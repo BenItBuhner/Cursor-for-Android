@@ -94,6 +94,7 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -248,12 +249,21 @@ fun ComposerBox(
     var focused by rememberSaveable(saver = FocusedSaver) { mutableStateOf(false) }
     var wantsFocus by remember { mutableStateOf(focused || focusOnOpen) }
     var menuOpen by rememberSaveable { mutableStateOf(false) }
+    // Whether the field held focus as the "+" menu opened: a menu put away with nothing picked hands it back, keyboard
+    // and all, whatever took either while the menu was up.
+    var focusedAtMenu by rememberSaveable { mutableStateOf(false) }
+    var wantsKeyboard by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
     // Waits for the "+" menu to be gone: its popup holds focus while it is up, and a request made under it is lost.
     LaunchedEffect(wantsFocus, menuOpen) {
         if (wantsFocus && !menuOpen) {
             wantsFocus = false
             focus.requestFocus()
+            if (wantsKeyboard) {
+                wantsKeyboard = false
+                keyboard?.show()
+            }
         }
     }
     var focusRequestsSeen by remember { mutableIntStateOf(focusRequests) }
@@ -548,10 +558,16 @@ fun ComposerBox(
             if (plusMenu != null) {
                 // The Box is the anchor: the menu drops from the "+" like the web's popover.
                 Box {
-                    ComposerRoundButton(CursorIcons.Plus, "Add to prompt", onClick = { menuOpen = true })
+                    ComposerRoundButton(CursorIcons.Plus, "Add to prompt", onClick = { focusedAtMenu = focused; menuOpen = true })
                     ComposerPlusMenu(
                         expanded = menuOpen,
                         onDismiss = { menuOpen = false },
+                        onCancel = {
+                            if (focusedAtMenu) {
+                                wantsFocus = true
+                                wantsKeyboard = true
+                            }
+                        },
                         prompt = value,
                         onPromptChange = { next ->
                             onValueChange(next)

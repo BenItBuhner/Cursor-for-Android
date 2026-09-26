@@ -3,6 +3,7 @@ package com.cursorforandroid.data.update
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import com.cursorforandroid.data.api.userMessage
+import com.cursorforandroid.data.local.DiskSweep
 import com.cursorforandroid.data.local.JsonDiskCache
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.domain.AppRelease
@@ -36,6 +37,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import com.cursorforandroid.util.toHex
 
 /**
  * What the last check learned, kept on disk so a fresh process shows it at once and the next check can be
@@ -712,7 +714,7 @@ class UpdateManager(
         val keep = marker?.takeIf { it.versionCode > platform.installedVersionCode }?.let { m ->
             apkFile(m.versionCode).takeIf { it.isFile && it.length() == m.sizeBytes }
         }
-        withContext(Dispatchers.IO) { downloadDir.listFiles()?.forEach { if (it != keep) it.deleteRecursively() } }
+        withContext(Dispatchers.IO) { downloadDir.listFiles()?.forEach { if (it != keep) DiskSweep.deleteTree(it) } }
         if (marker != null && keep == null) cache.clearVerified()
     }
 
@@ -732,7 +734,7 @@ class UpdateManager(
                 digest.update(buffer, 0, n)
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+        return digest.digest().toHex()
     }
 
     /** rename(2) replaces atomically on Linux; the fallback covers file systems where it does not. */

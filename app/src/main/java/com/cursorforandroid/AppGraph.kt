@@ -4,6 +4,9 @@ import android.content.Context
 import android.os.Build
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.cursorforandroid.crash.Breadcrumbs
+import com.cursorforandroid.crash.CrashContext
+import com.cursorforandroid.crash.CrashLog
 import com.cursorforandroid.crash.CrashReporting
 import com.cursorforandroid.data.api.AccountApi
 import com.cursorforandroid.data.api.AccountTranscriptionApi
@@ -84,6 +87,7 @@ import com.cursorforandroid.data.local.JsonDiskCache
 import com.cursorforandroid.data.local.McpServerStore
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.data.local.SecureKeyStore
+import com.cursorforandroid.data.local.TextSpill
 import com.cursorforandroid.data.media.MediaLoader
 import com.cursorforandroid.data.repo.AgentFileRepository
 import com.cursorforandroid.data.repo.AgentRepository
@@ -207,6 +211,8 @@ class AppGraph(
      * Injectable for tests only: the screenshot tests render a fixed version, so cutting a release re-records nothing.
      */
     val appVersion: String = BuildConfig.VERSION_NAME,
+    /** Crashes kept on the device (see [CrashLog]); the application installs its handler before building the graph. */
+    val crashLog: CrashLog = CrashLog(File(context.applicationContext.filesDir, CrashLog.DIRECTORY), appVersion),
     /**
      * Injectable for tests only: the account's follow-up queue and prompt-upload services, so a send that carries
      * files can be driven end to end — the composer, the bubble, the retry — against a scripted account (latency,
@@ -230,7 +236,7 @@ class AppGraph(
      * Disk copies of what the API last returned; the app opens on them and revalidates in the background. Eager
      * because it is only file paths until something reads or writes, and the sign-out wipe goes through it.
      */
-    val caches = AppCaches(JsonDiskCache(File(app.cacheDir, "cursor")))
+    val caches = AppCaches(JsonDiskCache(File(app.cacheDir, "cursor"))).also { TextSpill.install(it.spill) }
     /** Follow-ups typed or queued but not yet sent, with their images, per chat. Eager for the same reason. */
     private val followUpStore = FollowUpStore(app)
     /**
@@ -697,7 +703,7 @@ class AppGraph(
 
     /** One shared live stream per run, consumed by both the conversation screen and the live notification. */
     private val lazyLiveRuns = lazy {
-        LiveRunHub(session, agents, images = GeneratedImageStore { agentId, callId, bytes, mimeType -> generatedMedia.save(agentId, callId, bytes, mimeType) })
+        LiveRunHub(session, agents, images = GeneratedImageStore { agentId, callId, bytes, mimeType -> generatedMedia.save(agentId, callId, bytes, mimeType) }, parking = caches.liveRuns)
     }
     val liveRuns: LiveRunHub get() = lazyLiveRuns.value
 
@@ -884,7 +890,7 @@ class AppGraph(
         RunMonitor(
             agents = agents,
             hub = liveRuns,
-            runRecord = { agentId, runId -> session.current.api.getRun(agentId, runId) },
+            runRecord = { agentId, runId -> agents.runRecord(agentId, runId) },
             notificationPrefs = prefs.projectNotifications,
         )
     }
@@ -1014,7 +1020,7 @@ class AppGraph(
                 drafts.clear()
                 followUpStore.clear()
             } else {
-                drafts.whileStopped { withContext(Dispatchers.IO) { DraftFiles.park(app.filesDir, owner, draftRoots) } }
+                drafts.whileStopped { followUpStore.whileStopped { withContext(Dispatchers.IO) { DraftFiles.park(app.filesDir, owner, draftRoots) } } }
             }
             caches.clear()
         }
@@ -1236,8 +1242,48 @@ class AppGraph(
     suspend fun sendDiagnosticsToProject(): String {
         if (session.isDemo) throw java.io.IOException(DiagnosticsInbox.DEMO_HAS_NO_ACCOUNT)
         val now = AppClock.now()
-        val text = DiagnosticsInbox.compose(appVersion, now, projectDiagnosticsReport(), transcriptDiagnosticsReport())
+        val crashes = withContext(Dispatchers.IO) { crashLog.reports().takeIf { it.isNotEmpty() }?.let { crashLog.export() } }
+        val text = DiagnosticsInbox.compose(appVersion, now, projectDiagnosticsReport(), transcriptDiagnosticsReport(), crashes)
         return storeFiles.writeText(DiagnosticsInbox.PROJECT_ID, DiagnosticsInbox.path(now), text)
+    }
+
+    /**
+     * The system asking for memory back ([level] as `onTrimMemory` gives it): what is built gives up what it can read
+     * again — the chats nobody shows, holds or streams, the runs nobody follows, decoded images. A hidden UI trims
+     * gently; memory running low, or the app in the background, trims hard. Nothing is built to be trimmed.
+     */
+    fun trimMemory(level: Int) {
+        @Suppress("DEPRECATION")
+        val hard = level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+            level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
+        @Suppress("DEPRECATION")
+        if (level < android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN && !hard) return
+        val chats = if (lazyConversations.isInitialized()) conversations.trimMemory(hard) else 0
+        val runs = if (lazyLiveRuns.isInitialized()) liveRuns.trimMemory() else 0
+        if (lazyMedia.isInitialized()) media.trimMemory(hard)
+        Breadcrumbs.add("trim memory $level: ${if (hard) "hard" else "gentle"}, $chats chats and $runs runs let go")
+    }
+
+    /**
+     * The app's account of the moment, for a crash report (see [CrashLog.install]): the build and device, background
+     * live sync, the chats in memory and the run streams, memory and threads by pool, and the last things done. Reads
+     * only what is already built — nothing is created to describe it.
+     */
+    fun crashContext(): String = buildString {
+        appendLine("version: $appVersion (${BuildConfig.VERSION_CODE}) android=${Build.VERSION.SDK_INT} device=${Build.MANUFACTURER} ${Build.MODEL}")
+        appendLine("process up: ${(android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()) / 1000} s")
+        val sync = if (lazyLiveSync.isInitialized()) liveSync else null
+        appendLine("live sync: ${sync?.mode ?: "not started"} held=${sync?.heldIds?.value?.size ?: 0}")
+        if (lazyAgents.isInitialized()) appendLine("agents listed: ${agents.state.value.agents.size} running=${agents.state.value.agents.count { it.isRunning }}")
+        if (lazyConversations.isInitialized()) appendLine("conversations: ${conversations.stats()}")
+        if (lazyLiveRuns.isInitialized()) appendLine("run streams: ${liveRuns.stats()}")
+        append(CrashContext.runtime(app.getSystemService(android.app.ActivityManager::class.java)))
+        val recent = Breadcrumbs.lines()
+        if (recent.isNotEmpty()) {
+            appendLine("recent:")
+            recent.forEach { appendLine("  $it") }
+        }
     }
 
     suspend fun signOut() = session.signOut()
