@@ -774,14 +774,14 @@ private fun ComposerMainButton(face: MainFace, voice: VoiceInput?, touchShift: D
 /**
  * The composer's expand button, right of "+" ([afterPlus]) or first in the footer without one. It slides in and out
  * rather than popping, as the mic beside Send does: its slot widens from nothing while the glyph fades and scales up,
- * and while it is out it stands [CursorDimens.roundButtonGap] from "+", so their 40dp touch squares meet without
- * overlapping. The glyph is arrows out while collapsed and arrows in while expanded, named for what a tap does.
+ * and while it is out its disc stands [FooterSpacing.PlusToExpand] from the "+" disc, the footer's one step between
+ * controls. The glyph is arrows out while collapsed and arrows in while expanded, named for what a tap does.
  */
 @Composable
 private fun ExpandButton(expansion: ComposerExpansion, offered: Boolean, afterPlus: Boolean) {
     val shown by animateFloatAsState(if (offered) 1f else 0f, tween(MicSlideMillis, easing = FastOutSlowInEasing), label = "expandShown")
     if (shown <= 0f) return
-    val lead = if (afterPlus) CursorDimens.roundButtonGap else 0.dp
+    val lead = if (afterPlus) FooterSpacing.PlusToExpand else 0.dp
     val trail = if (afterPlus) 0.dp else 10.dp
     Row(
         Modifier
@@ -848,6 +848,12 @@ internal object FooterSpacing {
     val ChipEndBesideMic: Dp = ModelToMain - ChevronInk - MicGlyphStart - MicInk
 
     val MainTouchShift: Dp = (CursorDimens.roundButtonTouch - CursorDimens.roundButton) / 2
+
+    /**
+     * "+" disc to the expand disc: the same step as the chevron, mic and main button on the right. It is wider than
+     * [CursorDimens.roundButtonGap], so both keep whole 40dp touch squares that never overlap.
+     */
+    val PlusToExpand: Dp = ModelToMain
 
     /** Dictating, the status's cancel disc to the mic's box: its edge [ModelToMain] from the mic's ink. */
     val CancelToMic: Dp = ModelToMain - MicGlyphStart - MicInk

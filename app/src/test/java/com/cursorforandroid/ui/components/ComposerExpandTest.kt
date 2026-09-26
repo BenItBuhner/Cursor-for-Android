@@ -263,6 +263,10 @@ class ComposerExpandTest {
         assertThat(dp(touch.height)).isAtLeast(CursorDimens.roundButtonTouch.value - 0.5f)
         assertThat(plus.right).isAtMost(touch.left + 0.5f)
         assertThat(touch.center.y).isWithin(0.5f).of(main.center.y)
+        // Equal squares, each centred on its disc, the discs one footer step apart as chevron, mic and send are.
+        assertThat(dp(touch.width)).isWithin(0.5f).of(dp(plus.width))
+        assertThat(dp(touch.center.x - plus.center.x))
+            .isWithin(0.5f).of(CursorDimens.roundButton.value + FooterSpacing.ModelToMain.value)
         // The mic and send row (#365) does not move.
         assertThat(bounds(hasTestTag("composer-main"))).isEqualTo(main)
     }

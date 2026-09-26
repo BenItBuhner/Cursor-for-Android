@@ -200,23 +200,26 @@ object CursorIcons {
         }
     }
 
-    /** Lucide `maximize-2`: the composer grown over the window's height, beside "+". */
+    /**
+     * Lucide `maximize-2`: the composer grown over the window's height, beside "+". Drawn 7/9 size about the centre,
+     * so its ink spans 5..19 like [Plus]'s instead of Lucide's 3..21, and the two discs read as a matched pair.
+     */
     val Expand: ImageVector by lazy {
         icon("Expand") {
-            path("M15 3h6v6", 2f)
-            path("m21 3-7 7", 2f)
-            path("m3 21 7-7", 2f)
-            path("M9 21H3v-6", 2f)
+            path("M14.333 5H19V9.667", 2f)
+            path("M19 5L13.556 10.444", 2f)
+            path("M5 19L10.444 13.556", 2f)
+            path("M9.667 19H5V14.333", 2f)
         }
     }
 
-    /** Lucide `minimize-2`: the expanded composer back to its own height. */
+    /** Lucide `minimize-2`: the expanded composer back to its own height, at [Expand]'s 7/9 size. */
     val Collapse: ImageVector by lazy {
         icon("Collapse") {
-            path("m14 10 7-7", 2f)
-            path("M20 10h-6V4", 2f)
-            path("m3 21 7-7", 2f)
-            path("M4 14h6v6", 2f)
+            path("M13.556 10.444L19 5", 2f)
+            path("M18.222 10.444H13.556V5.778", 2f)
+            path("M5 19L10.444 13.556", 2f)
+            path("M5.778 13.556H10.444V18.222", 2f)
         }
     }
 
