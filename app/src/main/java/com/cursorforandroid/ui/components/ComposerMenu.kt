@@ -119,11 +119,12 @@ class ConnectorMenu(
 private enum class MenuPage { Root, Skills, McpServers }
 
 /**
- * The menu behind the composer's "+": the pickers, Skills › and MCP Servers ›. The web's flyout submenus become pages
- * that slide in over the root; skills toggle a slash command at the front of the prompt, "Images and videos" opens
- * the photo picker and "Files" the document picker (Extended mode; the default mode has "Images" alone). The MCP
+ * The menu behind the composer's "+": Plan, the pickers, Skills › and MCP Servers ›. The web's flyout submenus become
+ * pages that slide in over the root; skills toggle a slash command at the front of the prompt, "Images and videos"
+ * opens the photo picker and "Files" the document picker (Extended mode; the default mode has "Images" alone). The MCP
  * page switches the account's connectors in Extended mode ([ComposerMenuActions.connectors]); otherwise it manages
- * the app's own servers, sent inline. Multitask is not a row: it is the `/multitask` command, from the `/` popover.
+ * the app's own servers, sent inline. Plan is the one mode offered, first, as the desktop's "+" menu opens on its
+ * modes; Multitask, Ask and Debug are not rows: they are the `/` popover's, and Shift+Tab's.
  */
 @Composable
 fun ComposerPlusMenu(
@@ -134,6 +135,10 @@ fun ComposerPlusMenu(
     actions: ComposerMenuActions,
     /** What the Skills page lists: the composer's `/` catalog, the same one its popover completes from. */
     commands: SlashCatalog = SlashCatalog.BUILT_IN,
+    /** Whether the Plan pill is worn: its row carries a check. */
+    planOn: Boolean = false,
+    /** Puts Plan on, or off while it is worn; null, for a composer that sets no mode, hides the row. */
+    onTogglePlan: (() -> Unit)? = null,
     /** The menu put away with nothing picked — a tap outside it, or back — called after [onDismiss]. */
     onCancel: () -> Unit = {},
 ) {
@@ -168,6 +173,8 @@ fun ComposerPlusMenu(
             Column(Modifier.width(MenuWidth)) {
                 when (current) {
                     MenuPage.Root -> RootPage(
+                        planOn = planOn,
+                        onPlan = onTogglePlan?.let { toggle -> { onDismiss(); toggle() } },
                         onMedia = { onDismiss(); actions.onPickMedia() },
                         onFiles = actions.onPickFiles?.let { pick -> { onDismiss(); pick() } },
                         onSkills = { page = MenuPage.Skills },
@@ -228,7 +235,21 @@ const val MEDIA_LABEL_IMAGES = "Images"
 const val FILES_LABEL = "Files"
 
 @Composable
-private fun RootPage(onMedia: () -> Unit, onFiles: (() -> Unit)?, onSkills: () -> Unit, onMcpServers: () -> Unit) {
+private fun RootPage(planOn: Boolean, onPlan: (() -> Unit)?, onMedia: () -> Unit, onFiles: (() -> Unit)?, onSkills: () -> Unit, onMcpServers: () -> Unit) {
+    if (onPlan != null) {
+        // The desktop's mode row: the mode's glyph in its own colour, its name and its line; a check while it is worn.
+        val plan = ModePills.Pill.Plan
+        CursorMenuItem(
+            plan.label,
+            plan.icon,
+            subtitle = plan.description,
+            subtitleMaxLines = 1,
+            iconTint = pillTint(plan),
+            trailing = { if (planOn) Icon(CursorIcons.Check, "On", tint = CursorTheme.colors.iconSecondary, modifier = Modifier.size(CursorDimens.menuIcon)) },
+            onClick = onPlan,
+        )
+        CursorMenuSeparator()
+    }
     // Two pickers, each named for what it opens on: the gallery (images alone in the default mode, where the
     // documented request takes nothing else) and the document picker for every other kind of file (Extended mode).
     if (onFiles == null) {
