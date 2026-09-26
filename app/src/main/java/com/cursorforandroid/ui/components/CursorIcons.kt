@@ -75,6 +75,16 @@ object CursorIcons {
         }
     }
 
+    /**
+     * An agent at rest, as the desktop marks a link to one (its `agent` glyph): the arrowhead inside [Cube], drawn in
+     * outline, its flat edge on top and the fold running from the top-left corner in to the middle and down to the
+     * point. The stroke is the arrow's, not [Weight]: the glyph is drawn at text size, where the outline must stay as
+     * heavy as the letters beside it.
+     */
+    val AgentPointer: ImageVector by lazy {
+        icon("AgentPointer") { path("M1.6 3.07H22.16L11.52 20.95L11.44 9.37Z", width = 1.84f) }
+    }
+
     /** Filled stop square for the composer's stop button. */
     val Stop: ImageVector by lazy {
         icon("Stop") { fill("M7.5 6A1.5 1.5 0 0 0 6 7.5v9A1.5 1.5 0 0 0 7.5 18h9a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 16.5 6h-9z") }
@@ -160,6 +170,28 @@ object CursorIcons {
             path("M12 19V5", 2.25f)
         }
     }
+
+    /**
+     * Lucide `mic`: voice input in the composer's send slot. Drawn at three quarters about the centre, strokes kept at
+     * 2: at full size its 20-unit height all but fills the disc beside the arrow's 14, and the disc reads smaller.
+     */
+    val Mic: ImageVector by lazy {
+        icon("Mic") {
+            group(scaleX = MicScale, scaleY = MicScale, pivotX = 12f, pivotY = 12f) {
+                path("M12 19v3", 2f / MicScale)
+                path("M19 10v2a7 7 0 0 1-14 0v-2", 2f / MicScale)
+                rect(9f, 2f, 6f, 13f, 3f, 2f / MicScale)
+            }
+        }
+    }
+
+    private const val MicScale = 0.75f
+
+    /** Grid units between [Mic]'s ink and either side of its box: the capsule's arc, scaled, and half its stroke. */
+    const val MicInkInset = 12f - 7f * MicScale - 1f
+
+    /** Grid units between [ChevronDown]'s ink and either side of its box: the tips at 6 and 18, less half the stroke. */
+    const val ChevronInkInset = 5f
 
     val Plus: ImageVector by lazy {
         icon("Plus") {

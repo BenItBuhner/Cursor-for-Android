@@ -4,8 +4,12 @@ import android.content.Context
 import android.os.Build
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.cursorforandroid.crash.Breadcrumbs
+import com.cursorforandroid.crash.CrashContext
+import com.cursorforandroid.crash.CrashLog
 import com.cursorforandroid.crash.CrashReporting
 import com.cursorforandroid.data.api.AccountApi
+import com.cursorforandroid.data.api.AccountTranscriptionApi
 import com.cursorforandroid.data.api.AccountFollowup
 import com.cursorforandroid.data.api.AccountList
 import com.cursorforandroid.data.api.AgentFilesApi
@@ -61,6 +65,7 @@ import com.cursorforandroid.data.api.SlashCommandApi
 import com.cursorforandroid.data.api.SseRunStreamer
 import com.cursorforandroid.data.api.SteeringApi
 import com.cursorforandroid.data.api.StoreReadTarget
+import com.cursorforandroid.data.api.TranscriptionApi
 import com.cursorforandroid.data.api.TurnPlan
 import com.cursorforandroid.data.api.WorkerLaunch
 import com.cursorforandroid.data.api.WorkspaceFilesApi
@@ -72,6 +77,7 @@ import com.cursorforandroid.data.demo.DemoData
 import com.cursorforandroid.data.demo.DemoMcpConnectorApi
 import com.cursorforandroid.data.demo.DemoPullRequests
 import com.cursorforandroid.data.demo.DemoReview
+import com.cursorforandroid.data.demo.DemoStores
 import com.cursorforandroid.data.local.AppCaches
 import com.cursorforandroid.data.local.AttachmentStore
 import com.cursorforandroid.data.local.DiskSweep
@@ -83,6 +89,7 @@ import com.cursorforandroid.data.local.JsonDiskCache
 import com.cursorforandroid.data.local.McpServerStore
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.data.local.SecureKeyStore
+import com.cursorforandroid.data.local.TextSpill
 import com.cursorforandroid.data.media.MediaLoader
 import com.cursorforandroid.data.repo.AgentFileRepository
 import com.cursorforandroid.data.repo.AgentRepository
@@ -94,6 +101,7 @@ import com.cursorforandroid.data.repo.CapabilityGatedPullRequestSource
 import com.cursorforandroid.data.repo.CatalogRepository
 import com.cursorforandroid.data.repo.ChatLauncher
 import com.cursorforandroid.data.repo.ConversationRepository
+import com.cursorforandroid.data.repo.LiveSync
 import com.cursorforandroid.data.repo.CursorBackend
 import com.cursorforandroid.data.repo.CursorPullRequestSource
 import com.cursorforandroid.data.repo.ExtendedMode
@@ -105,6 +113,7 @@ import com.cursorforandroid.data.repo.NewChatDrafts
 import com.cursorforandroid.data.repo.Onboarding
 import com.cursorforandroid.data.repo.PinRepository
 import com.cursorforandroid.data.repo.ProjectEditor
+import com.cursorforandroid.data.repo.AgentStoreRepository
 import com.cursorforandroid.data.repo.ProjectRepository
 import com.cursorforandroid.data.repo.PromptUploader
 import com.cursorforandroid.data.repo.PullRequestRepository
@@ -124,6 +133,7 @@ import com.cursorforandroid.data.update.GitHubReleasesClient
 import com.cursorforandroid.data.update.UpdateCache
 import com.cursorforandroid.data.update.UpdateManager
 import com.cursorforandroid.data.update.WhatsNewRepository
+import com.cursorforandroid.domain.AgentStoreRef
 import com.cursorforandroid.domain.AgentDiff
 import com.cursorforandroid.domain.AgentMode
 import com.cursorforandroid.domain.AgentScope
@@ -153,11 +163,18 @@ import com.cursorforandroid.share.ShareInbox
 import com.cursorforandroid.ui.components.ComposerMediaPreviews
 import com.cursorforandroid.ui.conversation.AttachmentImages
 import com.cursorforandroid.ui.conversation.OutgoingSends
+import com.cursorforandroid.ui.media.GallerySaver
+import com.cursorforandroid.ui.media.MediaSaves
 import com.cursorforandroid.ui.settings.DIAGNOSTICS_DIR
 import com.cursorforandroid.update.AndroidUpdatePlatform
 import com.cursorforandroid.update.allocatableBytes
 import com.cursorforandroid.util.AppClock
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -198,6 +215,8 @@ class AppGraph(
      * Injectable for tests only: the screenshot tests render a fixed version, so cutting a release re-records nothing.
      */
     val appVersion: String = BuildConfig.VERSION_NAME,
+    /** Crashes kept on the device (see [CrashLog]); the application installs its handler before building the graph. */
+    val crashLog: CrashLog = CrashLog(File(context.applicationContext.filesDir, CrashLog.DIRECTORY), appVersion),
     /**
      * Injectable for tests only: the account's follow-up queue and prompt-upload services, so a send that carries
      * files can be driven end to end — the composer, the bubble, the retry — against a scripted account (latency,
@@ -209,6 +228,8 @@ class AppGraph(
     agentStartApi: AgentStartApi? = null,
     /** Injectable for tests only: the account's branch lists, for the composer's branch picker against a scripted account. */
     repositoryBranchesApi: RepositoryBranchesApi? = null,
+    /** Injectable for tests only: the account's transcription, so the composer's voice input can be driven against a scripted account. */
+    transcriptionApi: TranscriptionApi? = null,
 ) {
     private val app = context.applicationContext
 
@@ -219,7 +240,7 @@ class AppGraph(
      * Disk copies of what the API last returned; the app opens on them and revalidates in the background. Eager
      * because it is only file paths until something reads or writes, and the sign-out wipe goes through it.
      */
-    val caches = AppCaches(JsonDiskCache(File(app.cacheDir, "cursor")))
+    val caches = AppCaches(JsonDiskCache(File(app.cacheDir, "cursor"))).also { TextSpill.install(it.spill) }
     /** Follow-ups typed or queued but not yet sent, with their images, per chat. Eager for the same reason. */
     private val followUpStore = FollowUpStore(app)
     /**
@@ -362,6 +383,25 @@ class AppGraph(
     private val lazyBlobCache = lazy { BlobCache(BlobCache.MEMORY_BLOBS_WITH_DISK, BlobCache.MEMORY_BYTES_WITH_DISK, disk = caches.blobs) }
     private val lazySteeringApi = lazy { SteeringApi(lazyAccountRpc.value, lazySessionTokens.value, blobs = lazyBlobCache.value) }
     /**
+     * The account's transcription of a dictated clip, with the desktop's sixty-second limit on the call rather than
+     * the account client's forty-five: a five-minute clip goes up whole and is transcribed before the answer starts.
+     */
+    private val lazyTranscription = lazy {
+        transcriptionApi ?: run {
+            val client = lazyAccountClient.value.newBuilder().callTimeout(TRANSCRIPTION_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS).build()
+            AccountTranscriptionApi(ConnectJsonClient(client, CursorLoginEndpoints.API_URL, throttle = lazyAccountRpc.value.throttle), lazySessionTokens.value)
+        }
+    }
+    val transcription: TranscriptionApi get() = lazyTranscription.value
+
+    /**
+     * Whether the composers offer the microphone: wherever a dictation can be transcribed. That is through the account
+     * (`api2`), whose session is refused while Extended mode is off, so the mic is there in Extended mode and gone in
+     * Default mode rather than failing at every tap; never in the demo, which has no account to ask.
+     */
+    val voiceInput: Flow<Boolean> = combine(extendedMode.enabled, prefs.demoMode) { extended, demo -> extended && !demo }
+        .distinctUntilChanged()
+    /**
      * The account's own transcript of a chat (`FetchBackgroundComposer`), on the account client with the transcript's
      * call timeout: a page of a coordinator's record is hundreds of kilobytes to megabytes of payloads, and the
      * account client's forty-five seconds — right for its small RPCs — cut such a page off on a slow connection,
@@ -468,6 +508,7 @@ class AppGraph(
         override suspend fun pause(agentId: String, runId: String?) = lazyProjectApi.value.pause(agentId, runId)
         override suspend fun resume(agentId: String) = lazyProjectApi.value.resume(agentId)
         override suspend fun storeFor(sourceId: String): String? = lazyProjectApi.value.storeFor(sourceId)
+        override suspend fun stores(): List<AgentStoreRef> = lazyProjectApi.value.stores()
         override suspend fun entries(storeId: String, relativePath: String): List<ContextEntry> = lazyProjectApi.value.entries(storeId, relativePath)
         override suspend fun readFile(storeId: String, relativePath: String): String = lazyProjectApi.value.readFile(storeId, relativePath)
         override suspend fun presignRead(target: StoreReadTarget, relativePath: String): PresignedStoreRead? = lazyProjectApi.value.presignRead(target, relativePath)
@@ -649,6 +690,13 @@ class AppGraph(
     private val lazyProjectEditor = lazy { ProjectEditor(session, agents, projects, creation = { lazyProjectCreation.value }, capabilities = capabilities) }
     val projectEditor: ProjectEditor get() = lazyProjectEditor.value
 
+    /**
+     * The panel's Context tabs: the Project's Agent Store (its notes, its files) and the user's own, read through the
+     * same account endpoints as the Project section, behind the `projects` capability; the demo's stores stand in.
+     */
+    private val lazyAgentStores = lazy { AgentStoreRepository(api = projectAccount, capabilities = capabilities, isDemo = { session.isDemo }, demo = DemoStores) }
+    val agentStores: AgentStoreRepository get() = lazyAgentStores.value
+
     private val lazyCatalog = lazy {
         CatalogRepository(session, caches.catalog, throttlePausedUntil = { if (lazyAccountRpc.isInitialized()) lazyAccountRpc.value.throttle.pausedUntil() else null })
     }
@@ -678,7 +726,7 @@ class AppGraph(
 
     /** One shared live stream per run, consumed by both the conversation screen and the live notification. */
     private val lazyLiveRuns = lazy {
-        LiveRunHub(session, agents, images = GeneratedImageStore { agentId, callId, bytes, mimeType -> generatedMedia.save(agentId, callId, bytes, mimeType) })
+        LiveRunHub(session, agents, images = GeneratedImageStore { agentId, callId, bytes, mimeType -> generatedMedia.save(agentId, callId, bytes, mimeType) }, parking = caches.liveRuns)
     }
     val liveRuns: LiveRunHub get() = lazyLiveRuns.value
 
@@ -696,7 +744,10 @@ class AppGraph(
             cache = caches.conversations,
             traceCache = caches.traces,
             isForeground = { runCatching { ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }.getOrDefault(true) },
-            onOpened = { agentId -> LiveNotifications.cancelFinished(app, agentId) },
+            onOpened = { agentId ->
+                LiveNotifications.cancelFinished(app, agentId)
+                if (lazyLiveSync.isInitialized()) lazyLiveSync.value.opened(agentId)
+            },
             record = accountTranscript,
             capabilities = capabilities,
             images = GeneratedImageStore { agentId, callId, bytes, mimeType -> generatedMedia.save(agentId, callId, bytes, mimeType) },
@@ -717,6 +768,21 @@ class AppGraph(
         override val readsTurns: Boolean get() = true
     }
     val conversations: ConversationRepository get() = lazyConversations.value
+
+    /** Background live sync (Settings › Experimental › Keep chats live): started by [LiveSyncBinding]. */
+    private val lazyLiveSync = lazy {
+        LiveSync(
+            target = object : LiveSync.Target {
+                override fun hold(agentId: String) = conversations.hold(agentId)
+                override fun release(agentId: String) = conversations.release(agentId)
+                override suspend fun settled(agentId: String) = conversations.settled(agentId)
+            },
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
+    }
+    val liveSync: LiveSync get() = lazyLiveSync.value
+    /** Whether background live sync runs: the switch, outside the demo (which has no account to stream from). */
+    val liveSyncEnabled: Flow<Boolean> get() = combine(prefs.liveSync, prefs.demoMode) { on, demo -> on && !demo }
 
     /** The search palette's reading of the transcripts kept on this device (Ctrl+F, see [TranscriptSearchIndex]). */
     private val lazyTranscriptSearch = lazy { TranscriptSearchIndex(caches.conversations, caches.traces) }
@@ -839,11 +905,15 @@ class AppGraph(
     private val lazyMedia = lazy { MediaLoader(app, lazyMediaClient.value, artifacts, stores = { storeFiles }, files = { agentFileReads }) }
     val media: MediaLoader get() = lazyMedia.value
 
+    /** The media viewer's saves to the gallery: the process's, so a save runs on past the viewer's close and shows when it opens again. */
+    private val lazyMediaSaves = lazy { MediaSaves(CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), media, GallerySaver(app)) }
+    val mediaSaves: MediaSaves get() = lazyMediaSaves.value
+
     private val lazyRunMonitor = lazy {
         RunMonitor(
             agents = agents,
             hub = liveRuns,
-            runRecord = { agentId, runId -> session.current.api.getRun(agentId, runId) },
+            runRecord = { agentId, runId -> agents.runRecord(agentId, runId) },
             notificationPrefs = prefs.projectNotifications,
         )
     }
@@ -961,6 +1031,7 @@ class AppGraph(
             if (lazyPullRequests.isInitialized()) pullRequests.reset()
             if (lazyReviews.isInitialized()) reviews.reset()
             if (lazyWorkspace.isInitialized()) workspace.reset()
+            if (lazyAgentStores.isInitialized()) agentStores.reset()
             if (lazyRemote.isInitialized()) remote.reset()
             if (lazyArtifacts.isInitialized()) artifacts.resetAll()
             if (lazyStoreFiles.isInitialized()) storeFiles.resetAll()
@@ -973,7 +1044,7 @@ class AppGraph(
                 drafts.clear()
                 followUpStore.clear()
             } else {
-                drafts.whileStopped { withContext(Dispatchers.IO) { DraftFiles.park(app.filesDir, owner, draftRoots) } }
+                drafts.whileStopped { followUpStore.whileStopped { withContext(Dispatchers.IO) { DraftFiles.park(app.filesDir, owner, draftRoots) } } }
             }
             caches.clear()
         }
@@ -999,6 +1070,7 @@ class AppGraph(
             // The panel's account reads — a pull request the SCM service answered, a workspace listing, a diff — go too.
             if (lazyReviews.isInitialized()) reviews.reset()
             if (lazyWorkspace.isInitialized()) workspace.reset()
+            if (lazyAgentStores.isInitialized()) agentStores.reset()
             if (lazyRemote.isInitialized()) remote.reset()
             if (lazyAgents.isInitialized()) agents.forgetAccountSources(prefs.localAgentState.first().launchedHereIds)
             session.forgetAccountProfile()
@@ -1048,6 +1120,7 @@ class AppGraph(
             "pullRequestApi" to lazyPullRequestApi,
             "machineApi" to lazyMachineApi,
             "workspace" to lazyWorkspace,
+            "agentStores" to lazyAgentStores,
             "remote" to lazyRemote,
             "agents" to lazyAgents,
             "pullRequests" to lazyPullRequests,
@@ -1198,8 +1271,48 @@ class AppGraph(
     suspend fun sendDiagnosticsToProject(): String {
         if (session.isDemo) throw java.io.IOException(DiagnosticsInbox.DEMO_HAS_NO_ACCOUNT)
         val now = AppClock.now()
-        val text = DiagnosticsInbox.compose(appVersion, now, projectDiagnosticsReport(), transcriptDiagnosticsReport())
+        val crashes = withContext(Dispatchers.IO) { crashLog.reports().takeIf { it.isNotEmpty() }?.let { crashLog.export() } }
+        val text = DiagnosticsInbox.compose(appVersion, now, projectDiagnosticsReport(), transcriptDiagnosticsReport(), crashes)
         return storeFiles.writeText(DiagnosticsInbox.PROJECT_ID, DiagnosticsInbox.path(now), text)
+    }
+
+    /**
+     * The system asking for memory back ([level] as `onTrimMemory` gives it): what is built gives up what it can read
+     * again — the chats nobody shows, holds or streams, the runs nobody follows, decoded images. A hidden UI trims
+     * gently; memory running low, or the app in the background, trims hard. Nothing is built to be trimmed.
+     */
+    fun trimMemory(level: Int) {
+        @Suppress("DEPRECATION")
+        val hard = level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+            level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
+        @Suppress("DEPRECATION")
+        if (level < android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN && !hard) return
+        val chats = if (lazyConversations.isInitialized()) conversations.trimMemory(hard) else 0
+        val runs = if (lazyLiveRuns.isInitialized()) liveRuns.trimMemory() else 0
+        if (lazyMedia.isInitialized()) media.trimMemory(hard)
+        Breadcrumbs.add("trim memory $level: ${if (hard) "hard" else "gentle"}, $chats chats and $runs runs let go")
+    }
+
+    /**
+     * The app's account of the moment, for a crash report (see [CrashLog.install]): the build and device, background
+     * live sync, the chats in memory and the run streams, memory and threads by pool, and the last things done. Reads
+     * only what is already built — nothing is created to describe it.
+     */
+    fun crashContext(): String = buildString {
+        appendLine("version: $appVersion (${BuildConfig.VERSION_CODE}) android=${Build.VERSION.SDK_INT} device=${Build.MANUFACTURER} ${Build.MODEL}")
+        appendLine("process up: ${(android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime()) / 1000} s")
+        val sync = if (lazyLiveSync.isInitialized()) liveSync else null
+        appendLine("live sync: ${sync?.mode ?: "not started"} held=${sync?.heldIds?.value?.size ?: 0}")
+        if (lazyAgents.isInitialized()) appendLine("agents listed: ${agents.state.value.agents.size} running=${agents.state.value.agents.count { it.isRunning }}")
+        if (lazyConversations.isInitialized()) appendLine("conversations: ${conversations.stats()}")
+        if (lazyLiveRuns.isInitialized()) appendLine("run streams: ${liveRuns.stats()}")
+        append(CrashContext.runtime(app.getSystemService(android.app.ActivityManager::class.java)))
+        val recent = Breadcrumbs.lines()
+        if (recent.isNotEmpty()) {
+            appendLine("recent:")
+            recent.forEach { appendLine("  $it") }
+        }
     }
 
     suspend fun signOut() = session.signOut()
@@ -1207,3 +1320,4 @@ class AppGraph(
 
 /** How long one read of the account's record may take, headers to the last byte: the pages are large and the connection may be slow. */
 private const val RECORD_CALL_TIMEOUT_MINUTES = 5L
+private const val TRANSCRIPTION_CALL_TIMEOUT_SECONDS = 60L

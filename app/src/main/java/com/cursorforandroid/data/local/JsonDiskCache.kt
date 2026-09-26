@@ -106,7 +106,7 @@ class JsonDiskCache(
     /** Deletes every entry of this cache (and of its children), and lets writes through again afterwards. */
     suspend fun clear() = withContext(dispatcher) {
         epoch.beginWipe()
-        directory.deleteRecursively()
+        DiskSweep.deleteTree(directory)
         epoch.endWipe()
     }
 
@@ -121,16 +121,16 @@ class JsonDiskCache(
 
     /** Keys currently stored, most recently written first. */
     suspend fun keys(): List<String> = withContext(dispatcher) {
-        entryFiles().sortedByDescending { it.lastModified() }.map { it.name.removeSuffix(SUFFIX) }
+        DiskSweep.byModified(entryFiles().asSequence(), newestFirst = true).map { it.name.removeSuffix(SUFFIX) }
     }
 
     /** The names of the child caches that exist on disk (see [child]), most recently written first. */
     suspend fun childNames(): List<String> = withContext(dispatcher) {
-        childDirectories().sortedByDescending { it.lastModified() }.map { it.name }
+        DiskSweep.byModified(childDirectories().asSequence(), newestFirst = true).map { it.name }
     }
 
     /** Deletes this cache's directory — every entry and every child — without the generation bump of [clear]. */
-    suspend fun drop() = withContext(dispatcher) { directory.deleteRecursively(); Unit }
+    suspend fun drop() = withContext(dispatcher) { DiskSweep.deleteTree(directory); Unit }
 
     /**
      * Marks [key]'s entry as just used, so that [prune] ranks it by that rather than by when it was written. Compared

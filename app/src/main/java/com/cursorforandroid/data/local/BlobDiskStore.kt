@@ -4,7 +4,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import com.cursorforandroid.util.toHex
 
 /**
  * The account records' blobs on disk (Extended mode, the Beta transcript engine): one file per blob under a directory
@@ -18,6 +20,7 @@ class BlobDiskStore(private val cache: JsonDiskCache, private val maxBytes: Long
     private val dir: File get() = cache.root
     /** Bytes on disk, counted once on first use and kept as files come and go; -1 until counted. */
     private val bytes = AtomicLong(-1L)
+    private val trimming = AtomicBoolean(false)
 
     suspend fun read(agentId: String, blobId: String): ByteArray? = withContext(Dispatchers.IO) {
         val file = file(agentId, blobId)
@@ -74,9 +77,8 @@ class BlobDiskStore(private val cache: JsonDiskCache, private val maxBytes: Long
             if (!tmp.renameTo(file)) throw java.io.IOException("rename failed")
         }.onFailure { tmp.delete() }.isSuccess
         if (written) {
-            val total = counted() + value.size
-            bytes.set(total)
-            if (total > maxBytes) trim()
+            counted()
+            if (bytes.addAndGet(value.size.toLong()) > maxBytes) trim()
         }
     }
 
@@ -86,7 +88,7 @@ class BlobDiskStore(private val cache: JsonDiskCache, private val maxBytes: Long
      */
     suspend fun recentIds(agentId: String, max: Int): List<String> = withContext(Dispatchers.IO) {
         val files = chatDir(agentId).listFiles { f -> f.isFile && !f.name.endsWith(".tmp") } ?: return@withContext emptyList()
-        files.sortedByDescending { it.lastModified() }.asSequence().mapNotNull { idOf(it.name) }.take(max).toList()
+        DiskSweep.byModified(files, newestFirst = true).asSequence().mapNotNull { idOf(it.name) }.take(max).toList()
     }
 
     /** The ids the server last prefetched for [agentId] (see `BlobCache.notePrefetched`), newest first; empty when none were noted. */
@@ -111,25 +113,48 @@ class BlobDiskStore(private val cache: JsonDiskCache, private val maxBytes: Long
     private fun counted(): Long {
         val known = bytes.get()
         if (known >= 0) return known
-        val total = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        val total = DiskSweep.filesUnder(dir).sumOf { it.length() }
         bytes.compareAndSet(-1L, total)
         return bytes.get()
     }
 
-    /** Evicts the least recently used blobs, whichever chat they belong to, until the store is at three quarters of [maxBytes]. */
+    /**
+     * Evicts the least recently used blobs, whichever chat they belong to, until the store is at three quarters of
+     * [maxBytes]. One pass at a time: the writes that find the store over while a pass runs leave it to that pass
+     * rather than each walking every file of every chat again, and the pass looks again once done, for what they
+     * wrote after its walk. It takes off the count only what it freed, so their bytes stay counted.
+     */
     private fun trim() {
-        val files = dir.walkTopDown().filter { it.isFile }.sortedBy { it.lastModified() }.toList()
-        var total = files.sumOf { it.length() }
-        val target = maxBytes * 3 / 4
-        for (file in files) {
-            if (total <= target) break
-            val size = file.length()
-            if (file.delete()) total -= size
+        while (bytes.get() > maxBytes) {
+            if (!trimming.compareAndSet(false, true)) return
+            try {
+                val files = DiskSweep.byModified(DiskSweep.filesUnder(dir).asSequence())
+                val walked = files.sumOf { it.length() }
+                var total = walked
+                val target = maxBytes * 3 / 4
+                for (file in files) {
+                    if (total <= target) break
+                    val size = file.length()
+                    if (file.delete()) total -= size
+                }
+                if (total == walked) {
+                    bytes.set(walked)
+                    return
+                }
+                bytes.addAndGet(total - walked)
+            } finally {
+                trimming.set(false)
+            }
         }
-        bytes.set(total)
     }
 
-    private fun chatDir(agentId: String): File = File(dir, sha1(agentId).take(24))
+    private val chatDirs = java.util.concurrent.ConcurrentHashMap<String, File>()
+
+    private fun chatDir(agentId: String): File {
+        chatDirs[agentId]?.let { return it }
+        if (chatDirs.size >= MAX_NAMED_CHATS) chatDirs.clear()
+        return File(dir, sha1(agentId).take(24)).also { chatDirs[agentId] = it }
+    }
 
     private fun file(agentId: String, blobId: String): File = File(chatDir(agentId), nameOf(blobId))
 
@@ -142,11 +167,13 @@ class BlobDiskStore(private val cache: JsonDiskCache, private val maxBytes: Long
         private const val INDEX = "prefetched"
         /** Ahead of a prefetched copy's name (see [readPartial]): `qx…` or `qh…`, never a whole blob's, never the index. */
         private const val PARTIAL = "q"
+        /** Chats whose directory name is remembered rather than hashed again on every read. */
+        private const val MAX_NAMED_CHATS = 1_024
 
         /** A file name for a blob id: its characters in hex, reversible whatever the id's alphabet; a hash for an id too long for a name. */
         internal fun nameOf(blobId: String): String {
             val bytes = blobId.toByteArray()
-            return if (bytes.size <= 100) "x" + bytes.joinToString("") { "%02x".format(it) } else "h${sha1(blobId)}"
+            return if (bytes.size <= 100) "x" + bytes.toHex() else "h${sha1(blobId)}"
         }
 
         /** The id a file was named after, or null for one named by a hash. */
@@ -156,6 +183,6 @@ class BlobDiskStore(private val cache: JsonDiskCache, private val maxBytes: Long
             return runCatching { String(ByteArray(hex.length / 2) { i -> hex.substring(i * 2, i * 2 + 2).toInt(16).toByte() }) }.getOrNull()
         }
 
-        private fun sha1(text: String): String = MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+        private fun sha1(text: String): String = MessageDigest.getInstance("SHA-1").digest(text.toByteArray()).toHex()
     }
 }

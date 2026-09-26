@@ -2,17 +2,24 @@ package com.cursorforandroid.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.ui.agents.LocalMediaLoader
 import com.cursorforandroid.ui.auth.SignInScreen
+import com.cursorforandroid.ui.components.SendMotionHost
 import com.cursorforandroid.ui.navigation.AppNavHost
 import com.cursorforandroid.ui.onboarding.ModeChoiceScreen
 import com.cursorforandroid.ui.theme.CursorTheme
@@ -55,19 +62,28 @@ fun CursorRoot(
                 // The loader is provided here rather than around the whole tree because building it is what first
                 // pulls Coil and its HTTP client in, and nothing before this point draws an image.
                 else -> CompositionLocalProvider(LocalMediaLoader provides graph.media) {
-                    AppNavHost(
-                        graph = graph,
-                        user = s.user,
-                        isDemo = s.isDemo,
-                        deepLinkAgentId = deepLinkAgentId,
-                        onDeepLinkConsumed = onDeepLinkConsumed,
-                        newChatRequested = newChatRequested,
-                        onNewChatConsumed = onNewChatConsumed,
-                        searchRequested = searchRequested,
-                        onSearchConsumed = onSearchConsumed,
-                    )
+                    // Over every screen and pane, so a sent message can travel from one composer into a bubble on
+                    // another screen (see SendMotion).
+                    SendMotionHost {
+                        AppNavHost(
+                            graph = graph,
+                            user = s.user,
+                            isDemo = s.isDemo,
+                            deepLinkAgentId = deepLinkAgentId,
+                            onDeepLinkConsumed = onDeepLinkConsumed,
+                            newChatRequested = newChatRequested,
+                            onNewChatConsumed = onNewChatConsumed,
+                            searchRequested = searchRequested,
+                            onSearchConsumed = onSearchConsumed,
+                        )
+                    }
                 }
             }
         }
+        // Over whatever screen the app opened on, under the status bar: the one place it is seen whichever that is.
+        CrashReportCard(
+            graph = graph,
+            modifier = Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(horizontal = 12.dp, vertical = 8.dp),
+        )
     }
 }

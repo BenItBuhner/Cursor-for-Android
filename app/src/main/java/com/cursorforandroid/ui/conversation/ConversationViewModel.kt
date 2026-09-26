@@ -563,6 +563,8 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      * Puts the repository's draft in the composer: a restored one, or a queued message taken back for editing. The
      * previews are decoded off the main thread first; with [unlessWrittenInto], a composer written into meanwhile —
      * a word typed, a file attached — keeps what it has, and the restored draft stays on disk for the next time.
+     * Nor is a draft that is no longer the repository's put back: [saved] was read before the decode (and the
+     * repository's draft is the composer's own as typed), so an empty composer by now may be one a send emptied.
      */
     private suspend fun adoptDraft(saved: FollowUpDraft, unlessWrittenInto: Boolean = false) {
         val restored = withContext(Dispatchers.Default) {
@@ -570,7 +572,12 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         }
         // An image file's chip thumbnail is decoded on the way back too, off the main thread.
         val restoredFiles = withContext(Dispatchers.Default) { saved.files.map { PendingFile.of(it.file, it.id) } }
-        if (unlessWrittenInto && !composerIsEmpty()) return
+        if (unlessWrittenInto) {
+            // The composer is read before the repository: a send clears the repository's draft first (see clearComposer).
+            if (!composerIsEmpty()) return
+            val now = graph.followUps.state(agentId).value.draft
+            if (now.text != saved.text || now.images != saved.images || now.files != saved.files) return
+        }
         thumbnails.update { cache -> cache + restored.mapNotNull { a -> a.thumbnail?.let { a.id to it } } }
         draft.value = saved.text
         attachments.value = restored
@@ -601,33 +608,37 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      * web show too (see [controls]); otherwise on this device (see [queue]). Only one run can be active per agent,
      * and the API refuses anything more; a send the server refuses as busy all the same (the row was a poll behind)
      * is queued too. A follow-up in Ask or Debug mode travels on the account's follow-up, which alone can carry it.
+     *
+     * Returns what the message's bubble says when it goes out now, into a bubble at the foot of the transcript — the
+     * text the composer's may travel into — and null when nothing typed went there: refused, queued, or sent with
+     * attachments alone.
      */
-    fun send() {
+    fun send(): String? {
         val text = draft.value.trim()
         val images = attachments.value
         val attached = files.value
-        if (text.isEmpty() && images.isEmpty() && attached.isEmpty()) return
+        if (text.isEmpty() && images.isEmpty() && attached.isEmpty()) return null
         val options = picker.value
-        // One reading, one source at a time — the freshest that has spoken — shared with the queue's dispatcher, so
-        // what the composer decides and what the queue does never disagree (see SendGate; the `send:` diagnostics).
+        // Decided here and now, with nothing asked of the server: the queue dispatcher's reading, and busy too while
+        // the chat shows a turn under way — what the Stop button and the placeholder say (see SendGate.decideAtSend).
         val busy = graph.followUps.decide(agentId).busy
         val caps = capabilities.value
         val accountMode = options.mode?.needsAccountService == true
         if (accountMode && !caps.agentModes) {
             toast.value = "${options.mode?.label} mode needs Extended mode; turn it on in Settings, or take the pill off."
-            return
+            return null
         }
         // A file of any type travels on the account's follow-up alone, as Ask and Debug do: uploaded first, then
         // named in the message as the desktop names it (see AgentRepository.FILES_NEED_EXTENDED for the mode off).
         val withFiles = attached.isNotEmpty()
         if (withFiles && (!caps.promptFiles || graph.session.isDemo)) {
             toast.value = AgentRepository.FILES_NEED_EXTENDED
-            return
+            return null
         }
         // The send button is held while a file is still going up; a send that gets here all the same waits its turn too.
         uploadHint.value?.let { hint ->
             toast.value = "$hint The message goes out once the files are up."
-            return
+            return null
         }
         val accountQueue = caps.accountQueue && !graph.session.isDemo
         val waiting = graph.followUps.state(agentId).value.queue.isNotEmpty()
@@ -642,17 +653,27 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
             override = options.override,
         )
         when {
-            // Mid-turn in Extended mode: into the account's queue, behind the turn under way. The account answers with
-            // no run, the bubble comes down and the card above the composer shows the message until it is delivered.
-            busy && accountQueue -> dispatch(message, graph.outgoing.accountRoute(agentId, message))
+            // Mid-turn in Extended mode: into the account's queue, behind the turn under way — on the card above the
+            // composer from the tap, never a bubble first, until it is delivered (see ConversationRepository.queueAhead).
+            busy && accountQueue -> {
+                dispatch(message, graph.outgoing.accountRoute(agentId, message, queued = true))
+                return null
+            }
             // This device's queue sends the documented run request, which cannot carry Ask or Debug: a message in
             // either mode is not put behind the ones waiting there to go out as an agent turn without a word.
-            accountMode && (busy || waiting) -> toast.value = "${options.mode?.label} mode follow-ups cannot wait in this device's queue. Let the queued messages go first, or take the pill off."
-            busy || waiting -> enqueue(text, images, attached, options)
+            accountMode && (busy || waiting) -> {
+                toast.value = "${options.mode?.label} mode follow-ups cannot wait in this device's queue. Let the queued messages go first, or take the pill off."
+                return null
+            }
+            busy || waiting -> {
+                enqueue(text, images, attached, options)
+                return null
+            }
             // A mode, or files: only the account's follow-up carries them.
             accountMode || withFiles -> dispatch(message, graph.outgoing.accountRoute(agentId, message))
             else -> dispatch(message, graph.outgoing.documentedRoute())
         }
+        return text.ifEmpty { null }
     }
 
     /**
@@ -669,10 +690,10 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     }
 
     private fun clearComposer() {
+        graph.followUps.clearDraft(agentId)
         draft.value = ""
         attachments.value = emptyList()
         files.value = emptyList()
-        graph.followUps.clearDraft(agentId)
     }
 
     /** The server has the message: the model override it went out with is spent — unless another was picked meanwhile. */
@@ -715,11 +736,11 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
             files = attached.map { DraftFile(it.id, it.file.withUpload(graph.attachmentUploads.ref(it.id) ?: it.file.upload)) },
             refusedAsBusy = refusedAsBusy,
         )
+        graph.followUps.clearDraft(agentId)
         draft.value = ""
         attachments.value = emptyList()
         files.value = emptyList()
         graph.attachmentUploads.forget(attached.map { it.id })
-        graph.followUps.clearDraft(agentId)
     }
 
     /** Takes a queued follow-up back into the composer; a draft already there is queued in its place, so nothing is lost. */

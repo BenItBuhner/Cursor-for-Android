@@ -4,6 +4,7 @@ import com.cursorforandroid.data.api.AgentStoreApi
 import com.cursorforandroid.data.api.StoreReadTarget
 import com.cursorforandroid.data.api.await
 import com.cursorforandroid.data.api.readCancellably
+import com.cursorforandroid.data.local.DiskSweep
 import com.cursorforandroid.data.local.JsonDiskCache
 import com.cursorforandroid.domain.Capabilities
 import com.cursorforandroid.domain.MediaRef
@@ -20,6 +21,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import com.cursorforandroid.util.toHex
 
 /**
  * Reads the files an agent's reply points into an Agent Store for (`/cursor/stores/<mount>/…`, see
@@ -190,7 +192,7 @@ class StoreFileRepository(
         val storeId = storeId(ownerId) ?: throw IOException(NO_STORE)
         val store = api() ?: throw IOException(NOT_AVAILABLE)
         val bytes = text.toByteArray(Charsets.UTF_8)
-        val sha = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        val sha = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
         val instruction = store.presignWrite(storeId, relativePath, bytes.size.toLong(), sha) ?: throw IOException(NO_WRITE)
         if (instruction.preconditionFailed) throw IOException(FILE_EXISTS)
         val request = Request.Builder()
@@ -250,7 +252,7 @@ class StoreFileRepository(
 
     /** Drops the least recently used files until the directory is within [maxBlobBytes]. */
     private fun trim(dir: File) {
-        val files = dir.listFiles { f -> f.isFile && !f.name.endsWith(".tmp") }?.sortedBy { it.lastModified() } ?: return
+        val files = dir.listFiles { f -> f.isFile && !f.name.endsWith(".tmp") }?.let { DiskSweep.byModified(it) } ?: return
         var total = files.sumOf { it.length() }
         for (f in files) {
             if (total <= maxBlobBytes) break

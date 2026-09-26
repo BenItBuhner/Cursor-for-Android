@@ -20,8 +20,10 @@ plugins {
 //   * A checkout at a release tag `vX.Y.Z` builds X.Y.Z.
 //   * Anything else is a dev build of the release that comes next: the highest `v*` tag's PATCH + 1 - or the tag's own
 //     version while that tag is a pre-release such as v0.4.0-rc.1 - with `-dev` appended, e.g. `0.3.49-dev` after
-//     v0.3.48. CI replaces the `-dev` with its stamp (below). A checkout without git or without any release tag builds
-//     0.0.0-dev and says so; fetch the tags (`git fetch --tags`) to get the real version.
+//     v0.3.48. A PATCH (then MINOR) that would reach 100 rolls over to the next MINOR (then MAJOR) instead, since the
+//     versionCode below has room for 0..99 only: `0.4.0-dev` after v0.3.99. CI replaces the `-dev` with its stamp
+//     (below). A checkout without git or without any release tag builds 0.0.0-dev and says so; fetch the tags
+//     (`git fetch --tags`) to get the real version.
 //
 // versionCode is computed from the resolved name, so the tag is the only input a release needs:
 //
@@ -66,7 +68,14 @@ fun versionFromGit(): Pair<String, Boolean> {
         return "0.0.0" to true
     }
     val (major, minor, patch, preRelease) = releaseTagVersion.matchEntire("v$latest")!!.destructured
-    return (if (preRelease.isEmpty()) "$major.$minor.${patch.toInt() + 1}" else "$major.$minor.$patch") to true
+    return (if (preRelease.isEmpty()) nextReleaseAfter(major.toInt(), minor.toInt(), patch.toInt()) else "$major.$minor.$patch") to true
+}
+
+/** The release after stable [major].[minor].[patch]; mirrored by AppVersion.nextDevVersion (see Versioning above). */
+fun nextReleaseAfter(major: Int, minor: Int, patch: Int): String = when {
+    patch + 1 < 100 -> "$major.$minor.${patch + 1}"
+    minor + 1 < 100 -> "$major.${minor + 1}.0"
+    else -> "${major + 1}.0.0"
 }
 
 val appVersionNameSuffix: String? = providers.gradleProperty("app.versionNameSuffix").orNull?.takeIf { it.isNotBlank() }
@@ -434,24 +443,17 @@ class TestShardFilter(private val shard: TestShard, private val slices: Map<Stri
 }
 
 /**
- * How long a test class takes alone in its JVM, in seconds, for the ones that take more than a few: the fault and
- * harness suites (built on real timeouts and paced retries: a dozen classes, half of the suite's time) and the larger
- * Compose and repository suites. Every other class counts as one second. The slices are filled with these: heaviest
- * class first, each onto the slice with the least in it so far, so no slice ends up with two of the biggest while
- * another has none. Only the balance depends on the numbers - a class missing here, or a stale one, costs seconds of
- * wall time, never correctness. Refresh them from the per-class `time` in the `unit-tests-results-*` artifacts every CI
- * run uploads (the TEST-*.xml files under app/build/test-results/testDebugUnitTest). The benchmarks are not here: they
- * have their own shard.
+ * How long a test class takes alone in its JVM, in seconds, for every class over two (app/test-class-seconds.properties,
+ * measured in CI); every other class counts as one second. The slices are filled with these: heaviest class first,
+ * each onto the slice with the least in it so far, so no slice ends up with two of the biggest while another has none.
+ * Only the balance depends on the numbers - a class missing there, or a stale one, costs seconds of wall time, never
+ * correctness. When a slice drifts (a new fault or latency suite lands), `scripts/refresh-test-balance.sh` rewrites the
+ * file from the newest green run's `unit-tests-results-*` artifacts.
  */
-val testClassSeconds = mapOf(
-    "SendFaultsTest" to 80, "LongProjectReopenTest" to 65, "TranscriptVerifyHarness" to 60, "TranscriptFaultsTest" to 45,
-    "RefreshFaultsTest" to 40, "LiveTurnDeliveryTest" to 40, "NewAgentViewModelTest" to 25, "LongProjectLoadTest" to 25,
-    "LiveFinishFaultsTest" to 25, "DemoBackendTest" to 20, "LiveNotificationServiceTest" to 15, "ConversationViewModelTest" to 15,
-    "PredictiveBackTest" to 10, "FollowUpRepositoryTest" to 10, "RegularChatTextTest" to 10, "LiveStatusTruthTest" to 10,
-    "WidgetSyncTest" to 10, "ConversationRepositoryTest" to 10, "MainActivityThemeTest" to 5, "SidebarCollapsePersistenceTest" to 5,
-    "AppGraphTest" to 5, "AppGraphExtendedModeTest" to 5, "LocalEchoOrderTest" to 5, "DeferredStartupTest" to 5,
-    "AttachmentStoreTest" to 5, "AccountSimulationTest" to 5, "WidgetRefreshTest" to 5, "SnoozeChatDialogTest" to 5,
-)
+val testClassSeconds: Map<String, Int> = providers.fileContents(layout.projectDirectory.file("test-class-seconds.properties"))
+    .asText.getOrElse("").lineSequence()
+    .map(String::trim).filter { it.isNotEmpty() && !it.startsWith("#") }
+    .associate { line -> line.substringBefore('=').trim() to line.substringAfter('=').trim().toInt() }
 
 /** Every ordinary test source file as the class path it compiles to, assigned to one of [count] slices: heaviest first, each onto the lightest slice so far. */
 fun testShardSlices(count: Int): Map<String, Int> {
