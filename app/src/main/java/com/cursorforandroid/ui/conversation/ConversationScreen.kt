@@ -79,18 +79,26 @@ import com.cursorforandroid.domain.SubagentPlacement
 import com.cursorforandroid.ui.agents.RenameChatDialog
 import com.cursorforandroid.ui.agents.SnoozeChatDialog
 import com.cursorforandroid.ui.components.ChatHeader
+import com.cursorforandroid.domain.UserMessage
+import com.cursorforandroid.ui.components.ComposerAnchor
 import com.cursorforandroid.ui.components.ComposerBox
+import com.cursorforandroid.ui.components.LocalSendMotion
+import com.cursorforandroid.ui.components.arrivalGlide
+import com.cursorforandroid.ui.components.rememberArrivalGlide
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.CursorMenu
 import com.cursorforandroid.ui.components.CursorMenuItem
 import com.cursorforandroid.ui.components.FlatIconButton
 import com.cursorforandroid.ui.components.Haptic
 import com.cursorforandroid.ui.components.HeaderClearance
+import com.cursorforandroid.ui.components.LocalAgentLinkStatuses
 import com.cursorforandroid.ui.components.LocalMarkdownMedia
 import com.cursorforandroid.ui.components.LocalRunStopConfirmation
 import com.cursorforandroid.ui.components.MarkdownMediaContext
+import com.cursorforandroid.ui.components.ProjectGlyph
 import com.cursorforandroid.ui.components.RunInterruption
 import com.cursorforandroid.ui.components.RunStopDialog
+import com.cursorforandroid.ui.components.rememberAgentLinkStatuses
 import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.ui.components.rememberRunStopConfirmation
 import com.cursorforandroid.ui.components.ShimmerText
@@ -148,8 +156,9 @@ internal fun ConversationState.workingCaption(): String = when {
 }
 
 /**
- * One chat: a header of controls alone (back, its pull request once it has one, the panel, the menu; the agent's name
- * is the header's accessibility label and the panel's header), the transcript, and the follow-up composer.
+ * One chat: a header of its controls (back, its pull request once it has one, the panel, the menu) with the agent's
+ * name beside back — a Project's after its icon — and no repository line (that is the panel's header), the transcript,
+ * and the follow-up composer.
  *
  * The transcript follows the newest row while the reader is at the bottom, bottom-anchored, and holds what is on
  * screen, top-anchored, once they have scrolled away or opened a dropdown (see [TranscriptScroll]).
@@ -423,6 +432,8 @@ fun ConversationScreen(
             onOpenAgentLink = agentLinks::open,
         )
     }
+    // The status icon each link to an agent opens with, working or at rest, off the list as it follows the runs.
+    val agentLinkStatuses = rememberAgentLinkStatuses(graph.agents)
     // The agent's VM desktop is reached from the header menu (Extended mode, `GetMachine` then noVNC), for the chats
     // that have one to show — the Agents Window's rule, a cloud composer, narrowed to the chats GetMachine would not
     // refuse (DesktopEligibility). It opens over the whole screen for the whole of the way there: the steps while the
@@ -444,7 +455,7 @@ fun ConversationScreen(
         panelContent = {
             // The panel's figures — generated images, recordings, artifacts — resolve through the same media context and
             // open into the same viewer as the transcript's, among the same pages.
-            CompositionLocalProvider(LocalMarkdownMedia provides markdownMedia, LocalPanelGraph provides graph, LocalRunStopConfirmation provides stopConfirmation) {
+            CompositionLocalProvider(LocalMarkdownMedia provides markdownMedia, LocalAgentLinkStatuses provides agentLinkStatuses, LocalPanelGraph provides graph, LocalRunStopConfirmation provides stopConfirmation) {
                 ConversationPanel(panel, panelActions, onClose = { scope.launch { panelState.close() } }, tabStates = panelTabs)
             }
         },
@@ -454,9 +465,13 @@ fun ConversationScreen(
         // Where the header's buttons stand in the margin beside the transcript's column (a wide pane), the header gives
         // its band to the transcript, which then reads up to the status bar; where they reach the column it keeps it.
         val headerClearance = remember { HeaderClearance() }
+        // The name stands beside the back arrow and goes with it: a wide window, whose rail lists the chat, has neither.
+        val showsBack = onBack != null
         ChatHeader(
             label = agent?.name ?: "Chat",
             clearance = headerClearance,
+            title = agent?.name?.takeIf { showsBack && it.isNotBlank() },
+            titleIcon = agent?.takeIf { it.looksLikeProject }?.let { project -> { ProjectGlyph(project.projectAppearance) } },
             leading = {
                 when {
                     onBack != null -> FlatIconButton(CursorIcons.ChevronLeft, "Back", onClick = onBack, touchHeight = touchHeight)
@@ -575,6 +590,7 @@ fun ConversationScreen(
             // opening a provider scope per item.
             CompositionLocalProvider(
                 LocalMarkdownMedia provides markdownMedia,
+                LocalAgentLinkStatuses provides agentLinkStatuses,
                 LocalTranscriptControls provides transcriptControls,
                 LocalDisclosureTaps provides transcriptScroll,
                 LocalOpenStretches provides openStretches,
@@ -650,6 +666,11 @@ fun ConversationScreen(
         }
 
         val archived = agent?.isArchived == true
+        // A message sent into a bubble travels there from the composer (see SendMotion); a chat just started from New
+        // Chat has its composer glide down from where that one stood.
+        val sendMotion = LocalSendMotion.current
+        val composerAnchor = remember(agentId) { ComposerAnchor() }
+        val arrival = rememberArrivalGlide(agentId)
         // Extended mode keeps the queue on the account, where the desktop and the web keep theirs; otherwise on this device.
         val accountQueue = capabilities.accountQueue && !isDemo
         val willQueue = isActive || queue.isNotEmpty() || (accountQueue && controls.queue.isNotEmpty())
@@ -660,7 +681,7 @@ fun ConversationScreen(
         // the stack is a dockedCard: stood in from the box's sides so its corners are concentric with the box's, the
         // same gap between each, whether one is stacked or five.
         Column(
-            Modifier.fillMaxWidth().composerDockPadding(),
+            Modifier.fillMaxWidth().composerDockPadding().arrivalGlide(arrival),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // A fetch that did not go through, said rather than swallowed, in the server's own words: the load's
@@ -738,7 +759,12 @@ fun ConversationScreen(
                     willQueue -> "Follow up (sends when the turn ends)…"
                     else -> "Follow up…"
                 },
-                onSend = viewModel::send,
+                onSend = {
+                    val takeoff = composerAnchor.takeoff()
+                    val before = items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id }
+                    viewModel.send()?.let { sent -> sendMotion?.depart(takeoff, sent, before) }
+                },
+                anchor = composerAnchor,
                 // Free the moment send is tapped: the message, its files' uploads and its send are the transcript's from then on.
                 canSend = (draft.isNotBlank() || attachments.isNotEmpty() || files.isNotEmpty()) && !archived,
                 isRunning = isActive,

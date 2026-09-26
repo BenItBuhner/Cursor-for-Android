@@ -310,6 +310,8 @@ open class FakeCursorApi : CursorApi {
         return CreateRunResponseDto(run)
     }
     override suspend fun cancelRun(id: String, runId: String): IdResponseDto {
+        // As the API answers any id it did not mint, before it looks for the run (Bennett's Stop on 0.4.2).
+        if (!runId.startsWith("run-")) throw CursorApiException(400, "invalid_argument", "Run ID must be in the format 'run-<uuid>'")
         if (failCancel || runId in notCancellable) throw CursorApiException(409, "run_not_cancellable", "Run already finished.")
         failCancelWith?.let { throw it }
         cancelled += runId
@@ -380,6 +382,11 @@ class FakeRunStreamer(private val replay: Int = 256) : RunStreamer {
     override fun stream(agentId: String, runId: String, lastEventId: String?): Flow<RunStreamEvent> = flow {
         connections += runId
         resumes += lastEventId
+        // As the API answers any id it did not mint.
+        if (!runId.startsWith("run-")) {
+            emit(RunStreamEvent.Error("invalid_argument", "Run ID must be in the format 'run-<uuid>'", resumeFrom = null))
+            return@flow
+        }
         val skip = lastEventId?.substringAfterLast('#')?.toIntOrNull() ?: 0
         val drop = synchronized(drops) { drops[runId]?.removeFirstOrNull() }
         if (drop != null && drop.afterEvents == 0) {
