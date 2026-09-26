@@ -42,6 +42,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorforandroid.domain.PendingFollowup
 import com.cursorforandroid.domain.QueuedFollowUp
+import androidx.compose.ui.text.TextLayoutResult
+import com.cursorforandroid.ui.components.AnyAttachment
+import com.cursorforandroid.ui.components.ComposerAnchor
+import com.cursorforandroid.ui.components.LocalSendMotion
+import com.cursorforandroid.ui.components.QueueFlights
+import com.cursorforandroid.ui.components.SendAttachment
+import com.cursorforandroid.ui.components.SendLanding
+import com.cursorforandroid.ui.components.SendMotion
+import com.cursorforandroid.ui.components.SendSurface
+import com.cursorforandroid.ui.components.queueCard
+import com.cursorforandroid.ui.components.queueLine
+import com.cursorforandroid.ui.components.sendAttachmentSource
+import com.cursorforandroid.ui.components.sendAttachmentTarget
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.CursorMenu
 import com.cursorforandroid.ui.components.CursorMenuItem
@@ -73,6 +86,9 @@ import com.cursorforandroid.ui.components.onContextClick
  * list of what is about to be said, not as a stack of forms. A message that could not be sent shows a warning where
  * its tiles would be and the reason under the message, in red; send-now then retries it. One on its way out shows a
  * ring instead of the glyphs.
+ *
+ * With [flights], each row is an end of the send's flight (see `SendMotion`): a message sent while the agent is busy
+ * lands in its row from the composer, and a row the run takes lifts off the card into its bubble.
  */
 @Composable
 fun QueuedFollowUps(
@@ -82,21 +98,31 @@ fun QueuedFollowUps(
     onSteer: (QueuedFollowUp) -> Unit,
     onRemove: (QueuedFollowUp) -> Unit,
     modifier: Modifier = Modifier,
+    flights: QueueFlights? = null,
 ) {
+    val motion = LocalSendMotion.current
     Column(modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEachIndexed { index, item ->
-            QueuedFollowUpRow(
-                item = item,
-                position = index + 1,
-                count = queue.size,
-                thumbnails = thumbnails,
-                onEdit = { onEdit(item) },
-                onSteer = { onSteer(item) },
-                onRemove = { onRemove(item) },
-            )
+            key(item.id) {
+                QueuedFollowUpRow(
+                    item = item,
+                    position = index + 1,
+                    count = queue.size,
+                    thumbnails = thumbnails,
+                    onEdit = { onEdit(item) },
+                    onSteer = { onSteer(item) },
+                    onRemove = { onRemove(item) },
+                    motion = motion,
+                    anchor = flights?.anchor(item.id),
+                )
+            }
         }
     }
 }
+
+/** A queued row's card as a flight draws it: the card's own surface. */
+@Composable
+private fun queueCardSurface(): SendSurface = CursorTheme.colors.let { SendSurface(it.elevated, it.strokeSubtle) }
 
 @Composable
 private fun QueuedFollowUpRow(
@@ -107,15 +133,18 @@ private fun QueuedFollowUpRow(
     onEdit: () -> Unit,
     onSteer: () -> Unit,
     onRemove: () -> Unit,
+    motion: SendMotion?,
+    anchor: ComposerAnchor?,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
+    val words = item.previewText
     Row(
         Modifier
             .fillMaxWidth()
             // The card's own surface, stood in from the composer's sides so its corners are concentric with the box's.
             // The description sits on the surface, so the row's node is the card as drawn.
-            .dockedCard()
+            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface()))
             .semantics {
                 contentDescription = when (val note = item.warning) {
                     null -> "Queued follow-up $position of $count"
@@ -131,8 +160,15 @@ private fun QueuedFollowUpRow(
             Spacer(Modifier.width(8.dp))
         } else if (item.images.isNotEmpty() || item.files.isNotEmpty()) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                item.images.forEach { image ->
-                    Box(Modifier.size(Tile).cursorSurface(colors.fill, colors.stroke, CursorTheme.shapes.sm)) {
+                // Each tile at its place in the prompt's attachments, the images first: where a send's copy of it lands, and lifts off from.
+                item.images.forEachIndexed { ordinal, image ->
+                    Box(
+                        Modifier
+                            .size(Tile)
+                            .sendAttachmentSource(motion, anchor, "queued:${item.id}:$ordinal", SendAttachment(ordinal, thumbnails[image.id], media = true))
+                            .sendAttachmentTarget(motion, item.id, words, ordinal, SendLanding.Queue)
+                            .cursorSurface(colors.fill, colors.stroke, CursorTheme.shapes.sm),
+                    ) {
                         val bitmap = thumbnails[image.id]
                         if (bitmap != null) {
                             Image(bitmap, contentDescription = "Attached image", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -142,8 +178,17 @@ private fun QueuedFollowUpRow(
                     }
                 }
                 // A file keeps its glyph where an image has its tile; its name follows the message line below.
-                item.files.forEach { file ->
-                    Box(Modifier.size(Tile).cursorSurface(colors.fill, colors.stroke, CursorTheme.shapes.sm).semantics { contentDescription = "Attached file ${file.file.name}" }) {
+                item.files.forEachIndexed { index, file ->
+                    val ordinal = item.images.size + index
+                    val look = SendAttachment(ordinal, thumbnail = null, media = false, name = file.file.name, kind = file.file.kind, sizeBytes = file.file.sizeBytes.toLong())
+                    Box(
+                        Modifier
+                            .size(Tile)
+                            .sendAttachmentSource(motion, anchor, "queued:${item.id}:$ordinal", look)
+                            .sendAttachmentTarget(motion, item.id, words, ordinal, SendLanding.Queue)
+                            .cursorSurface(colors.fill, colors.stroke, CursorTheme.shapes.sm)
+                            .semantics { contentDescription = "Attached file ${file.file.name}" },
+                    ) {
                         Icon(file.file.kind.icon(), null, tint = colors.iconTertiary, modifier = Modifier.size(10.dp).align(Alignment.Center))
                     }
                 }
@@ -158,14 +203,7 @@ private fun QueuedFollowUpRow(
         Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
             // The commands dim with the rest of the line while it goes out.
             val textColor = if (sending) colors.textTertiary else colors.textPrimary
-            Text(
-                highlightSlashCommands(item.previewText, commandTints().faded(textColor.alpha)),
-                style = type.input,
-                color = textColor,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
+            QueueLine(words, textColor, motion, anchor, item.id)
             if (item.files.isNotEmpty()) AttachedFileNames(item.files.map { it.file.name })
             // Why it did not go, in the server's words or the connection's: without it the warning is only a riddle.
             item.warning?.let { note ->
@@ -245,11 +283,16 @@ fun AccountQueueRows(
     onSteerNow: ((PendingFollowup) -> Unit)? = null,
     /** Moves a queued message one place earlier (`up`) or later; null when the order cannot be changed from here. */
     onMove: ((PendingFollowup, up: Boolean) -> Unit)? = null,
+    /** The rows as ends of the send's flight, as on [QueuedFollowUps]. */
+    flights: QueueFlights? = null,
 ) {
+    val motion = LocalSendMotion.current
     Column(modifier.animateContentSize().testTag("account-queue"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEachIndexed { index, item ->
             key(item.id) {
                 AccountQueueRow(
+                    motion = motion,
+                    anchor = flights?.anchor(item.id),
                     item = item,
                     position = index + 1,
                     count = queue.size,
@@ -268,6 +311,8 @@ fun AccountQueueRows(
 
 @Composable
 private fun AccountQueueRow(
+    motion: SendMotion?,
+    anchor: ComposerAnchor?,
     item: PendingFollowup,
     position: Int,
     count: Int,
@@ -286,10 +331,11 @@ private fun AccountQueueRow(
     var menuAt by remember { mutableStateOf<IntOffset?>(null) }
     // The caret starts at the end of the message, where a rewording most often continues.
     var text by rememberSaveable(item.id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(item.text, TextRange(item.text.length))) }
+    val words = item.previewText
     Row(
         Modifier
             .fillMaxWidth()
-            .dockedCard()
+            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface()))
             .onContextClick(enabled = onMove != null && !editing && !inFlight) { at -> menuAt = at; menuOpen = true }
             .testTag("account-queue-row")
             .heightIn(min = RowHeight)
@@ -328,22 +374,16 @@ private fun AccountQueueRow(
         } else {
             Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
                 val textColor = if (inFlight) colors.textTertiary else colors.textPrimary
-                Text(
-                    highlightSlashCommands(item.previewText, commandTints().faded(textColor.alpha)),
-                    style = type.input,
-                    color = textColor,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                QueueLine(words, textColor, motion, anchor, item.id)
                 // What the account says the message carries (`selected_context`): its files by name, its images by count.
+                // A send's attachments, which have no tiles here, land on the line and dissolve into its words.
                 if (item.files.isNotEmpty() || item.imageCount > 0) {
                     val images = when (item.imageCount) {
                         0 -> emptyList()
                         1 -> listOf("1 image")
                         else -> listOf("${item.imageCount} images")
                     }
-                    AttachedFileNames(item.files.map { it.name } + images)
+                    AttachedFileNames(item.files.map { it.name } + images, Modifier.sendAttachmentTarget(motion, item.id, words, AnyAttachment, SendLanding.Queue))
                 }
                 if (item.isEditing) Text("Being edited on another device", style = type.small, color = colors.textQuaternary, maxLines = 1)
                 // A message put back on the card: the transcript had shown it under a run that ended without it (see QueuePlacement.returned).
@@ -376,9 +416,28 @@ private fun AccountQueueRow(
     }
 }
 
+/**
+ * A queued row's message, verbatim, on one line that trails off where it ends, its `/commands` painted as the composer
+ * painted them: where a queued send's text lands, and what a delivery lifts off the card.
+ */
+@Composable
+private fun QueueLine(words: String, color: Color, motion: SendMotion?, anchor: ComposerAnchor?, id: String) {
+    val layout = remember { arrayOfNulls<TextLayoutResult>(1) }
+    Text(
+        highlightSlashCommands(words, commandTints().faded(color.alpha)),
+        style = CursorTheme.typography.input,
+        color = color,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
+        onTextLayout = { layout[0] = it },
+        modifier = Modifier.queueLine(motion, anchor, id, words, color) { layout[0] },
+    )
+}
+
 /** The attachments a queued row carries, named in one small line under its text: `report.pdf · trace.zip · 2 images`. */
 @Composable
-private fun AttachedFileNames(names: List<String>) {
+private fun AttachedFileNames(names: List<String>, modifier: Modifier = Modifier) {
     Text(
         names.joinToString(" · "),
         style = CursorTheme.typography.small,
@@ -386,7 +445,7 @@ private fun AttachedFileNames(names: List<String>) {
         maxLines = 1,
         softWrap = false,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.testTag("queued-attachments"),
+        modifier = modifier.testTag("queued-attachments"),
     )
 }
 

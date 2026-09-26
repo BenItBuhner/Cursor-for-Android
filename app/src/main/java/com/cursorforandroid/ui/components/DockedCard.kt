@@ -47,16 +47,18 @@ data class DockInset(val start: Dp, val end: Dp)
  * The surface of a card docked over the follow-up composer — a queued follow-up, the goal strip, a notice about the
  * transcript's load: the composer's own surface and stroke in [shape], stood in from the composer's sides by
  * [composerDockInset] so its corners are concentric with the composer's. Any number of them stack over the box, each
- * inset the same, with whatever gap the stack keeps between them; a lone card is placed no differently.
+ * inset the same, with whatever gap the stack keeps between them; a lone card is placed no differently. [surface] goes
+ * between the inset and the surface: it sees the card's own box, and wraps the card's drawing, surface included.
  */
 @Composable
 fun Modifier.dockedCard(
     shape: CornerBasedShape = CursorTheme.shapes.xl,
     fill: Color = CursorTheme.colors.elevated,
     border: Color = CursorTheme.colors.strokeSubtle,
+    surface: Modifier = Modifier,
 ): Modifier {
     val inset = composerDockInset(shape)
-    return this.padding(start = inset.start, end = inset.end).cursorSurface(fill, border, shape)
+    return this.padding(start = inset.start, end = inset.end).then(surface).cursorSurface(fill, border, shape)
 }
 
 /** A corner size in dp does not care what it is a corner of; a proportional one gets this to be a corner of. */
