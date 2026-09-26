@@ -42,9 +42,16 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
@@ -64,6 +71,8 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import com.cursorforandroid.domain.PromptFile
@@ -252,6 +261,12 @@ class SendFlight internal constructor(
     /** The id of the bubble or row it is landing on, once that is placed. */
     var targetId: String? = null
         internal set
+
+    /**
+     * Whether the attachments' copies have been laid out. A queued row that leaves goes in the frame its flight is
+     * started, after the host has composed that frame's copies; until they are up, the overlay draws the row's tiles.
+     */
+    internal var copiesPlaced = false
 
     /**
      * One place the flight could land, as laid out: its surface and text boxes, how each looks, and its attachments by
@@ -575,7 +590,7 @@ private fun FlightRunner(motion: SendMotion) {
 private fun AttachmentFlights(flight: SendFlight) {
     if (flight.takeoff.attachments.isEmpty()) return
     val host = remember { arrayOfNulls<LayoutCoordinates>(1) }
-    Box(Modifier.fillMaxSize().onPlaced { host[0] = it }) {
+    Box(Modifier.fillMaxSize().onPlaced { host[0] = it; flight.copiesPlaced = true }) {
         for (attachment in flight.takeoff.attachments) {
             key(attachment.key) {
                 Box(
@@ -604,6 +619,9 @@ private fun AttachmentFace(look: SendAttachment) {
     val type = CursorTheme.typography
     val shape = CursorTheme.shapes.lg
     if (look.media) {
+        // A bubble's thumbnail and a queued row's tile: the corners tighten with the copy, as a file's card gives way to its tile.
+        val tile = CursorTheme.shapes.sm
+        val shape = remember(tile, shape) { NarrowingCorners(tile, shape) }
         Box(Modifier.fillMaxSize().cursorSurface(if (look.video) Color.Black else colors.fill, colors.stroke, shape), contentAlignment = Alignment.Center) {
             if (look.thumbnail != null) {
                 Image(look.thumbnail, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -650,6 +668,16 @@ private fun cardShare(width: Float, density: androidx.compose.ui.unit.Density): 
     ((width - TileUpTo.toPx()) / (CardFrom.toPx() - TileUpTo.toPx())).coerceIn(0f, 1f)
 }
 
+/** [small]'s corners at a tile's size, [large]'s from a card's, and between the two on the way: read from the size it is laid out at. */
+private class NarrowingCorners(private val small: Shape, private val large: Shape) : Shape {
+    override fun createOutline(size: Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection, density: androidx.compose.ui.unit.Density): Outline {
+        fun radius(shape: Shape) = (shape.createOutline(size, layoutDirection, density) as? Outline.Rounded)?.roundRect?.topLeftCornerRadius?.x ?: 0f
+        val tight = radius(small)
+        val corner = tight + (radius(large) - tight) * cardShare(size.width, density)
+        return Outline.Rounded(RoundRect(Rect(Offset.Zero, size), CornerRadius(corner)))
+    }
+}
+
 private val TileUpTo = 32.dp
 private val CardFrom = 72.dp
 
@@ -662,6 +690,7 @@ private fun FlightOverlay(motion: SendMotion) {
     val style = CursorTheme.typography.message
     val measurer = rememberTextMeasurer(cacheSize = 4)
     val holder = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val tile = CursorTheme.shapes.sm
     Canvas(Modifier.fillMaxSize().onPlaced { holder[0] = it }) {
         val own = holder[0]?.takeIf { it.isAttached } ?: return@Canvas
         val shift = -own.positionInWindow()
@@ -676,10 +705,38 @@ private fun FlightOverlay(motion: SendMotion) {
                     clipTo(takeoff.viewport.translate(shift).inflate(ClipSlack.toPx())) {
                         drawText(takeoff.layout, color = colors.textPrimary, topLeft = takeoff.origin + shift, alpha = alpha)
                     }
+                    if (!flight.copiesPlaced) {
+                        for (attachment in takeoff.attachments) drawTile(attachment, shift, tile, colors.fill, colors.stroke, alpha)
+                    }
                 }
                 SendFlight.Phase.Flying -> drawFlight(flight, shift, measurer, style, colors.textPrimary, bubble)
             }
         }
+    }
+}
+
+/** A queued row's tile as it stood — its picture, or a plain tile for a file — for the frame before its copy is up. */
+private fun DrawScope.drawTile(attachment: AttachmentTakeoff, shift: Offset, shape: Shape, fill: Color, stroke: Color, alpha: Float) {
+    val box = attachment.rect.translate(shift)
+    val outline = shape.createOutline(box.size, layoutDirection, this)
+    translate(box.left, box.top) {
+        val picture = attachment.look.thumbnail?.takeIf { attachment.look.media }
+        if (picture == null) {
+            drawOutline(outline, fill, alpha = alpha)
+        } else {
+            val scale = maxOf(box.width / picture.width, box.height / picture.height)
+            val crop = IntSize((box.width / scale).roundToInt().coerceIn(1, picture.width), (box.height / scale).roundToInt().coerceIn(1, picture.height))
+            clipPath(Path().apply { addOutline(outline) }) {
+                drawImage(
+                    picture,
+                    srcOffset = IntOffset((picture.width - crop.width) / 2, (picture.height - crop.height) / 2),
+                    srcSize = crop,
+                    dstSize = IntSize(box.width.roundToInt(), box.height.roundToInt()),
+                    alpha = alpha,
+                )
+            }
+        }
+        drawOutline(outline, stroke, alpha = alpha, style = Stroke(1.dp.toPx()))
     }
 }
 
