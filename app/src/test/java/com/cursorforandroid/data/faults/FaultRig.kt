@@ -27,6 +27,7 @@ import com.cursorforandroid.data.local.FollowUpStore
 import com.cursorforandroid.data.local.JsonDiskCache
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.data.local.SecureKeyStore
+import com.cursorforandroid.data.local.TextSpill
 import com.cursorforandroid.data.local.TraceCache
 import com.cursorforandroid.data.repo.AgentRepository
 import com.cursorforandroid.data.repo.RefreshDepth
@@ -103,6 +104,8 @@ class FaultRig(
     http2: Boolean = false,
     /** The blob store's budget on disk, all chats together (production: `BlobDiskStore.MAX_BYTES`). */
     blobDiskBytes: Long = BlobDiskStore.MAX_BYTES,
+    /** Long texts are kept on disk while their chats are open, as in the app (see `TextSpill`); false keeps them on the heap. */
+    spillTexts: Boolean = true,
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var now: Long = 1_800_000_000_000L
@@ -132,8 +135,19 @@ class FaultRig(
     val bytesOut = java.util.concurrent.atomic.AtomicLong()
     /** Calls the clients started. */
     val calls = java.util.concurrent.atomic.AtomicInteger()
+    /**
+     * Calls to the account's record service not yet finished. Their answers carry the account's word on what is
+     * running, which the app stamps with the clock when an answer lands, not when the server wrote it.
+     */
+    val accountCallsInFlight = java.util.concurrent.atomic.AtomicInteger()
+    private fun isAccountCall(call: okhttp3.Call) = FaultServer.RECORD_SERVICE in call.request().url.encodedPath
     private val wire = object : okhttp3.EventListener() {
-        override fun callStart(call: okhttp3.Call) { calls.incrementAndGet() }
+        override fun callStart(call: okhttp3.Call) {
+            calls.incrementAndGet()
+            if (isAccountCall(call)) accountCallsInFlight.incrementAndGet()
+        }
+        override fun callEnd(call: okhttp3.Call) { if (isAccountCall(call)) accountCallsInFlight.decrementAndGet() }
+        override fun callFailed(call: okhttp3.Call, ioe: java.io.IOException) { if (isAccountCall(call)) accountCallsInFlight.decrementAndGet() }
         override fun requestHeadersEnd(call: okhttp3.Call, request: okhttp3.Request) { bytesOut.addAndGet(request.headers.byteCount()) }
         override fun requestBodyEnd(call: okhttp3.Call, byteCount: Long) { bytesOut.addAndGet(byteCount) }
         override fun responseHeadersEnd(call: okhttp3.Call, response: okhttp3.Response) { bytesIn.addAndGet(response.headers.byteCount()) }
@@ -168,12 +182,12 @@ class FaultRig(
     val prefs = PreferencesStore(context)
     val backend = CursorBackend(api, streamer, isDemo = false)
     val session = SessionManager(SecureKeyStore(context), prefs, backend, CursorBackend(api, streamer, isDemo = true))
-    private val disk = JsonDiskCache(File(root, "cache").apply { mkdirs() }, dispatcher = Dispatchers.Unconfined)
+    private val disk = JsonDiskCache(File(root, "cache").apply { mkdirs() }, dispatcher = Dispatchers.Unconfined).also { TextSpill.install(if (spillTexts) it.child("spill") else null) }
     val attachments = AttachmentStore(context)
     /** The list's work in flight, shared by the list and the account layer (see `PendingWork`): what the sidebar's one loading row stands for. */
     val pending = PendingWork()
     val agents = AgentRepository(session, prefs, attachments, AgentListCache(disk.child("agents")), scope, persistDelayMs = 10, capabilities = { capabilities }, recordOf = { id -> if (this.capabilities.accountSession) accountAgents.record(id) else null }, pending = pending)
-    val hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 500, releaseGraceMs = 200, reconnectBaseMs = 200, reconnectMaxMs = 800, scope = scope)
+    val hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 500, releaseGraceMs = 200, reconnectBaseMs = 200, reconnectMaxMs = 800, parking = disk.child("liveruns"), scope = scope)
     val conversationCache = ConversationCache(disk.child("conversations"))
     val traces = TraceCache(JsonDiskCache(File(root, "traces").apply { mkdirs() }, nowProvider = { now }, dispatcher = Dispatchers.Unconfined))
     /**
@@ -294,6 +308,7 @@ class FaultRig(
         accountClient.dispatcher.executorService.shutdownNow()
         accountClient.connectionPool.evictAll()
         AppClock.nowMillis = System::currentTimeMillis
+        TextSpill.install(null)
     }
 }
 

@@ -151,10 +151,19 @@ class SoakBudgetBenchmarkTest {
      * list refreshing and turns ending and starting underneath.
      */
     @Test
-    fun `hundreds of working agents with Projects switched fast stay within budget`() = runBlocking {
+    fun `hundreds of working agents with Projects switched fast stay within budget`() = fleetWithin("fleet", runsDatedAt = now)
+
+    /**
+     * The same fleet with every turn's run dated an hour behind the chat's last finished one (a server clock off):
+     * the agent's record still names it as the latest. Read by dates alone, each held chat reloaded itself every
+     * round trip while its turn ran — 3,636 calls and 349 MB allocated where the fleet takes some 840 and 135 MB.
+     */
+    @Test
+    fun `hundreds of working agents whose runs are dated behind stay within budget`() = fleetWithin("fleet dated behind", runsDatedAt = now - 3_600_000L)
+
+    private fun fleetWithin(name: String, runsDatedAt: Long) = runBlocking {
         server = FaultServer(rttMillis = 5L..20L, http2 = true).start()
-        // Turns started now are the newest runs of their chats, as the fixtures date the finished ones.
-        server.clock = { now }
+        server.clock = { runsDatedAt }
         server.liveRunStreams = true
         server.liveRunBeatMs = 500L
         server.liveRunGenerator = working
@@ -189,7 +198,7 @@ class SoakBudgetBenchmarkTest {
         }
         delay(2_000)
         meter.checkpoint()
-        report("fleet", meter, rig)
+        report(name, meter, rig)
         meter.close()
         budget("peak retained heap", meter.peakRetained, FLEET_HEAP)
         budget("bytes received", meter.bytesIn, FLEET_BYTES_IN)
@@ -288,7 +297,125 @@ class SoakBudgetBenchmarkTest {
         assertThat(server.liveRunOpen.get()).isEqualTo(0)
     }
 
+    /**
+     * Forty working chats looked in on one after another — more runs than the live-run table keeps — then the first
+     * ten opened again once their agents have done a little more: what those reopens cost on the wire, and how many
+     * of their runs' streams were read again from the first event rather than resumed.
+     */
+    @Test
+    fun `working chats reopened after their runs left the live table resume rather than replay`() = runBlocking {
+        server = FaultServer(rttMillis = 5L..20L, http2 = true).start()
+        server.clock = { now }
+        server.liveRunStreams = true
+        server.liveRunBeatMs = 500L
+        val ids = (0 until EVICTED_CHATS).map { "bc-evict-$it" }
+        ids.forEachIndexed { i, id ->
+            addChat(id, "Worker $i", now - 100_000L - 1_000L * i)
+            server.startTurnElsewhere(id, "Work on part $i.", "run-evict-$i")
+            server.appendRunEvents("run-evict-$i", (1..RUN_EVENTS).flatMap { tick -> working("run-evict-$i", tick) })
+        }
+        val rig = rig()
+        rig.agents.refresh()
+        warmUp(rig, "bc-evict-${EVICTED_CHATS - 1}")
+        val conversations = rig.conversations
+        suspend fun look(id: String, tick: Int) {
+            conversations.attach(id)
+            rig.awaitUntil(20_000) {
+                conversations.state(id).value.let { s -> s.isStreaming && s.items.any { it.toString().contains("Step $tick passes") } }
+            }
+            conversations.detach(id)
+        }
+        ids.forEachIndexed { i, id -> look(id, RUN_EVENTS) }
+        delay(1_000)
+        // The agents work on while nobody looks.
+        ids.forEachIndexed { i, _ -> server.appendRunEvents("run-evict-$i", (RUN_EVENTS + 1..RUN_EVENTS + 3).flatMap { tick -> working("run-evict-$i", tick) }) }
+        val streamsBefore = server.seen.size
+        val meter = Meter(rig)
+        val stories = ids.take(REOPENED).map { id ->
+            look(id, RUN_EVENTS + 3)
+            conversations.state(id).value.items.joinToString("\n")
+        }
+        delay(1_000)
+        meter.checkpoint()
+        val reopenStreams = server.seen.drop(streamsBefore).filter { it.route == FaultServer.Route.Stream }
+        val replays = reopenStreams.count { it.lastEventId == null }
+        report("reopen after eviction streams=${reopenStreams.size} replays=$replays", meter, rig)
+        meter.close()
+        // Resumed, each turn's story is whole: its first step, its newest, and none of them twice.
+        stories.forEach { story ->
+            assertThat(story).contains("Step 1 passes")
+            assertThat(Regex("Step ${RUN_EVENTS + 3} passes").findAll(story).count()).isEqualTo(1)
+            assertThat(Regex("Step $RUN_EVENTS passes").findAll(story).count()).isEqualTo(1)
+        }
+        assertWithMessage("runs read again from their first event").that(replays).isAtMost(REOPEN_REPLAYS)
+        budget("bytes received reopening ten working chats", meter.bytesIn, REOPEN_BYTES_IN)
+    }
+
+    /**
+     * Twenty working chats held by keep chats live, none of them on screen, their agents writing a step each half second
+     * for thirty seconds: how long their streams stay open, what the app allocates keeping them current, and — once a
+     * few are opened — how soon each shows its newest step and whether its story came through whole.
+     */
+    @Test
+    fun `held working chats nobody looks at are looked in on, not streamed`() = runBlocking {
+        server = FaultServer(rttMillis = 5L..20L, http2 = true).start()
+        server.clock = { now }
+        server.liveRunStreams = true
+        server.liveRunBeatMs = 500L
+        val ids = (0 until LiveSync.MAX_HELD).map { "bc-held-$it" }
+        ids.forEachIndexed { i, id ->
+            addChat(id, "Held $i", now - 100_000L - 1_000L * i)
+            server.startTurnElsewhere(id, "Work on part $i.", "run-held-$i")
+            server.appendRunEvents("run-held-$i", working("run-held-$i", 1))
+        }
+        val rig = rig()
+        rig.agents.refresh()
+        warmUp(rig, "bc-held-0")
+        val sync = liveSync(rig)
+        rig.awaitUntil(30_000) { sync.heldIds.value.size == ids.size }
+        ids.forEach { rig.conversations.settled(it) }
+        delay(2_000)
+        val meter = Meter(rig)
+        var streamSamples = 0L
+        val sampler = rig.scope.launch {
+            while (true) { streamSamples += server.liveRunOpen.get(); delay(100) }
+        }
+        var tick = 1
+        val started = System.nanoTime()
+        while (System.nanoTime() - started < HELD_WORK_MS * 1_000_000) {
+            tick++
+            ids.forEachIndexed { i, _ -> server.appendRunEvents("run-held-$i", working("run-held-$i", tick)) }
+            delay(500)
+        }
+        meter.checkpoint()
+        sampler.cancel()
+        val streamSeconds = streamSamples / 10.0
+        val opens = ids.take(HELD_OPENED).map { id ->
+            val openedAt = System.nanoTime()
+            rig.conversations.attach(id)
+            rig.awaitUntil(10_000) { rig.conversations.state(id).value.items.any { it.toString().contains("Step $tick passes") } }
+            val ms = (System.nanoTime() - openedAt) / 1_000_000
+            val story = rig.conversations.state(id).value.items.joinToString("\n")
+            rig.conversations.detach(id)
+            ms to story
+        }
+        report("held unwatched streamSeconds=${"%.0f".format(streamSeconds)} opens=${opens.map { it.first }}ms", meter, rig)
+        meter.close()
+        opens.forEach { (_, story) ->
+            for (step in listOf(1, tick / 2, tick)) assertThat(Regex("Step $step passes").findAll(story).count()).isEqualTo(1)
+        }
+        assertWithMessage("stream-seconds open for twenty held chats over ${HELD_WORK_MS / 1000} s").that(streamSeconds).isAtMost(HELD_STREAM_SECONDS)
+        budget("bytes allocated keeping twenty working chats current", meter.allocatedBytes(), HELD_ALLOCATED)
+        opens.forEach { (ms, _) -> assertWithMessage("opening a held chat to its newest step").that(ms).isAtMost(HELD_OPEN_MS) }
+    }
+
     private companion object {
+        const val HELD_WORK_MS = 30_000L
+        const val HELD_OPENED = 5
+        const val EVICTED_CHATS = 40
+        const val REOPENED = 10
+        /** Beats of work in each run's log before it is first looked at: some 300 KB of tool output a run. */
+        const val RUN_EVENTS = 80
         const val HUGE_TURNS = 1_500
         const val SCROLL_PAGES = 20
 
@@ -303,7 +430,10 @@ class SoakBudgetBenchmarkTest {
         const val FLEET_ALLOCATED = 300 * MB
         /** 838. A held chat re-read in a loop while its record and run list disagreed made 3,600. */
         const val FLEET_CALLS = 1_500
-        /** 20.9 MB, of which some 16 MB is Robolectric's framework resource table, loaded once mid-scenario. */
+        /**
+         * 20.0 MB, of which some 16 MB is Robolectric's framework resource table, loaded once mid-scenario (21.2 MB
+         * before the files its turns read were kept on disk: 1.3 million characters of reports read whole).
+         */
         const val HUGE_OPEN_HEAP = 40 * MB
         /** 16.5 MB, the same 16 MB of it Robolectric's: the long chat itself is gone from memory once it is closed. */
         const val HUGE_CLOSED_HEAP = 22 * MB
@@ -315,5 +445,15 @@ class SoakBudgetBenchmarkTest {
         const val HUGE_CALLS = 4_000
         /** Nothing at all: keep chats live stands down in the background, and nothing else streams. */
         const val BACKGROUND_BYTES_IN = 256L * 1024
+        /** 0 of 10 (10 of 10 before runs leaving the live table were parked to be resumed). */
+        const val REOPEN_REPLAYS = 1
+        /** 0.1 MB: what the turns did meanwhile, and the chats' own reads. Replaying their runs from the first event was 1.9 MB. */
+        const val REOPEN_BYTES_IN = 512L * 1024
+        /** 228 of the 600 there are, each look a resumed connection (604 while every held run was streamed throughout). */
+        const val HELD_STREAM_SECONDS = 320.0
+        /** 30 MB (48 MB streamed: every event published to a chat nobody sees). */
+        const val HELD_ALLOCATED = 40 * MB
+        /** 77–178 ms: the rest is cut short and the look catches up from its position. Waiting it out would be up to 30 s. */
+        const val HELD_OPEN_MS = 1_000L
     }
 }
