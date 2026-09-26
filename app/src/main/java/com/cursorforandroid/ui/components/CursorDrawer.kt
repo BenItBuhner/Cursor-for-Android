@@ -57,7 +57,6 @@ import com.cursorforandroid.ui.theme.CursorTheme
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.math.roundToInt
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 /**
@@ -181,31 +180,23 @@ class CursorDrawerState(initialValue: DrawerValue) {
 
     internal var widthPx = 0f
 
-    /** Plays the drag's half-way threshold (see [halfwayCrossing]); set by the [CursorDrawer] showing this state. */
+    /** Plays a swipe's open or close as the sheet lands ([SheetLanding]); set by the [CursorDrawer] showing this state. */
     internal var haptics: Haptics? = null
+
+    private val landing = SheetLanding()
 
     private val mutex = MutatorMutex()
 
-    /** Counts [jumpTo]s: a slide or fling that began before the latest one no longer moves the sheet. */
-    private var jumps = 0
-
-    suspend fun open() = slideTo(DrawerValue.Open)
-
-    suspend fun close() = slideTo(DrawerValue.Closed)
-
     /**
-     * Puts the sheet at [value] in this frame, with no slide: the keyboard's answer (Ctrl+B, Esc, a chat opened from
-     * the keyboard). A slide or a drag still holding the sheet stops moving it at once, and is cancelled on [scope].
+     * [keyed]: a key asked for it (Ctrl+B, Esc, a chat opened from the keyboard), and the slide is under way in the
+     * first frame drawn after the key ([setOffAhead]) where it is launched undispatched from the key's handler.
      */
-    fun jumpTo(value: DrawerValue, scope: CoroutineScope) {
-        jumps++
-        targetValue = value
-        fraction = value.fraction
-        if (!mutex.tryMutate { }) scope.launch { snapTo(value) }
-    }
+    suspend fun open(keyed: Boolean = false) = slideTo(DrawerValue.Open, keyed)
 
-    /** Animates to [value] from wherever the sheet is now, taking longer the further it has to travel. */
-    internal suspend fun slideTo(value: DrawerValue) {
+    suspend fun close(keyed: Boolean = false) = slideTo(DrawerValue.Closed, keyed)
+
+    /** Animates to [value] from wherever the sheet is now, taking longer the further it has to travel; [keyed], a frame ahead. */
+    internal suspend fun slideTo(value: DrawerValue, keyed: Boolean = false) {
         val target = value.fraction
         mutex.mutate {
             targetValue = value
@@ -215,8 +206,8 @@ class CursorDrawerState(initialValue: DrawerValue) {
                 return@mutate
             }
             val millis = (SlideMillis * distance).roundToInt().coerceIn(MinSlideMillis, SlideMillis)
-            val jump = jumps
-            runAnimation { animate(fraction, target, animationSpec = tween(millis, easing = SlideEasing)) { v, _ -> if (jumps == jump) fraction = v } }
+            val slide = tween<Float>(millis, easing = SlideEasing)
+            runAnimation { animate(fraction, target, animationSpec = if (keyed) slide.setOffAhead() else slide) { v, _ -> fraction = v } }
         }
     }
 
@@ -252,10 +243,14 @@ class CursorDrawerState(initialValue: DrawerValue) {
             else -> DrawerValue.Closed
         }
         mutex.mutate {
+            landing.released(wasOpen = isOpen, open = value == DrawerValue.Open)
             targetValue = value
-            val jump = jumps
+            landing.at(fraction)?.let { haptics?.perform(it) }
             runAnimation {
-                animate(fraction, value.fraction, initialVelocity = velocity, animationSpec = FlingSpec) { v, _ -> if (jumps == jump) fraction = v.coerceIn(0f, 1f) }
+                animate(fraction, value.fraction, initialVelocity = velocity, animationSpec = FlingSpec) { v, _ ->
+                    fraction = v.coerceIn(0f, 1f)
+                    landing.at(fraction)?.let { haptics?.perform(it) }
+                }
             }
         }
     }
@@ -274,9 +269,8 @@ class CursorDrawerState(initialValue: DrawerValue) {
         private val dragScope = object : DragScope {
             override fun dragBy(pixels: Float) {
                 if (widthPx <= 0f) return
-                val before = fraction
+                landing.dragged(fraction)
                 fraction = (fraction + pixels / widthPx).coerceIn(0f, 1f)
-                halfwayCrossing(before, fraction, restingOpen = isOpen)?.let { haptics?.perform(it) }
             }
         }
 

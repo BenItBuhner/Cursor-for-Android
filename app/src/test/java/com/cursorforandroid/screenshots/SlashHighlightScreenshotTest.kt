@@ -138,6 +138,6 @@ class SlashHighlightScreenshotTest {
     @Test
     fun modeTokensLight() {
         compose.setContent { Scene(ThemeMode.Light, modesPrompt, modesQueued) }
-        capture("517_slash_highlight_modes_light")
+        capture("489_slash_highlight_modes_light")
     }
 }

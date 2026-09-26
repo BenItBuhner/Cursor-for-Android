@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -166,6 +167,7 @@ object InlineMarkdown {
         /** The `/command` tokens of the text being rendered, by the index of their slash in it; empty without [commandTints]. */
         val commands: Map<Int, IntRange>,
         val onLinkClick: ((String) -> Unit)?,
+        val agentLinkIcons: Boolean,
     ) {
         val code = SpanStyle(fontFamily = JetBrainsMono, color = codeColor, background = codeBackground, fontSize = base.fontSize * 0.9f)
         val bold = SpanStyle(fontWeight = FontWeight.SemiBold, color = boldColor)
@@ -192,6 +194,9 @@ object InlineMarkdown {
      *
      * [onLinkClick] receives the target of a tapped link. Without one the annotation falls back to Compose's
      * `LocalUriHandler`, which throws when nothing on the device handles the address.
+     *
+     * With [agentLinkIcons] every link to an agent opens with the slot of its status icon, inside the link (see
+     * [AgentLinkIcon]); the text then needs [AgentLinkIcon.inlineContent] to draw them.
      */
     fun render(
         text: String,
@@ -202,9 +207,10 @@ object InlineMarkdown {
         boldColor: Color,
         onLinkClick: ((String) -> Unit)? = null,
         commandTints: CommandTints? = null,
+        agentLinkIcons: Boolean = false,
     ): AnnotatedString {
         val commands = if (commandTints != null) SlashCommands.tokenRanges(text).associateBy { it.first } else emptyMap()
-        val palette = Palette(base, codeColor, codeBackground, linkColor, boldColor, commandTints, commands, onLinkClick)
+        val palette = Palette(base, codeColor, codeBackground, linkColor, boldColor, commandTints, commands, onLinkClick, agentLinkIcons)
         return buildAnnotatedString { appendInline(text, palette, insideLink = false, offset = 0) }
     }
 
@@ -231,6 +237,7 @@ object InlineMarkdown {
             }
             val listener = p.onLinkClick?.let { click -> LinkInteractionListener { click(target) } }
             withLink(LinkAnnotation.Url(url = target, styles = p.link, linkInteractionListener = listener)) {
+                if (p.agentLinkIcons && AgentLink.parse(target) != null) appendInlineContent(AgentLinkIcon.id(target))
                 appendInline(label, p, insideLink = true, offset + labelAt)
             }
         }
@@ -749,8 +756,10 @@ internal fun InlineText(text: String, style: TextStyle, color: Color, modifier: 
             boldColor = colors.textPrimary,
             onLinkClick = openLink,
             commandTints = commandTints,
+            agentLinkIcons = true,
         )
     }
+    val agentLinkIcons = remember(annotated, colors.link) { AgentLinkIcon.inlineContent(annotated, colors.link) }
     // Press and hold on an inline code span copies it, as the block's button does its code; on a link to an agent it
     // copies the link. The text, its layout and where its links go are kept in a plain holder read at press time, so
     // a paragraph still arriving — a new string every delta — neither recomposes nor restarts the gesture for it.
@@ -763,6 +772,7 @@ internal fun InlineText(text: String, style: TextStyle, color: Color, modifier: 
         style = style.copy(color = color),
         onTextLayout = { paragraph.layout = it },
         modifier = modifier.copyInlineSpanOnLongPress(paragraph, copy),
+        inlineContent = agentLinkIcons,
     )
 }
 

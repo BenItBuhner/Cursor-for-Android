@@ -971,26 +971,28 @@ class NewAgentViewModel(
      * under it, without [onOpen] ever running. For a composer with nothing of the app behind it to show the chat in
      * (the quick composer over the launcher), where an optimistic open would be an app opened on a chat that may
      * never exist.
+     *
+     * Returns whether the draft went out: false when it was refused on the spot, the composer as it was.
      */
-    fun launch(onOpen: (agentId: String) -> Unit, awaitServer: Boolean = false) {
+    fun launch(onOpen: (agentId: String) -> Unit, awaitServer: Boolean = false): Boolean {
         val s = _state.value
-        if (!s.canLaunch) return
+        if (!s.canLaunch) return false
         // A file rides the account's start, which this composer can only ask of Cursor's cloud (see AgentRepository.startWithFiles).
         if (s.files.isNotEmpty()) {
             if (!s.canAttachFiles) {
                 reportError(AgentRepository.FILES_NEED_EXTENDED)
-                return
+                return false
             }
             if (s.selectedDevice.type == EnvType.POOL || s.selectedDevice.type == EnvType.MACHINE) {
                 reportError(AgentRepository.FILES_NEED_CLOUD)
-                return
+                return false
             }
         }
         // Ask and Debug ride the account's start too: Cursor's cloud, or a machine's checkout the desktop's way.
         val accountMode = s.sentAccountMode
         if (accountMode != null && (s.selectedDevice.type == EnvType.POOL || (s.selectedDevice.type == EnvType.MACHINE && !s.startsFromCheckout))) {
             reportError(AgentRepository.modeNeedsCloud(accountMode))
-            return
+            return false
         }
         val nonce = launchNonce
         // Held only for as long as the draft takes to pack and put on screen, so a second tap cannot send it twice.
@@ -1100,6 +1102,7 @@ class NewAgentViewModel(
                 graph.attachmentUploads.forget(s.files.map { it.id })
             }
         }
+        return true
     }
 
     /**

@@ -22,6 +22,47 @@ class StagedAttachments internal constructor(internal val dir: File?, val attach
 }
 
 /**
+ * Where [AttachmentStore.commit] moved each set of copies, so a reader holding a path from before the move still finds
+ * the file. A bubble is drawn from its staged paths, and the launch or send can settle and move the files in the
+ * instant between the bubble taking a path and decoding it; the state that names the new paths comes a frame later,
+ * and a decode that failed on the old one would show the image as gone. Held for this process only, and bounded:
+ * a path is only ever stale for the moment it takes the new one to reach the screen.
+ */
+object AttachmentMoves {
+    private val moves = object : LinkedHashMap<String, String>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>) = size > MAX_MOVES
+    }
+
+    @Synchronized
+    internal fun record(from: File, to: File) {
+        moves[from.path] = to.path
+    }
+
+    /**
+     * [path], or where the file it named went — through every move since, a set re-staged and filed again included.
+     * [path] itself while it is still there, or when nothing that was moved is there instead.
+     */
+    fun resolve(path: String): String {
+        var file = File(path)
+        if (file.exists()) return path
+        synchronized(this) {
+            repeat(MAX_MOVES) {
+                val dir = file.parentFile?.path ?: return path
+                val to = moves[dir] ?: return path
+                file = File(to, file.name)
+                if (file.exists()) return file.path
+            }
+        }
+        return path
+    }
+
+    @Synchronized
+    internal fun clear() = moves.clear()
+
+    private const val MAX_MOVES = 256
+}
+
+/**
  * Device-local copies of the images attached to prompts.
  *
  * `GET /v0/agents/{id}/conversation` returns a `user_message` as text only: the `prompt.images` that went up with a
@@ -64,7 +105,7 @@ class AttachmentStore(context: Context) {
                 preview ?: runCatching { writeFile(file, dir, index) }.getOrNull()
             }
         if (written.isEmpty()) {
-            dir.deleteRecursively()
+            DiskSweep.deleteTree(dir)
             return@withContext StagedAttachments.EMPTY
         }
         StagedAttachments(dir, written)
@@ -78,10 +119,12 @@ class AttachmentStore(context: Context) {
         // The metadata goes in before the move so the run directory is complete the instant it appears.
         writeMeta(from, runId, moved)
         to.parentFile?.mkdirs()
-        if (to.exists()) to.deleteRecursively()
+        if (to.exists()) DiskSweep.deleteTree(to)
+        // Recorded before the move: a reader that finds the old path gone finds the new one already named.
+        AttachmentMoves.record(from, to)
         if (!from.renameTo(to)) {
             from.copyRecursively(to, overwrite = true)
-            from.deleteRecursively()
+            DiskSweep.deleteTree(from)
         }
         moved
     }
@@ -105,7 +148,7 @@ class AttachmentStore(context: Context) {
     }
 
     suspend fun discard(staged: StagedAttachments) = withContext(Dispatchers.IO) {
-        staged.dir?.deleteRecursively()
+        staged.dir?.let(DiskSweep::deleteTree)
         Unit
     }
 
@@ -115,7 +158,7 @@ class AttachmentStore(context: Context) {
      * reads its set back by [staged], and a week is past any wait that still delivers.
      */
     suspend fun sweepStaging(nowMillis: Long = System.currentTimeMillis(), maxAgeMs: Long = STAGING_MAX_AGE_MS) = withContext(Dispatchers.IO) {
-        staging.listFiles { f -> f.isDirectory }?.forEach { if (it.lastModified() < nowMillis - maxAgeMs) it.deleteRecursively() }
+        staging.listFiles { f -> f.isDirectory }?.forEach { if (it.lastModified() < nowMillis - maxAgeMs) DiskSweep.deleteTree(it) }
         Unit
     }
 
@@ -136,12 +179,13 @@ class AttachmentStore(context: Context) {
     }
 
     suspend fun delete(agentId: String) = withContext(Dispatchers.IO) {
-        agentDir(agentId).deleteRecursively()
+        DiskSweep.deleteTree(agentDir(agentId))
         Unit
     }
 
     suspend fun clear() = withContext(Dispatchers.IO) {
-        root.deleteRecursively()
+        DiskSweep.deleteTree(root)
+        AttachmentMoves.clear()
         Unit
     }
 

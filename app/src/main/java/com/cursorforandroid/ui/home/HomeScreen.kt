@@ -60,7 +60,10 @@ import com.cursorforandroid.domain.Repository
 import com.cursorforandroid.ui.agents.AgentListUiState
 import com.cursorforandroid.ui.agents.AgentRowActions
 import com.cursorforandroid.ui.agents.ChatRowMenu
+import com.cursorforandroid.ui.components.ComposerAnchor
 import com.cursorforandroid.ui.components.ComposerBox
+import com.cursorforandroid.ui.components.LocalSendMotion
+import com.cursorforandroid.ui.components.SendMotion
 import com.cursorforandroid.ui.components.CursorCard
 import com.cursorforandroid.ui.components.CursorHeader
 import com.cursorforandroid.ui.components.FadingLazyColumn
@@ -89,10 +92,13 @@ import com.cursorforandroid.ui.compose.LaunchRefusedHaptic
 import com.cursorforandroid.ui.compose.NewAgentUiState
 import com.cursorforandroid.ui.compose.NewAgentViewModel
 import com.cursorforandroid.ui.compose.rememberComposerMenuActions
+import com.cursorforandroid.ui.compose.rememberComposerVoice
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.util.AppClock
 import com.cursorforandroid.util.TimeFormat
+import androidx.compose.ui.unit.IntOffset
+import com.cursorforandroid.ui.components.onContextClick
 
 /**
  * The "New Chat" pane — the home of the official app: context selectors, the composer, then — as Settings › New chat
@@ -166,6 +172,7 @@ fun HomeScreen(
     )
     val pickFiles = rememberFilePicker(counts = counts, onPickedFiles = viewModel::addFiles, onError = viewModel::reportError)
     val plusMenu = rememberComposerMenuActions(graph, onPickMedia = pickMedia, onPickFiles = if (state.canAttachFiles) pickFiles else null)
+    val voice = rememberComposerVoice(graph)
     val share by graph.share.offer.collectAsStateWithLifecycle()
     LaunchedEffect(share?.generation, share?.target) {
         val draft = share ?: return@LaunchedEffect
@@ -187,6 +194,8 @@ fun HomeScreen(
         val centring = remember { PageCentring() }
         LaunchedEffect(recentState) { centring.follow(recentState) }
         var composerFocusRequests by remember { mutableIntStateOf(0) }
+        val sendMotion = LocalSendMotion.current
+        val composerAnchor = remember { ComposerAnchor() }
         LaunchedEffect(focusComposer) {
             if (focusComposer) {
                 recentState.scrollToItem(0)
@@ -210,7 +219,16 @@ fun HomeScreen(
                         value = state.prompt,
                         onValueChange = viewModel::setPrompt,
                         placeholder = NewChatHomeCopy.PLACEHOLDER,
-                        onSend = { viewModel.launch(onOpen = onLaunchOpen) },
+                        // The prompt is lifted off here and lands in the new chat's first bubble (see SendMotion).
+                        onSend = {
+                            val flight = sendMotion?.depart(composerAnchor.takeoff(), state.prompt, holdMillis = SendMotion.LaunchHoldMillis)
+                            val went = viewModel.launch(onOpen = { agentId ->
+                                sendMotion?.bind(flight, agentId)
+                                onLaunchOpen(agentId)
+                            })
+                            if (!went) sendMotion?.cancel(flight)
+                        },
+                        anchor = composerAnchor,
                         canSend = state.canLaunch,
                         isSending = state.isLaunching,
                         minLines = 3,
@@ -237,6 +255,7 @@ fun HomeScreen(
                         currentModel = state.modelChoice,
                         onPickModel = { viewModel.selectModel(it.model, it.variant) },
                         focusRequests = composerFocusRequests,
+                        voice = voice,
                     )
                     state.error?.let { ComposerErrorLine(it, state.errorAsked, onDismiss = viewModel::dismissError) }
                 }
@@ -320,6 +339,7 @@ fun RecentChatRow(
     val agent = row.agent
     val shape = CursorTheme.shapes.xl
     var menuOpen by remember { mutableStateOf(false) }
+    var menuAt by remember { mutableStateOf<IntOffset?>(null) }
     val interaction = remember { MutableInteractionSource() }
     val haptics = rememberHaptics()
     Box(modifier) {
@@ -330,11 +350,12 @@ fun RecentChatRow(
                 if (actions != null) {
                     Modifier
                         .clip(shape)
+                        .onContextClick { at -> menuAt = at; menuOpen = true }
                         .combinedClickable(
                             interactionSource = interaction,
                             indication = ripple(color = colors.base),
                             onClick = onClick,
-                            onLongClick = { haptics.perform(Haptic.LongPress); menuOpen = true },
+                            onLongClick = { haptics.perform(Haptic.LongPress); menuAt = null; menuOpen = true },
                         )
                 } else {
                     Modifier.pressable(onClick, shape)
@@ -374,7 +395,7 @@ fun RecentChatRow(
             }
         }
     }
-        if (actions != null) ChatRowMenu(row = row, expanded = menuOpen, onDismiss = { menuOpen = false }, actions = actions)
+        if (actions != null) ChatRowMenu(row = row, expanded = menuOpen, onDismiss = { menuOpen = false }, actions = actions, at = menuAt)
     }
 }
 

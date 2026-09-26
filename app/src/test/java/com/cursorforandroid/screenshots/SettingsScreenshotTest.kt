@@ -21,6 +21,8 @@ import androidx.compose.ui.test.isNotEnabled
 import androidx.compose.ui.test.isOff
 import androidx.compose.ui.test.isOn
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
@@ -161,13 +163,13 @@ class SettingsScreenshotTest {
 
     /** The whole list at once, on a canvas tall enough to hold it: the account first and the disclaimer last. */
     @Test
-    @Config(sdk = [35], qualifiers = "w411dp-h1900dp-night-420dpi")
+    @Config(sdk = [35], qualifiers = "w411dp-h2050dp-night-420dpi")
     fun settingsEssentials() {
         essentials(ThemeMode.Dark, "65_settings_essentials")
     }
 
     @Test
-    @Config(sdk = [35], qualifiers = "w411dp-h1900dp-notnight-420dpi")
+    @Config(sdk = [35], qualifiers = "w411dp-h2050dp-notnight-420dpi")
     fun settingsEssentialsLight() {
         essentials(ThemeMode.Light, "160_settings_essentials_light")
     }
@@ -239,9 +241,14 @@ class SettingsScreenshotTest {
         composeSettings()
         scrollToBottom()
         compose.onNode(hasTestTag(ExtendedModeTags.TOGGLE) and isOff()).assertIsDisplayed()
-        // The engine beside the switch, dimmed and off, saying why it does nothing yet: default mode's row as it always was.
-        compose.onNodeWithText(ExtendedModeCopy.NEEDS_MODE).assertIsDisplayed()
+        // The engine beside the switch, dimmed and off, saying why it does nothing yet: default mode's row as it always
+        // was. Voice input is no switch of its own, so nothing else waits on the mode here.
+        compose.onAllNodesWithText(ExtendedModeCopy.NEEDS_MODE).assertCountEquals(1)
         compose.onNodeWithTag(ExtendedModeTags.ENGINE_TOGGLE).assertIsNotEnabled().assertIsOff()
+        // The one Experimental switch left is background live sync; voice input has none.
+        compose.onAllNodesWithText("Experimental").assertCountEquals(1)
+        compose.onAllNodesWithText(SettingsCopy.LIVE_SYNC).assertCountEquals(1)
+        compose.onAllNodesWithText("Voice input").assertCountEquals(0)
         capture("66_settings_extended_off")
     }
 
@@ -256,6 +263,11 @@ class SettingsScreenshotTest {
         compose.onNodeWithText(ExtendedModeCopy.ENGINE_DETAIL).assertIsDisplayed()
         compose.onNodeWithTag(ExtendedModeTags.ENGINE_TOGGLE).assertIsEnabled()
         assertThat(runBlocking { graph.extendedMode.engine() }).isEqualTo(TranscriptEngine.BETA)
+        // Voice input comes with the mode, in the composers.
+        // The one Experimental switch left is background live sync; voice input has none.
+        compose.onAllNodesWithText("Experimental").assertCountEquals(1)
+        compose.onAllNodesWithText(SettingsCopy.LIVE_SYNC).assertCountEquals(1)
+        compose.onAllNodesWithText("Voice input").assertCountEquals(0)
         capture("67_settings_extended_on")
     }
 
