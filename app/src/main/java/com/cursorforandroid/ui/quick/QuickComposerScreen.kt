@@ -38,6 +38,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.local.DraftStore
 import com.cursorforandroid.data.repo.SessionState
+import com.cursorforandroid.domain.ModelChoice
 import com.cursorforandroid.domain.SlashCatalog
 import com.cursorforandroid.share.ShareTarget
 import com.cursorforandroid.ui.components.AttachmentCounts
@@ -170,7 +171,8 @@ private fun QuickComposer(
         onRetryFile = viewModel::retryFile,
         onAttachmentError = viewModel::reportError,
         onDismissError = viewModel::dismissError,
-        onModePill = { pill -> viewModel.setPlanMode(pill == ModePills.Pill.Plan) },
+        onModePill = viewModel::setModePill,
+        onPickModel = { viewModel.selectModel(it.model, it.variant) },
         onRepo = { repoSheet = true },
         onBranch = { branchSheet = true },
         onDevice = { deviceSheet = true },
@@ -253,6 +255,7 @@ fun QuickComposerSheet(
     onAttachmentError: (String) -> Unit = {},
     onDismissError: () -> Unit = {},
     onModePill: (ModePills.Pill?) -> Unit = {},
+    onPickModel: ((ModelChoice) -> Unit)? = null,
     onRepo: () -> Unit = {},
     onBranch: () -> Unit = {},
     onDevice: () -> Unit = {},
@@ -297,8 +300,12 @@ fun QuickComposerSheet(
             sendHint = state.uploadHint,
             modelLabel = state.modelLabel,
             onModel = onModel,
-            modePill = if (state.planMode) ModePills.Pill.Plan else null,
+            modePill = state.modePill,
             onModePill = onModePill,
+            extendedModes = state.extendedModes,
+            models = state.models,
+            currentModel = state.modelChoice,
+            onPickModel = onPickModel,
             focusOnOpen = true,
             voice = voice,
         )

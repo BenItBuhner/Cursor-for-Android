@@ -803,6 +803,10 @@ fun ConversationScreen(
                 modePill = picker.modePill,
                 onModePill = viewModel::setModePill,
                 extendedModes = capabilities.agentModes && !isDemo,
+                // The `/` popover's models switch the next follow-up's model, as the chip's picker does.
+                models = picker.models,
+                currentModel = picker.selected,
+                onPickModel = if (archived) null else ({ viewModel.selectModel(it.model, it.variant) }),
                 focusRequests = composerFocusRequests,
                 // An archived chat takes no follow-ups, so there is nothing to dictate into.
                 voice = voice.takeUnless { archived },
