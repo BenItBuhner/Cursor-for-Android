@@ -3,9 +3,6 @@ package com.cursorforandroid.ui.conversation
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Rect as AndroidRect
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -199,7 +196,7 @@ class ToolDropdownScrollFlickerTest {
      * Runs [scroll] on a stopped clock and draws [FRAMES] frames after it, each watched row's ink measured against
      * [rest] — what it had at rest — on every one. Returns the worst frame of each row.
      */
-    private fun watch(label: String, rest: Map<String, Int>, strip: MutableList<Pair<String, Bitmap>>, scroll: () -> Unit): List<Dip> {
+    private fun watch(label: String, rest: Map<String, Int>, scroll: () -> Unit): List<Dip> {
         val worst = mutableMapOf<String, Dip>()
         scroll()
         for (frame in 1..FRAMES) {
@@ -210,7 +207,7 @@ class ToolDropdownScrollFlickerTest {
                 val ratio = ink(bitmap, area).toFloat() / base
                 if (ratio < (worst[name]?.ratio ?: Float.MAX_VALUE)) worst[name] = Dip(name, frame, ratio)
             }
-            if (frame in STRIP_FRAMES) strip += "$label +${frame * 16}ms" to bitmap
+            keep(bitmap, "$label +${frame * 16}ms")
         }
         return worst.values.sortedBy { it.ratio }
     }
@@ -236,13 +233,12 @@ class ToolDropdownScrollFlickerTest {
         val rest = watched().mapValues { (_, area) -> ink(atRest, area) }.filterValues { it > 0 }
         assertWithMessage("step rows on screen at rest: ${rest.keys}").that(rest.size).isAtLeast(4)
 
-        val strip = mutableListOf("at rest, following" to atRest)
+        keep(atRest, "at rest, following")
         // Up off the bottom: the list pins what is on screen from the scroll's first pixel.
-        val up = watch("up", rest, strip) { scrollBy(-SCROLL_PX) }
+        val up = watch("up", rest) { scrollBy(-SCROLL_PX) }
         val pinned = following()
         // Back down to the bottom: the scroll comes to rest there and the list follows again.
-        val down = watch("down", rest, strip) { scrollBy(SCROLL_PX * 4) }
-        writeStrip(strip)
+        val down = watch("down", rest) { scrollBy(SCROLL_PX * 4) }
         assertThat(pinned).isFalse()
         assertThat(following()).isTrue()
 
@@ -312,27 +308,18 @@ class ToolDropdownScrollFlickerTest {
         }
     }
 
-    /** When `DROPDOWN_FLICKER_FRAMES` names a file, the frames around each switch as one strip. */
-    private fun writeStrip(frames: List<Pair<String, Bitmap>>) {
-        val out = System.getenv("DROPDOWN_FLICKER_FRAMES")?.takeIf { it.isNotBlank() }?.let(::File) ?: return
+    private val frameDir = System.getenv("DROPDOWN_FLICKER_FRAMES")?.takeIf { it.isNotBlank() }?.let(::File)
+    private var framesKept = 0
+
+    /** When `DROPDOWN_FLICKER_FRAMES` names a directory, [bitmap]'s transcript as the next numbered frame there, [label] beside it. */
+    private fun keep(bitmap: Bitmap, label: String) {
+        val dir = frameDir ?: return
+        dir.mkdirs()
         val list = listBounds()
-        val crop = AndroidRect(0, list.top.toInt(), frames[0].second.width, list.bottom.toInt())
-        val scale = 0.4f
-        val w = (crop.width() * scale).toInt()
-        val h = (crop.height() * scale).toInt()
-        val gap = 12
-        val caption = 40
-        val strip = Bitmap.createBitmap(frames.size * (w + gap) + gap, h + caption + gap * 2, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(strip)
-        canvas.drawColor(0xFF101010.toInt())
-        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFEDEDED.toInt(); textSize = 20f }
-        frames.forEachIndexed { i, (label, bitmap) ->
-            val x = gap + i * (w + gap)
-            canvas.drawBitmap(bitmap, crop, AndroidRect(x, gap, x + w, gap + h), Paint(Paint.FILTER_BITMAP_FLAG))
-            canvas.drawText(label, x.toFloat(), (gap + h + 28).toFloat(), text)
-        }
-        out.parentFile?.mkdirs()
-        out.outputStream().use { strip.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val crop = Bitmap.createBitmap(bitmap, 0, list.top.toInt(), bitmap.width, (list.bottom - list.top).toInt())
+        val n = framesKept++
+        File(dir, "frame-%03d.png".format(n)).outputStream().use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(dir, "labels.txt").appendText("%03d %s\n".format(n, label))
     }
 
     private companion object {
@@ -340,7 +327,6 @@ class ToolDropdownScrollFlickerTest {
         const val STRETCH = "${10 + TURNS - 1} files"
         const val SCROLL_PX = 160f
         const val FRAMES = 48
-        val STRIP_FRAMES = setOf(1, 3, 6, 12, 24)
         const val LIT = 90
         const val STEP_FLOOR = 0.8f
         const val CAPTION_LIT = 40
