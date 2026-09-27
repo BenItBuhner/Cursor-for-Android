@@ -19,7 +19,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * while the app is on screen, so opening one paints the turn as it stands and reads nothing.
  *
  * Which chats ([select]): every running chat, the Project coordinators whose workers are running (their reports
- * land as coordinator turns), and the few chats opened last — up to [maxHeld], coordinators first. A chat that
+ * land as coordinator turns), and the few chats opened last — up to [maxHeld], coordinators first, the chats opened
+ * last always among them. With more running chats than that, the newest are held and a held one keeps its hold for as
+ * long as it runs, rather than giving it up to whichever row the last refresh moved above it. A chat that
  * stops running keeps its hold for [lingerMs], for the coordinator's next turn and the steer that follows a finish.
  * Idle chats hold nothing open: the sidebar's own refresh names the chat that starts running, and it is held then.
  *
@@ -108,7 +110,17 @@ class LiveSync(
             .sortedByDescending { byId[it]?.updatedAtMillis ?: 0L }
         val coordinators = running.mapNotNull { it.parent?.id }.distinct().filter { it in byId } +
             running.filter { it.isProjectRoot }.map { it.id }
-        return (coordinators + running.map { it.id } + recentIds.filter { it in byId } + lingering)
+        val recentShown = recentIds.filter { it in byId }
+        // The chats opened last keep their places however many run: with more running chats than holds, they were
+        // the first cut, and the chat the reader just left was read again in full on the way back to it.
+        val reserved = (coordinators + recentShown).distinct()
+        val runningBudget = (maxHeld - reserved.size).coerceAtLeast(0)
+        // A running chat held already keeps its hold while it runs: running rows trade places in the list at every
+        // refresh, and following the newest twenty dropped a turn's stream and loaded another chat for each swap.
+        val heldNow = synchronized(this) { held.toSet() }
+        val runningIds = running.map { it.id }.filter { it !in reserved }
+        val runningKept = (runningIds.filter { it in heldNow } + runningIds.filter { it !in heldNow }).take(runningBudget).toSet()
+        return (coordinators + runningIds.filter { it in runningKept } + recentShown + lingering)
             .distinct()
             .take(maxHeld)
     }
