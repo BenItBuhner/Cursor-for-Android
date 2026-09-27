@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -164,6 +165,8 @@ class LiveRunHub(
         val watchersChanged = MutableStateFlow(0)
         /** Between two looks (see [lookBaseMs]), with no connection open; for [stats]. */
         @Volatile var resting = false
+        /** Set by [lookNow]: the next pause between looks (or the one under way) ends at once. */
+        val lookRequested = MutableStateFlow(false)
 
         /** True while any subscriber is watched, or none has said (a replay riding along, a release's grace). */
         fun watched(): Boolean = synchronized(entries) { watchers.isEmpty() || watchers.any { it.value } }
@@ -657,12 +660,26 @@ class LiveRunHub(
 
     private fun lookDelay(looks: Int): Long = (lookBaseMs shl looks.coerceIn(0, 10)).coerceAtMost(lookMaxMs)
 
+    /**
+     * Ends the pause of every run of [agentId] followed between looks, so each looks in now rather than after up to
+     * [lookMaxMs]: the agent list's word that the agent stopped running reaches a chat nobody watches at once, where
+     * the next look would have left it saying running for half a minute. Costs one look when the word was wrong.
+     */
+    fun lookNow(agentId: String) {
+        val waiting = synchronized(entries) { entries.values.filter { it.agentId == agentId && it.job?.isActive == true } }
+        waiting.forEach { it.lookRequested.value = true }
+    }
+
     /** Waits out a pause between looks; true when it ended because someone watches the run now. */
     private suspend fun rest(entry: Entry, pauseMs: Long): Boolean {
         entry.resting = true
         try {
-            return withTimeoutOrNull(pauseMs) { entry.watchedChanges().first { it } } != null
+            val watched = withTimeoutOrNull(pauseMs) {
+                merge(entry.watchedChanges().filter { it }, entry.lookRequested.filter { it }.map { false }).first()
+            }
+            return watched == true
         } finally {
+            entry.lookRequested.value = false
             entry.resting = false
         }
     }

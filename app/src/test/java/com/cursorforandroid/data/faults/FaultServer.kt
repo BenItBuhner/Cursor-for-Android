@@ -746,6 +746,8 @@ class FaultServer(
         logs[runId] = logs[runId].orEmpty() + ("result" to """{"runId":"$runId","status":"FINISHED","text":"","durationMs":$durationMs}""")
         agents[agentId] = agent.copy(status = "IDLE", updatedAt = endedAt)
         v0[agentId]?.let { v0[agentId] = it.copy(status = "FINISHED") }
+        // The account's list says the turn is over too; still saying running, it kept a chat at RUNNING in Extended mode.
+        composers[agentId]?.takeIf { it.running }?.let { composers[agentId] = it.copy(running = false) }
         return if (autoDeliver) deliverNext(agentId, nextLog) else null
     }
 

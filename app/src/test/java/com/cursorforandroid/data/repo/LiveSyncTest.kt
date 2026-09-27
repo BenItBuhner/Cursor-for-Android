@@ -105,6 +105,34 @@ class LiveSyncTest {
     }
 
     @Test
+    fun `the chats opened last are held however many chats run`() {
+        val sync = sync(Recorder(), max = 3)
+        sync.opened("bc-read")
+        val list = (1..10).map { agent("bc-$it", running = true, updatedAgo = it * 1_000L) } + agent("bc-read")
+
+        assertThat(sync.select(list)).containsExactly("bc-1", "bc-2", "bc-read").inOrder()
+    }
+
+    @Test
+    fun `a held running chat keeps its hold while rows that moved above it run too, and gives it up when it stops`() = runBlocking {
+        val target = Recorder()
+        val sync = sync(target, max = 3)
+        val agents = MutableStateFlow((1..3).map { agent("bc-$it", running = true, updatedAgo = it * 1_000L) })
+        sync.start(agents, MutableStateFlow(true), MutableStateFlow(true))
+        until { target.held == setOf("bc-1", "bc-2", "bc-3") }
+
+        // Two more chats start and every row moves: the list order is new, the running set held is not.
+        agents.value = (4..5).map { agent("bc-$it", running = true, updatedAgo = 100L) } + (1..3).map { agent("bc-$it", running = true, updatedAgo = 500L + it) }
+        delay(300)
+        assertThat(target.held).containsExactly("bc-1", "bc-2", "bc-3")
+        assertThat(target.calls.filter { it.startsWith("release") }).isEmpty()
+
+        // One stops: a chat still running takes its place, the stopped one lingering behind it.
+        agents.value = (4..5).map { agent("bc-$it", running = true, updatedAgo = 100L) } + listOf(agent("bc-1", updatedAgo = 50L)) + (2..3).map { agent("bc-$it", running = true, updatedAgo = 500L + it) }
+        until { target.held == setOf("bc-2", "bc-3", "bc-4") }
+    }
+
+    @Test
     fun `new holds are taken one at a time, each after the last one's first load`() = runBlocking {
         val target = Recorder(autoSettle = false)
         val sync = sync(target)
