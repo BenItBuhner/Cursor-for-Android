@@ -537,7 +537,7 @@ class FollowUpRepository(
     private suspend fun awaitIdle(agentId: String) {
         while (true) {
             if (withTimeoutOrNull(idleSettleMs) { isIdle(agentId).first { it } } == null) {
-                settleRow(agentId)
+                settleRow(agentId, waited = true)
             } else if (isIdleNow(agentId)) {
                 return
             }
@@ -548,11 +548,16 @@ class FollowUpRepository(
      * Puts the row where the server has the agent — its record and its latest run, read now — and the open chat with
      * it. Best effort. A run the hub has seen end is over whatever the record read says: the record can be a moment
      * behind the stream, and a row put back to running by it would stay so, since the hub reports a run's end once.
+     * The chat's running state is then reconciled with the server (see [ConversationRepository.reconcileRunning]);
+     * with [waited] — the message has waited out another stretch on the agent — the account's word that the chat
+     * runs, found twice with nothing moving on the chat and no run under way, is taken for a turn the server no
+     * longer has (Bennett, 0.4.4: a coordinator's queue held for good behind a turn that had ended).
      */
-    private suspend fun settleRow(agentId: String) {
+    private suspend fun settleRow(agentId: String, waited: Boolean = false) {
         if (settleFromHub(agentId)) return
         agents.loadDetail(agentId)
         settleFromHub(agentId)
+        if (!isIdleNow(agentId)) conversations.reconcileRunning(agentId, waited = waited)
         conversations.revalidate(agentId)
     }
 
@@ -783,7 +788,7 @@ class FollowUpRepository(
                 val ready = combine(e.state, isIdle(e.agentId)) { s, idle -> s.restored && idle && s.headMayGo }
                 if (withTimeoutOrNull(idleSettleMs) { ready.first { it } } == null) {
                     // Only the agent stands in the way: make sure the row is not behind the server about that.
-                    if (e.state.value.let { it.restored && it.headMayGo }) settleRow(e.agentId)
+                    if (e.state.value.let { it.restored && it.headMayGo }) settleRow(e.agentId, waited = true)
                     continue
                 }
                 // A message the server refused as busy waits out its pause first — the card saying so the whole
