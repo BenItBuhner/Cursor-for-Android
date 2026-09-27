@@ -120,6 +120,8 @@ import com.cursorforandroid.domain.SlashCatalog
 import com.cursorforandroid.domain.SlashCommand
 import com.cursorforandroid.domain.SlashCommands
 import com.cursorforandroid.ui.shortcuts.LocalKeyboardShortcuts
+import com.cursorforandroid.ui.shortcuts.LocalShortcutBindings
+import com.cursorforandroid.ui.shortcuts.Shortcut
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.util.ioThenMain
@@ -375,6 +377,7 @@ fun ComposerBox(
     // The app's shortcuts are read before this field sees a key; while the popover is up, Esc, Ctrl+N and Ctrl+K are
     // its (see `popoverKeys`) and not the shell's.
     val keyboardShortcuts = LocalKeyboardShortcuts.current
+    val shortcutBindings = LocalShortcutBindings.current
     if (slashOpen && keyboardShortcuts != null) {
         DisposableEffect(keyboardShortcuts) {
             val release = keyboardShortcuts.popoverOpened()
@@ -601,7 +604,14 @@ fun ComposerBox(
                         .onSizeChanged { if (expansion.progress.value == 0f) expansion.fieldPx = it.height }
                         .onPhysicalKey { physicalKeys = true }
                         .onPreviewKeyEvent { event ->
-                            val chord = event.type == KeyEventType.KeyDown && event.isCtrlPressed && event.isShiftPressed && !event.isAltPressed && event.key == Key.E
+                            val chord = event.type == KeyEventType.KeyDown && shortcutBindings.matches(
+                                Shortcut.ExpandComposer,
+                                event.nativeKeyEvent.keyCode,
+                                event.isCtrlPressed,
+                                event.isShiftPressed,
+                                event.isAltPressed,
+                                event.isMetaPressed,
+                            )
                             if (chord && expandOffered) expansion.toggle()
                             chord && expandOffered
                         }

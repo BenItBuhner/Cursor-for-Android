@@ -78,8 +78,24 @@ class ShortcutKeymapTest {
     }
 
     @Test
+    fun `a moved shortcut answers on its new keys and no longer on its old ones`() {
+        val moved = ShortcutBindings.Defaults.assign(Shortcut.ToggleSidebar, KeyChord(KeyEvent.KEYCODE_S, alt = true))
+        assertThat(ShortcutKeymap.action(KeyEvent.KEYCODE_S, ctrl = false, shift = false, alt = true, bindings = moved)).isEqualTo(ShortcutAction.ToggleSidebar)
+        assertThat(ShortcutKeymap.action(KeyEvent.KEYCODE_B, ctrl = true, shift = false, bindings = moved)).isNull()
+        assertThat(ShortcutKeymap.action(KeyEvent.KEYCODE_TAB, ctrl = true, shift = false, bindings = moved)).isEqualTo(ShortcutAction.SwitchNext)
+        assertThat(ShortcutKeymap.action(KeyEvent.KEYCODE_2, ctrl = true, shift = false, bindings = moved)).isEqualTo(ShortcutAction.OpenRailItem(1))
+    }
+
+    @Test
+    fun `the cheat sheet shows a moved shortcut on its new keys`() {
+        val moved = ShortcutBindings.Defaults.assign(Shortcut.CatchUp, KeyChord.ctrl(KeyEvent.KEYCODE_U))
+        val line = ShortcutsCopy.groups(moved).flatMap { it.lines }.single { it.shortcut == Shortcut.CatchUp }
+        assertThat(line.chords).containsExactly(listOf("Ctrl", "U"))
+    }
+
+    @Test
     fun `the cheat sheet lists every chord the keymap answers`() {
-        val listed = ShortcutsCopy.groups.flatMap { it.lines }.flatMap { it.chords }.map { it.joinToString("+") }
+        val listed = ShortcutsCopy.groups(ShortcutBindings.Defaults).flatMap { it.lines }.flatMap { it.chords }.map { it.joinToString("+") }
         assertThat(listed).containsAtLeast(
             "Ctrl+F", "Ctrl+K", "Ctrl+Tab", "Ctrl+B", "Ctrl+Shift+B", "Ctrl+1 … 9", "Ctrl+0", "Ctrl+N", "Ctrl+Shift+N",
             "Ctrl+,", "Ctrl+/", "Ctrl+Shift+?", "Esc", "Ctrl+R", "Ctrl+Shift+R", "Ctrl+Shift+E",

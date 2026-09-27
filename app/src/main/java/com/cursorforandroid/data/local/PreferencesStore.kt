@@ -28,6 +28,7 @@ import com.cursorforandroid.domain.LocalAgentState
 import com.cursorforandroid.domain.SignInMethod
 import com.cursorforandroid.domain.TranscriptEngine
 import com.cursorforandroid.ui.panel.PaneWidthClass
+import com.cursorforandroid.ui.shortcuts.ShortcutBindings
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CoroutineScope
@@ -169,6 +170,8 @@ class PreferencesStore(
         val liveSync = booleanPreferencesKey("live_sync")
         /** Settings › New chat page: what the New Chat pane lists under its composer (`recent` / `projects`); absent is Recent. */
         val newChatHome = stringPreferencesKey("new_chat_home")
+        /** Settings › Keyboard shortcuts: the shortcuts moved off their default keys (see `ShortcutBindings.encode`); absent is every default. */
+        val shortcutBindings = stringPreferencesKey("keyboard_shortcut_bindings")
         /** The transcript notices closed over each chat's composer: `agentId -> identities` (see `LoadNotice.identity`). */
         val dismissedNotices = stringPreferencesKey("dismissed_notices")
         /** Settings › Confirm before stopping; absent reads as on (see [confirmStop]). */
@@ -439,6 +442,17 @@ class PreferencesStore(
     val newChatHome: Flow<NewChatHome> = data.map { NewChatHome.parse(it[Keys.newChatHome]) }.distinctUntilChanged()
 
     suspend fun setNewChatHome(home: NewChatHome) = edit { it[Keys.newChatHome] = home.key }
+
+    /**
+     * Settings › Keyboard shortcuts: the keys each hardware-keyboard shortcut is on (see [ShortcutBindings]). The
+     * defaults until one is moved; a device preference like the theme, kept across sign-outs.
+     */
+    val shortcutBindings: Flow<ShortcutBindings> = data.map { ShortcutBindings.parse(it[Keys.shortcutBindings]) }.distinctUntilChanged()
+
+    suspend fun setShortcutBindings(bindings: ShortcutBindings) = edit { p ->
+        val encoded = bindings.encode()
+        if (encoded.isEmpty()) p.remove(Keys.shortcutBindings) else p[Keys.shortcutBindings] = encoded
+    }
 
     /**
      * The share of a wide window the conversation panel stands at beside the chat, as last dragged; null until it has

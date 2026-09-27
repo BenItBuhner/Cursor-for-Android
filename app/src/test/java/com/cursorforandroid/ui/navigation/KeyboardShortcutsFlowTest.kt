@@ -40,12 +40,16 @@ import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.ui.agents.AgentRowTags
 import com.cursorforandroid.ui.settings.KeyboardShortcutsTags
 import com.cursorforandroid.ui.settings.SettingsTags
+import com.cursorforandroid.ui.shortcuts.KeyChord
 import com.cursorforandroid.ui.shortcuts.KeyboardShortcuts
 import com.cursorforandroid.ui.shortcuts.LocalKeyboardShortcuts
 import com.cursorforandroid.ui.shortcuts.PaletteTags
+import com.cursorforandroid.ui.shortcuts.Shortcut
+import com.cursorforandroid.ui.shortcuts.ShortcutBindings
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -313,6 +317,63 @@ class KeyboardShortcutsFlowTest {
         listOf("Search chats and Projects", "Switch between recent chats", "Check for new messages", "Reload transcript").forEach { label ->
             assertTrue(label, exists(hasAnyAncestor(hasTestTag(KeyboardShortcutsTags.PAGE)) and hasText(label, substring = true)))
         }
+    }
+
+    private fun openShortcutsPage() {
+        chord(KeyEvent.KEYCODE_COMMA)
+        compose.waitUntil(20_000) { onScreen("Appearance") }
+        compose.onNodeWithTag(SettingsTags.KEYBOARD_SHORTCUTS_ROW).performScrollTo().performClick()
+        compose.waitUntil(20_000) { exists(hasTestTag(KeyboardShortcutsTags.PAGE)) }
+    }
+
+    private fun back() {
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+    }
+
+    private fun savedBindings() = runBlocking { graph.prefs.shortcutBindings.first() }
+
+    @Test
+    fun `a shortcut moved in Settings answers on its new keys, and its old keys no longer do anything`() {
+        showShell(wide = true)
+        openShortcutsPage()
+        compose.onNodeWithTag(KeyboardShortcutsTags.row(Shortcut.ToggleSidebar)).performScrollTo().performClick()
+        compose.waitUntil(5_000) { exists(hasTestTag(KeyboardShortcutsTags.CAPTURE)) }
+        // Pressed for the capture, Ctrl+J is not also read as anything else.
+        chord(KeyEvent.KEYCODE_J)
+        compose.waitUntil(5_000) { !exists(hasTestTag(KeyboardShortcutsTags.CAPTURE)) }
+        compose.waitUntil(5_000) { savedBindings().chords(Shortcut.ToggleSidebar) == listOf(KeyChord.ctrl(KeyEvent.KEYCODE_J)) }
+        assertTrue(compose.onAllNodes(hasTestTag(KeyboardShortcutsTags.reset(Shortcut.ToggleSidebar)), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+
+        back()
+        back()
+        compose.waitUntil(20_000) { displayed(hasContentDescription("Search chats")) }
+        chord(KeyEvent.KEYCODE_B)
+        compose.waitForIdle()
+        assertTrue(displayed(hasContentDescription("Search chats")))
+        chord(KeyEvent.KEYCODE_J)
+        compose.waitUntil(10_000) { !displayed(hasContentDescription("Search chats")) }
+        chord(KeyEvent.KEYCODE_J)
+        compose.waitUntil(10_000) { displayed(hasContentDescription("Search chats")) }
+    }
+
+    @Test
+    fun `keys another shortcut is on ask to swap or replace, and a swap leaves each on the other's keys`() {
+        showShell(wide = false)
+        openShortcutsPage()
+        compose.onNodeWithTag(KeyboardShortcutsTags.row(Shortcut.CatchUp)).performScrollTo().performClick()
+        compose.waitUntil(5_000) { exists(hasTestTag(KeyboardShortcutsTags.CAPTURE)) }
+        chord(KeyEvent.KEYCODE_B)
+        compose.waitUntil(5_000) { onScreen("Ctrl+B is already on “Show or hide the sidebar”.") }
+        assertTrue(onScreen("Swap moves it to Ctrl+R. Replace leaves it with no shortcut."))
+        assertEquals(ShortcutBindings.Defaults, savedBindings())
+
+        compose.onNodeWithTag(KeyboardShortcutsTags.SWAP).performScrollTo().performClick()
+        compose.waitUntil(5_000) { savedBindings().chords(Shortcut.CatchUp) == listOf(KeyChord.ctrl(KeyEvent.KEYCODE_B)) }
+        assertEquals(listOf(KeyChord.ctrl(KeyEvent.KEYCODE_R)), savedBindings().chords(Shortcut.ToggleSidebar))
+
+        compose.onNodeWithTag(KeyboardShortcutsTags.RESET_ALL).performScrollTo().performClick()
+        compose.waitUntil(5_000) { savedBindings() == ShortcutBindings.Defaults }
     }
 
     @Test
