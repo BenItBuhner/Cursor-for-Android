@@ -51,6 +51,20 @@ class PreferencesStoreTest {
     }
 
     @Test
+    fun `keep chats live is on for whoever never touched it, and a switch turned off stays off`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertThat(PreferencesStore(context).liveSync.first()).isTrue()
+        // What an older build wrote for someone who turned the experiment off, read by this one — sign-outs included.
+        PreferencesStore(context).setLiveSync(false)
+        val prefs = PreferencesStore(context)
+        assertThat(prefs.liveSync.first()).isFalse()
+        prefs.clearSession()
+        assertThat(prefs.liveSync.first()).isFalse()
+        prefs.setLiveSync(true)
+        assertThat(prefs.liveSync.first()).isTrue()
+    }
+
+    @Test
     fun `signing out drops the account's state and keeps the device's`() = runBlocking {
         val prefs = PreferencesStore(ApplicationProvider.getApplicationContext())
         prefs.setDemoMode(true)
