@@ -363,18 +363,23 @@ enum class SendLanding {
 /**
  * How a flight's target is drawn at rest, for the copy to arrive at it: its surface (null: a bubble's, from the theme)
  * and the fade it is drawn at, its text as laid out (null: measured to the box, in the bubble's style) and the colour
- * of that text (null: the theme's, at [fade]). Each part says what it knows; [merge] keeps both.
+ * of that text (null: the theme's, at [fade]). Each part says what it knows; [merge] keeps both. A bubble whose fade
+ * moves while a copy lands on it (its message filed mid-flight, coming up from its sending fade) says so with
+ * [fadeNow], read on every frame the flight is drawn, so the copy arrives at the bubble as it is then.
  */
 @Immutable
 class SendTargetLook(
     val surface: SendSurface? = null,
-    val fade: Float = 1f,
+    private val restingFade: Float = 1f,
     val layout: (() -> TextLayoutResult?)? = null,
     val textColor: Color? = null,
+    private val fadeNow: (() -> Float)? = null,
 ) {
+    val fade: Float get() = fadeNow?.invoke() ?: restingFade
+
     internal fun merge(part: SendTargetPart, other: SendTargetLook): SendTargetLook = when (part) {
-        SendTargetPart.Surface -> SendTargetLook(other.surface, other.fade, layout, textColor)
-        SendTargetPart.Text -> SendTargetLook(surface, fade, other.layout, other.textColor)
+        SendTargetPart.Surface -> SendTargetLook(other.surface, other.restingFade, layout, textColor, other.fadeNow)
+        SendTargetPart.Text -> SendTargetLook(surface, restingFade, other.layout, other.textColor, fadeNow)
     }
 
     companion object {
@@ -513,7 +518,7 @@ internal fun Modifier.sendTarget(
     part: SendTargetPart,
     fade: Float = 1f,
     landing: SendLanding = SendLanding.Bubble,
-    look: SendTargetLook = if (fade == 1f) SendTargetLook.Bubble else SendTargetLook(fade = fade),
+    look: SendTargetLook = if (fade == 1f) SendTargetLook.Bubble else SendTargetLook(restingFade = fade),
 ): Modifier {
     if (motion == null) return this
     val placed = onPlaced { motion.place(id, text, landing, part, it, look) }

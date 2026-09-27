@@ -351,6 +351,9 @@ fun ConversationScreen(
     // behind one summary line (see [TranscriptRows]); the newest stretch reads "Working" while the run still
     // writes. Both come presented, a turn at a time, off the main thread (see [TranscriptPresenter]).
     val items = presentedTranscript.items
+    // A sent message's bubble comes up from its sending fade on the screen's clock, over the server's copy of it too.
+    val sentFades = rememberSentFades(agentId)
+    sentFades.look(items)
     val isActive = conversation.runStatus?.isActive == true || conversation.isStreaming
     LaunchedEffect(isActive) { if (!isActive) stopConfirmation.dismissFor(agentId) }
     ChatHaptics(agentId, conversation.runStatus, outgoing)
@@ -625,6 +628,7 @@ fun ConversationScreen(
                 LocalTranscriptControls provides transcriptControls,
                 LocalDisclosureTaps provides transcriptScroll,
                 LocalOpenStretches provides openStretches,
+                LocalSentFades provides sentFades,
             ) {
                 LazyColumn(
                     state = listState,
