@@ -619,7 +619,7 @@ private fun AttachmentFace(look: SendAttachment) {
     val type = CursorTheme.typography
     val shape = CursorTheme.shapes.lg
     if (look.media) {
-        // A bubble's thumbnail and a queued row's tile: the corners tighten with the copy, as a file's card gives way to its tile.
+        // A bubble's thumbnail and a queued row's tile: the corners tighten as the copy comes down to the tile's size.
         val tile = CursorTheme.shapes.sm
         val shape = remember(tile, shape) { NarrowingCorners(tile, shape) }
         Box(Modifier.fillMaxSize().cursorSurface(if (look.video) Color.Black else colors.fill, colors.stroke, shape), contentAlignment = Alignment.Center) {
@@ -668,15 +668,22 @@ private fun cardShare(width: Float, density: androidx.compose.ui.unit.Density): 
     ((width - TileUpTo.toPx()) / (CardFrom.toPx() - TileUpTo.toPx())).coerceIn(0f, 1f)
 }
 
-/** [small]'s corners at a tile's size, [large]'s from a card's, and between the two on the way: read from the size it is laid out at. */
+/**
+ * [small]'s corners at a queued row's tile, [large]'s from anything bigger — a composer chip, a bubble's thumbnail however
+ * narrow — and between the two on the way: read from the longer side it is laid out at.
+ */
 private class NarrowingCorners(private val small: Shape, private val large: Shape) : Shape {
     override fun createOutline(size: Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection, density: androidx.compose.ui.unit.Density): Outline {
         fun radius(shape: Shape) = (shape.createOutline(size, layoutDirection, density) as? Outline.Rounded)?.roundRect?.topLeftCornerRadius?.x ?: 0f
         val tight = radius(small)
-        val corner = tight + (radius(large) - tight) * cardShare(size.width, density)
+        val share = with(density) { ((maxOf(size.width, size.height) - TightUpTo.toPx()) / (RoundFrom.toPx() - TightUpTo.toPx())).coerceIn(0f, 1f) }
+        val corner = tight + (radius(large) - tight) * share
         return Outline.Rounded(RoundRect(Rect(Offset.Zero, size), CornerRadius(corner)))
     }
 }
+
+private val TightUpTo = 18.dp
+private val RoundFrom = 40.dp
 
 private val TileUpTo = 32.dp
 private val CardFrom = 72.dp

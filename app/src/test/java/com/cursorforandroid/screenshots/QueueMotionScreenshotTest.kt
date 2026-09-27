@@ -46,12 +46,19 @@ class QueueMotionScreenshotTest {
 
     private fun capture(name: String) = compose.onNodeWithTag(QueueMotionScene.Frame).captureRoboImage(File(outDir, "$name.png").path, RoborazziOptions())
 
+    /**
+     * On, a frame at a time, to the first frame the flight is [into] its way: counted from the flight's own progress
+     * rather than the clock, since the frame it starts on depends on what ran in the JVM before it.
+     */
+    private fun catchAt(flight: SendFlight, into: Float) {
+        while (flight.phase != SendFlight.Phase.Flying || flight.progress.value < into) scene.frames(16)
+    }
+
     /** The tap while the agent works, and the flight caught [into] its way to the row. */
     private fun sendAndCatch(into: Float): SendFlight {
         val flight = checkNotNull(scene.sendQueued(motion, "q-2"))
-        scene.frames(32)
-        assertThat(flight.phase).isEqualTo(SendFlight.Phase.Flying)
-        scene.frames((SendMotion.FlightMillis * into).toLong())
+        catchAt(flight, into)
+        assertThat(flight.targetId).isEqualTo("q-2")
         return flight
     }
 
@@ -60,7 +67,7 @@ class QueueMotionScreenshotTest {
         scene.queue += QueuedFollowUp("q-1", "Run the migration first", queuedAtMillis = 0L)
         scene.composerText = "Then reseed the fixtures and rerun the flaky suite"
         scene.show(motion)
-        sendAndCatch(into = 0.12f)
+        sendAndCatch(into = 0.15f)
         capture("690_queue_send_mid_flight")
     }
 
@@ -70,7 +77,7 @@ class QueueMotionScreenshotTest {
         scene.composerText = "Match the header to these, and follow the spec"
         scene.attach()
         scene.show(motion)
-        sendAndCatch(into = 0.22f)
+        sendAndCatch(into = 0.25f)
         capture("691_queue_send_attachments_mid_flight")
     }
 
@@ -83,21 +90,19 @@ class QueueMotionScreenshotTest {
         scene.show(motion)
         scene.deliver("q-1", bubble = "u-2")
         val flight = checkNotNull(motion.flight)
-        scene.frames(32)
-        assertThat(flight.phase).isEqualTo(SendFlight.Phase.Flying)
+        catchAt(flight, into)
         assertThat(flight.targetId).isEqualTo("u-2")
-        scene.frames((SendMotion.FlightMillis * into).toLong())
     }
 
     @Test
     fun deliveryLiftingOff() {
-        deliverAndCatch(into = 0.04f)
+        deliverAndCatch(into = 0.05f)
         capture("692_queue_delivery_lifting_off")
     }
 
     @Test
     fun deliveryMidFlight() {
-        deliverAndCatch(into = 0.18f)
+        deliverAndCatch(into = 0.25f)
         capture("693_queue_delivery_mid_flight")
     }
 
@@ -110,7 +115,7 @@ class QueueMotionScreenshotTest {
         scene.frames(SendMotion.FlightMillis + 200L)
         assertThat(motion.flight).isNull()
         scene.deliver("q-1", bubble = "u-2", attachments = sent)
-        scene.frames(32 + (SendMotion.FlightMillis * 0.2f).toLong())
+        catchAt(checkNotNull(motion.flight), 0.25f)
         capture("694_queue_delivery_attachments_mid_flight")
     }
 }
