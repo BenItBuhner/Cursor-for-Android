@@ -2,14 +2,14 @@ package com.cursorforandroid.ui.conversation
 
 import android.os.Build
 import android.widget.Toast
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -180,15 +180,19 @@ private fun HumanMessage(item: UserMessage, modifier: Modifier) {
                 // It comes and goes with the bubble's own fade, the bubble easing to its new height, rather than popping.
                 val controls = LocalTranscriptControls.current
                 val outgoing = if (item.isPending) controls.outgoing[item.id]?.takeUnless { it == OutgoingStatus.Sending } else null
-                AnimatedContent(
-                    targetState = outgoing,
-                    contentKey = { it?.let { status -> status::class } },
-                    transitionSpec = {
-                        fadeIn(tween(SentFades.SentFadeMillis)) togetherWith fadeOut(tween(StatusFadeOutMillis)) using SizeTransform(clip = false) { _, _ -> tween(SentFades.SentFadeMillis) }
-                    },
+                // The last status said, drawn while it leaves.
+                val said = remember { arrayOfNulls<OutgoingStatus>(1) }
+                if (outgoing != null) said[0] = outgoing
+                AnimatedVisibility(
+                    visible = outgoing != null,
+                    enter = fadeIn(tween(SentFades.SentFadeMillis)) + expandVertically(tween(SentFades.SentFadeMillis), expandFrom = Alignment.Top),
+                    exit = fadeOut(tween(StatusFadeOutMillis)) + shrinkVertically(tween(SentFades.SentFadeMillis), shrinkTowards = Alignment.Top),
                     label = "outgoing-status",
-                ) { status ->
-                    if (status != null) OutgoingStatusRow(status, onRetry = controls.onRetryOutgoing?.let { retry -> { retry(item.id) } }, onEdit = controls.onEditOutgoing?.let { edit -> { edit(item.id) } })
+                ) {
+                    val status = said[0] ?: return@AnimatedVisibility
+                    Box(Modifier.animateContentSize(tween(SentFades.SentFadeMillis))) {
+                        OutgoingStatusRow(status, onRetry = controls.onRetryOutgoing?.let { retry -> { retry(item.id) } }, onEdit = controls.onEditOutgoing?.let { edit -> { edit(item.id) } })
+                    }
                 }
             }
         }
