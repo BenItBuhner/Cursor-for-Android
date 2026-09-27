@@ -1,5 +1,7 @@
 package com.cursorforandroid.ui.conversation
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -49,6 +51,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
@@ -159,9 +162,21 @@ internal fun ConversationState.workingCaption(): String = when {
 /**
  * The working row's way on and off the list: it fades in where it lands and fades out where it stood, never popping.
  * It does not slide: the list's own following puts the rows where they belong, and a slide would fight it.
+ *
+ * The fade in is [fadeIn] (see [rememberCaptionFadeIn]), not the list's: the list forgets what it had on screen
+ * whenever it is asked to scroll to a place, as each switch of the transcript's order asks, and would fade the caption
+ * in from nothing again at every one.
  */
-internal fun LazyItemScope.captionFade(): Modifier =
-    Modifier.animateItem(fadeInSpec = tween(CaptionFadeMillis), placementSpec = null, fadeOutSpec = tween(CaptionFadeMillis))
+internal fun LazyItemScope.captionFade(fadeIn: Animatable<Float, AnimationVector1D>): Modifier =
+    Modifier.animateItem(fadeInSpec = null, placementSpec = null, fadeOutSpec = tween(CaptionFadeMillis)).graphicsLayer { alpha = fadeIn.value }
+
+/** The working row's fade in: from nothing each time it joins the list ([shown]), and only then. */
+@Composable
+internal fun rememberCaptionFadeIn(shown: Boolean): Animatable<Float, AnimationVector1D> {
+    val fade = remember(shown) { Animatable(if (shown) 0f else 1f) }
+    LaunchedEffect(fade) { fade.animateTo(1f, tween(CaptionFadeMillis)) }
+    return fade
+}
 
 internal const val CaptionFadeMillis = 220
 internal const val WORKING_CAPTION_TAG = "working-caption"
@@ -359,6 +374,7 @@ fun ConversationScreen(
     val showTraces = items.isNotEmpty() && conversation.traceStatus.let { it.pending + it.expired + it.failed > 0 }
     val loadingRow = conversation.isLoading && items.isEmpty()
     val emptyRow = !conversation.isLoading && items.isEmpty()
+    val captionIn = rememberCaptionFadeIn(showWorking)
     // Everything the list holds, top to bottom: the rows between the items above them and the working caption below.
     val order = remember(listedRows, showWorking, showTraces, hasOlder, loadingRow, emptyRow) {
         TranscriptOrder(
@@ -632,7 +648,7 @@ fun ConversationScreen(
                     // A following list is declared bottom-up, the newest row first (see TranscriptScroll). Each kind of
                     // item has one call site for both orders: a row declared from two would be a different group in
                     // each, and every switch would rebuild every row on screen and drop what the reader had opened.
-                    fun edge(key: String) = item(key) { edgeItem(key, if (key == WORKING_KEY) captionFade() else Modifier) }
+                    fun edge(key: String) = item(key) { edgeItem(key, if (key == WORKING_KEY) captionFade(captionIn) else Modifier) }
                     val (before, after) = if (following) order.below.asReversed() to order.above.asReversed() else order.above to order.below
                     before.forEach(::edge)
                     // Without a content type the lazy layout offers a scrolled-off user bubble's slot to an activity
