@@ -86,6 +86,11 @@ class RecordTurn(
      * connection): the turn shows what did load and is read again (see `ConversationRepository.startBlobWork`).
      */
     val unavailable: Int = 0,
+    /**
+     * The prompt went into the turn under way rather than starting one (`UserMessage.turn_steer`, see
+     * [HeadlessTranscript.Turn.steer]): the turn has no run of its own — it is the tail of the run before it.
+     */
+    val steer: Boolean = false,
 ) {
     /** The key the turn's items are filed under on disk (see `TraceCache`); stable while the record is append-only. */
     val traceKey: String get() = traceKey(stepIndex, turnIndexed)
@@ -102,11 +107,11 @@ class RecordTurn(
 
     /** This turn with [replies] — the `/v0` transcript's — as its text, marked as such (see [textFromTranscript]). */
     fun withTranscriptText(replies: List<TimelineItem>): RecordTurn =
-        RecordTurn(stepIndex, stepCount, prompt, projectMode, items + replies, shape, errorMessage, textFromTranscript = true, stepsFromRecord = hasBody, turnIndexed = turnIndexed, blobId = blobId, complete = complete, stepTotal = stepTotal, messageSteps = messageSteps, unavailable = unavailable)
+        RecordTurn(stepIndex, stepCount, prompt, projectMode, items + replies, shape, errorMessage, textFromTranscript = true, stepsFromRecord = hasBody, turnIndexed = turnIndexed, blobId = blobId, complete = complete, stepTotal = stepTotal, messageSteps = messageSteps, unavailable = unavailable, steer = steer)
 
     /** This turn as it stands, [pieces] of it having failed on the server in the last read (see [unavailable]). */
     fun withUnavailable(pieces: Int): RecordTurn =
-        RecordTurn(stepIndex, stepCount, prompt, projectMode, items, shape, errorMessage, textFromTranscript, stepsFromRecord, turnIndexed, blobId, complete, stepTotal, messageSteps, unavailable = pieces)
+        RecordTurn(stepIndex, stepCount, prompt, projectMode, items, shape, errorMessage, textFromTranscript, stepsFromRecord, turnIndexed, blobId, complete, stepTotal, messageSteps, unavailable = pieces, steer = steer)
 
     /** The turn's steps are not to be had: the record gave none and the reply is the transcript's (see [withTranscriptText]). */
     val activityMissing: Boolean get() = textFromTranscript && !stepsFromRecord
@@ -515,7 +520,7 @@ object RecordTranscript {
             // The newest turns' shapes, from the steps as they were just read — reused items or not: the shapes are
             // the diagnostics' account of the record as this read found it.
             val shape = if (i >= kept.size - SHAPE_TURNS) HeadlessTranscript.shape(turn, stepIndex) else null
-            RecordTurn(stepIndex, count, turn.prompt, turn.projectMode, items, shape, errorMessage = HeadlessTranscript.errorMessage(turn), turnIndexed = raw.turnIndexed)
+            RecordTurn(stepIndex, count, turn.prompt, turn.projectMode, items, shape, errorMessage = HeadlessTranscript.errorMessage(turn), turnIndexed = raw.turnIndexed, steer = turn.steer)
         }
         return RecordWindow(raw.total, firstStep, turns, leading, state ?: previous?.state, now, newestTurn = kept.lastOrNull()?.first, turnIndexed = raw.turnIndexed)
     }
@@ -549,7 +554,7 @@ object RecordTranscript {
             // The turn as it stood: its items stand when nothing was appended to it (the delta went to later turns).
             val items = if (i == 0 && stepIndex == last.stepIndex && count == last.stepCount && turn.prompt == last.prompt) last.items else build(turn, RecordTurn.traceKey(stepIndex, window.turnIndexed))
             val shape = if (i >= cut.size - SHAPE_TURNS) HeadlessTranscript.shape(turn, stepIndex) else null
-            RecordTurn(stepIndex, count, turn.prompt, turn.projectMode, items, shape, errorMessage = HeadlessTranscript.errorMessage(turn), turnIndexed = window.turnIndexed)
+            RecordTurn(stepIndex, count, turn.prompt, turn.projectMode, items, shape, errorMessage = HeadlessTranscript.errorMessage(turn), turnIndexed = window.turnIndexed, steer = turn.steer)
         }
         // The newest turn read again as it was, and nothing after it: the window stands, nothing to republish.
         if (rereadsNewest && rebuilt.size == 1 && rebuilt[0].items === last.items && delta.total == window.total) return window
@@ -595,7 +600,7 @@ object RecordTranscript {
             val short = read.unavailable > 0 || (read.messageSteps?.let { CoordinatorTranscript.sent(built).size < it } ?: false)
             val items = if (!same && short && held != null && held.prompt == turn.prompt) CoordinatorTranscript.keepMessages(held.items, built) else built
             val shape = if (i >= shapesFrom) HeadlessTranscript.shape(turn, read.index) else held?.shape
-            RecordTurn(read.index, count, turn.prompt, turn.projectMode, items, shape, errorMessage = HeadlessTranscript.errorMessage(turn), turnIndexed = true, blobId = read.blobId, complete = read.complete, stepTotal = read.stepTotal, messageSteps = read.messageSteps, unavailable = read.unavailable)
+            RecordTurn(read.index, count, turn.prompt, turn.projectMode, items, shape, errorMessage = HeadlessTranscript.errorMessage(turn), turnIndexed = true, blobId = read.blobId, complete = read.complete, stepTotal = read.stepTotal, messageSteps = read.messageSteps, unavailable = read.unavailable, steer = turn.steer)
         }
         return turns to cut
     }
@@ -638,7 +643,7 @@ object RecordTranscript {
         val olderTurns = kept.map { cutTurn ->
             val turn = cutTurn.first
             val stepIndex = cutTurn.second
-            RecordTurn(stepIndex, turn.steps.size + (if (turn.prompt != null) 1 else 0), turn.prompt, turn.projectMode, build(turn, RecordTurn.traceKey(stepIndex, window.turnIndexed)), errorMessage = HeadlessTranscript.errorMessage(turn), turnIndexed = window.turnIndexed)
+            RecordTurn(stepIndex, turn.steps.size + (if (turn.prompt != null) 1 else 0), turn.prompt, turn.projectMode, build(turn, RecordTurn.traceKey(stepIndex, window.turnIndexed)), errorMessage = HeadlessTranscript.errorMessage(turn), turnIndexed = window.turnIndexed, steer = turn.steer)
         }
         return RecordWindow(window.total, firstStep, olderTurns + window.turns, leading, window.state, now, window.newestTurn, window.turnIndexed)
     }
