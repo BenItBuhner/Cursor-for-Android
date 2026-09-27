@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.ui.conversation.CaptionFadeMillis
 import com.cursorforandroid.ui.conversation.captionFade
+import com.cursorforandroid.ui.conversation.rememberCaptionFadeIn
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import org.junit.Rule
@@ -94,11 +95,12 @@ class RollingTextTest {
         compose.mainClock.autoAdvance = false
         compose.setContent {
             CursorTheme(mode = ThemeMode.Dark) {
+                val fadeIn = rememberCaptionFadeIn(working)
                 LazyColumn(Modifier.fillMaxSize()) {
                     item("row") { BasicText("A reply") }
                     if (working) {
                         item("working") {
-                            Box(captionFade().testTag("caption")) { RollingText("Working…") }
+                            Box(captionFade(fadeIn).testTag("caption")) { RollingText("Working…") }
                         }
                     }
                 }
