@@ -1,5 +1,6 @@
 package com.cursorforandroid.ui.conversation
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -86,11 +87,19 @@ internal class OpenStretches(saved: Map<String, Boolean> = emptyMap()) {
     /** What is being closed, its steps fading out where they are before they go (see [isLeaving]); else null. */
     private var leaving by mutableStateOf<String?>(null)
 
+    /** What has just been opened, its steps fading in behind the rows sliding past (see [enteringAlpha]); else null. */
+    private var entering by mutableStateOf<String?>(null)
+    private val enteringFade = Animatable(1f)
+
     /** Whether [step] is one of those fading out. */
-    fun isLeaving(step: TranscriptRow.Step): Boolean {
-        val closing = leaving ?: return false
-        return if (closing.startsWith(THOUGHT)) step.text != null && step.stretchKey == closing.substring(THOUGHT.length) else step.stretchKey == closing
-    }
+    fun isLeaving(step: TranscriptRow.Step): Boolean = leaving?.let { step.belongsTo(it) } == true
+
+    /** How opaque [step] is drawn as what it belongs to opens: from nothing up, just after the tap; else whole. Read where it is drawn. */
+    fun enteringAlpha(step: TranscriptRow.Step): Float =
+        if (!step.live && entering?.let { step.belongsTo(it) } == true) enteringFade.value else 1f
+
+    private fun TranscriptRow.Step.belongsTo(toggle: String): Boolean =
+        if (toggle.startsWith(THOUGHT)) text != null && stretchKey == toggle.substring(THOUGHT.length) else stretchKey == toggle
 
     private val asked = Channel<Pair<String, Boolean>>(Channel.UNLIMITED)
 
@@ -98,28 +107,33 @@ internal class OpenStretches(saved: Map<String, Boolean> = emptyMap()) {
      * Opens and closes what is asked, two frames after the tap. A tap that opens also stops the list following (see
      * [TranscriptScroll.toggling]): its frame lays the rows out in their new order where they were, nothing sliding,
      * or they would all slide from where the other order had them. The next gives the rows their slide ([moving]) —
-     * the list follows only rows that had one on the frame before — and the one after opens. A close first fades the
-     * steps out where they are, [STEP_FADE_OUT_MS], and only then takes them away: rows coming into view as they go
-     * start wherever the list puts them, and must not be drawn over steps still showing. Ends each window
-     * [MOTION_WINDOW_MS] after the last change in it. Runs for as long as the caller does.
+     * the list follows only rows that had one on the frame before — and the one after opens, its steps fading in
+     * once the rows have mostly gone by. A close first fades the steps out where they are, [STEP_FADE_OUT_MS], and
+     * only then takes them away: rows coming into view as they go start wherever the list puts them, and must not be
+     * drawn over steps still showing. Ends each window [MOTION_WINDOW_MS] after the last change in it. Runs for as
+     * long as the caller does.
      */
     suspend fun run() = coroutineScope {
         var settling: Job? = null
         for ((key, open) in asked) {
             settling?.cancel()
+            entering = null
             withFrameNanos { }
             withFrameNanos {
                 moving = true
                 if (!open) leaving = key
             }
-            if (!open) delay(STEP_FADE_OUT_MS.toLong())
+            if (!open) delay(STEP_FADE_OUT_MS.toLong()) else enteringFade.snapTo(0f)
             withFrameNanos {
                 toggled[key] = open
                 leaving = null
+                if (open) entering = key
             }
             settling = launch {
+                if (open) launch { enteringFade.animateTo(1f, tween(STEP_FADE_IN_MS, delayMillis = STEP_FADE_IN_DELAY_MS)) }
                 delay(MOTION_WINDOW_MS)
                 moving = false
+                entering = null
             }
         }
     }
@@ -206,22 +220,21 @@ internal fun StepRow(step: TranscriptRow.Step, modifier: Modifier = Modifier) {
  *
  * Every row carries the modifier, its placement off outside the moment: a placement that is only a snap still moves a
  * row a frame late, and rows landing from the stream must not lag.
+ *
+ * The steps' fade in is the tap's ([OpenStretches.enteringAlpha]), never the list's own: the list forgets what it had
+ * on screen whenever it is asked to scroll to a place (`requestScrollToItem`, which each switch of the transcript's
+ * order is), and then fades in every item on screen that has a fade in, as if each had just been added.
  */
 @Composable
 internal fun LazyItemScope.rowMotion(row: TranscriptRow, open: OpenStretches): Modifier {
-    val moving = open.moving
     val motion = Modifier.animateItem(
-        fadeInSpec = when {
-            row !is TranscriptRow.Step || row.live -> null
-            moving -> tween(STEP_FADE_IN_MS, delayMillis = STEP_FADE_IN_DELAY_MS)
-            else -> tween(STEP_FADE_IN_MS)
-        },
-        placementSpec = if (moving) tween(ROW_SLIDE_MS, easing = FastOutSlowInEasing) else null,
+        fadeInSpec = null,
+        placementSpec = if (open.moving) tween(ROW_SLIDE_MS, easing = FastOutSlowInEasing) else null,
         fadeOutSpec = null,
     )
     if (row !is TranscriptRow.Step) return motion
     val shown by animateFloatAsState(if (open.isLeaving(row)) 0f else 1f, tween(STEP_FADE_OUT_MS), label = "step")
-    return motion.graphicsLayer { alpha = shown }
+    return motion.graphicsLayer { alpha = shown * open.enteringAlpha(row) }
 }
 
 private const val STEP_FADE_IN_MS = 150
