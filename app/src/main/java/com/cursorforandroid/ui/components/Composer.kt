@@ -169,7 +169,8 @@ import kotlinx.coroutines.launch
  * Once the text runs past the ten lines the field shows and scrolls inside it, a button slides in right of "+" that
  * grows the composer over nearly all the height it can have ([expansion]): the room its parent allows — in a chat, all
  * of it above the keyboard or the navigation bar, the transcript giving way — or [expandRoom] where the owner measures it.
- * The same button, Back, Ctrl+Shift+E or a send brings it back down; see [ComposerExpansion].
+ * The same button, Back, Ctrl+Shift+E or a send brings it back down; see [ComposerExpansion]. Collapsed or expanded,
+ * text that runs past the field's top or bottom fades there ([scrollEdgeFade]), as every scrolling list in the app does.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -596,6 +597,9 @@ fun ComposerBox(
                         .heightIn(min = 22.dp)
                         .then(if (stretched) Modifier.fillMaxHeight() else Modifier)
                         .onSizeChanged { if (expansion.progress.value == 0f) expansion.fieldPx = it.height }
+                        // Painted, not dissolved: the field is resized every frame the composer expands or collapses,
+                        // and the composer's own fill is flat behind it.
+                        .scrollEdgeFade(textScroll, surface = colors.elevated)
                         .onPhysicalKey { physicalKeys = true }
                         .onPreviewKeyEvent { event ->
                             val chord = event.type == KeyEventType.KeyDown && event.isCtrlPressed && event.isShiftPressed && !event.isAltPressed && event.key == Key.E
