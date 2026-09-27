@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.cursorforandroid.domain.PendingAttachment
+import com.cursorforandroid.domain.PendingFollowup
 import com.cursorforandroid.domain.QueuedFollowUp
 import com.cursorforandroid.ui.components.SendFlight
 import com.cursorforandroid.ui.components.SendMotion
@@ -26,7 +28,9 @@ import java.nio.ByteBuffer
 /**
  * The send's flight with the queue card at either end, caught mid-motion on a stopped clock: a message sent while the
  * agent works on its way from the composer into its row, with pictures and a spec shrinking onto the row's tiles; and
- * a queued row the run took lifting off the card, then on its way into its bubble. Same device qualifiers as
+ * a queued row the run took lifting off the card, then on its way into its bubble. Then the same on the account's card
+ * (Extended mode, what a phone signed in runs), whose rows draw their tiles from this device's copies of what a message
+ * queued from here carries, and the account's word on it (plain tiles, the file's name) for one queued elsewhere. Same device qualifiers as
  * [AppScreenshotTest]; written to `screenshots/`, which CI compares pixel for pixel.
  */
 @RunWith(AndroidJUnit4::class)
@@ -109,6 +113,65 @@ class QueueMotionScreenshotTest {
     fun deliveryMidFlight() {
         deliverAndCatch(into = 0.25f)
         capture("693_queue_delivery_mid_flight")
+    }
+
+    /**
+     * Extended mode, what a phone signed in runs: the send onto the account's card, its two pictures and its spec
+     * shrinking onto the row's own tiles (staged here, drawn from this device's copies).
+     */
+    private fun sendOnAccount(): SendFlight {
+        scene.onAccount = true
+        scene.account += PendingFollowup("a-0", "Run the migration first")
+        scene.composerText = "Match the header to these, and follow the spec"
+        scene.attach()
+        scene.show(motion)
+        return checkNotNull(scene.sendQueued(motion, "a-1", onAccount = true))
+    }
+
+    @Test
+    fun accountSendAttachmentsMidFlight() {
+        val flight = sendOnAccount()
+        catchAt(flight, 0.25f)
+        assertThat(flight.targetId).isEqualTo("a-1")
+        capture("695_account_queue_send_attachments_mid_flight")
+    }
+
+    /** The row at rest once the account's list names the message in names and a count: its tiles still this device's pictures. */
+    @Test
+    fun accountRowTilesOnceListed() {
+        sendOnAccount()
+        scene.frames(SendMotion.FlightMillis + 200L)
+        scene.accountTakes("a-1")
+        scene.awaitTilePreviews()
+        assertThat(motion.flights).isEmpty()
+        capture("696_account_queue_row_tiles")
+    }
+
+    @Test
+    fun accountDeliveryWithAttachmentsMidFlight() {
+        sendOnAccount()
+        scene.frames(SendMotion.FlightMillis + 200L)
+        scene.accountTakes("a-1")
+        scene.awaitTilePreviews()
+        scene.deliver("a-1", bubble = "u-2")
+        val flight = checkNotNull(motion.flight)
+        catchAt(flight, 0.25f)
+        assertThat(flight.targetId).isEqualTo("u-2")
+        capture("697_account_queue_delivery_attachments_mid_flight")
+    }
+
+    /** A message queued from another device: the account's word on what it carries, as plain tiles and the file's name. */
+    @Test
+    fun accountRowQueuedElsewhere() {
+        scene.onAccount = true
+        scene.account += PendingFollowup(
+            "a-1",
+            "Match the header to these, and follow the spec",
+            files = listOf(PendingAttachment("Q3-header-spec.pdf", "application/pdf")),
+            imageCount = 2,
+        )
+        scene.show(motion)
+        capture("698_account_queue_row_queued_elsewhere")
     }
 
     @Test
