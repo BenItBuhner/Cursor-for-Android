@@ -2115,21 +2115,33 @@ class ConversationRepository(
      * The list's refresh, for the held chats nobody is looking at: one whose row moved while no stream carries it
      * is read again — at once, and in full, when the row names a run the chat does not know (a turn started
      * elsewhere, a worker's report reaching its coordinator); a row that only moved is read as a revalidation is.
+     * A row that stopped running while a stream follows the chat between looks has the stream look in now.
      */
     private fun syncHeld(list: List<Agent>) {
         val held = synchronized(entries) { entries.values.filter { it.held && it.screens == 0 } }
         if (held.isEmpty()) return
         val rows = list.associateBy { it.id }
-        for (e in held) {
-            val row = rows[e.agentId] ?: continue
-            val newRun = synchronized(e) {
-                val moved = row.updatedAtMillis > e.heldRowAt
-                e.heldRowAt = maxOf(e.heldRowAt, row.updatedAtMillis)
-                if (!moved || e.streamJob?.isActive == true) return@synchronized null
-                row.isRunning || row.latestRunId?.let { it.startsWith(LOCAL_RUN_PREFIX) || e.runById(it) != null } == false
-            } ?: continue
-            revalidateNow(e, force = newRun, fresh = newRun)
+        for (e in held) syncHeld(e, rows[e.agentId] ?: continue)
+    }
+
+    /**
+     * One held chat against its row (see [syncHeld]). A move seen while a stream carries the chat is left for the
+     * stream's end ([startStreaming] asks again then): answered at once, a coordinator's quick turns elsewhere — each
+     * started and over between two refreshes — were taken as heard while the chat still followed the first, and the
+     * refresh after found the row where it was and read nothing, the later turns never shown.
+     */
+    private fun syncHeld(e: Entry, row: Agent) {
+        var stopped = false
+        val newRun = synchronized(e) {
+            if (!e.held || e.screens != 0) return
+            val streaming = e.streamJob?.isActive == true
+            stopped = !row.isRunning && streaming
+            if (row.updatedAtMillis <= e.heldRowAt || streaming) return@synchronized null
+            e.heldRowAt = row.updatedAtMillis
+            row.isRunning || row.latestRunId?.let { it.startsWith(LOCAL_RUN_PREFIX) || e.runById(it) != null } == false
         }
+        if (stopped) hub.lookNow(e.agentId)
+        if (newRun != null) revalidateNow(e, force = newRun, fresh = newRun)
     }
 
     /**
@@ -4823,7 +4835,13 @@ class ConversationRepository(
             )
             true
         }
-        if (following) job.start() else job.cancel()
+        if (following) {
+            // A held chat's row may have moved on while this followed it (see [syncHeld]): asked again once it ends.
+            job.invokeOnCompletion { cause -> if (cause == null) agents.agent(agentId)?.let { syncHeld(e, it) } }
+            job.start()
+        } else {
+            job.cancel()
+        }
     }
 
     /**
