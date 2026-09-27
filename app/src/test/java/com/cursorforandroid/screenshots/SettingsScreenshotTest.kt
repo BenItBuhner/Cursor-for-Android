@@ -16,6 +16,7 @@ import com.cursorforandroid.domain.TranscriptEngine
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.isNotEnabled
 import androidx.compose.ui.test.isOff
@@ -245,9 +246,11 @@ class SettingsScreenshotTest {
         // was. Voice input is no switch of its own, so nothing else waits on the mode here.
         compose.onAllNodesWithText(ExtendedModeCopy.NEEDS_MODE).assertCountEquals(1)
         compose.onNodeWithTag(ExtendedModeTags.ENGINE_TOGGLE).assertIsNotEnabled().assertIsOff()
-        // The one Experimental switch left is background live sync; voice input has none.
-        compose.onAllNodesWithText("Experimental").assertCountEquals(1)
+        // Background live sync sits with the mode and the engine, on for whoever never turned it off; nothing is
+        // experimental any more, and voice input has no switch.
+        compose.onAllNodesWithText("Experimental").assertCountEquals(0)
         compose.onAllNodesWithText(SettingsCopy.LIVE_SYNC).assertCountEquals(1)
+        compose.onNodeWithTag(SettingsTags.LIVE_SYNC_TOGGLE).assertIsOn()
         compose.onAllNodesWithText("Voice input").assertCountEquals(0)
         capture("66_settings_extended_off")
     }
@@ -264,9 +267,11 @@ class SettingsScreenshotTest {
         compose.onNodeWithTag(ExtendedModeTags.ENGINE_TOGGLE).assertIsEnabled()
         assertThat(runBlocking { graph.extendedMode.engine() }).isEqualTo(TranscriptEngine.BETA)
         // Voice input comes with the mode, in the composers.
-        // The one Experimental switch left is background live sync; voice input has none.
-        compose.onAllNodesWithText("Experimental").assertCountEquals(1)
+        // Background live sync sits with the mode and the engine, on for whoever never turned it off; nothing is
+        // experimental any more, and voice input has no switch.
+        compose.onAllNodesWithText("Experimental").assertCountEquals(0)
         compose.onAllNodesWithText(SettingsCopy.LIVE_SYNC).assertCountEquals(1)
+        compose.onNodeWithTag(SettingsTags.LIVE_SYNC_TOGGLE).assertIsOn()
         compose.onAllNodesWithText("Voice input").assertCountEquals(0)
         capture("67_settings_extended_on")
     }

@@ -165,7 +165,7 @@ class PreferencesStore(
         val collapsedSidebarSections = stringSetPreferencesKey("sidebar_collapsed_sections")
         /** Settings › Appearance › Shorten long Projects list; absent reads as on (see [shortenSidebarLists]). */
         val shortenSidebarLists = booleanPreferencesKey("sidebar_shorten_long_lists")
-        /** Settings › Experimental › Keep chats live; absent reads as off (see [liveSync]). */
+        /** Settings › Advanced › Keep chats live; absent reads as on (see [liveSync]). */
         val liveSync = booleanPreferencesKey("live_sync")
         /** Settings › New chat page: what the New Chat pane lists under its composer (`recent` / `projects`); absent is Recent. */
         val newChatHome = stringPreferencesKey("new_chat_home")
@@ -425,9 +425,11 @@ class PreferencesStore(
     suspend fun setShortenSidebarLists(enabled: Boolean) = edit { it[Keys.shortenSidebarLists] = enabled }
 
     /**
-     * Settings › Experimental › Keep chats live: background live sync (see `LiveSync`); off unless turned on.
+     * Settings › Advanced › Keep chats live: background live sync (see `LiveSync`). On unless turned off: the switch
+     * is written only when it is flipped, so whoever turned it off while it was an experiment keeps it off, and whoever
+     * never touched it has it on.
      */
-    val liveSync: Flow<Boolean> = data.map { it[Keys.liveSync] ?: false }
+    val liveSync: Flow<Boolean> = data.map { it[Keys.liveSync] ?: true }
 
     suspend fun setLiveSync(enabled: Boolean) = edit { it[Keys.liveSync] = enabled }
 
