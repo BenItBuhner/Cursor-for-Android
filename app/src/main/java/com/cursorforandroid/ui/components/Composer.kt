@@ -339,8 +339,8 @@ fun ComposerBox(
     val minFieldPx = with(density) { maxOf(22.dp.roundToPx(), (type.input.lineHeight.toPx() * minLines).roundToInt()) }
     BackHandler(enabled = expansion.expanded) { expansion.collapse() }
     // Collapsing, the field shrinks from the bottom; the caret is kept in sight as it does, so the line being written
-    // is still the one showing when the composer is back to its own height.
-    // Only while it collapses (and on the frame it lands): at rest the field scrolls as the reader leaves it.
+    // is still the one showing when the composer is back to its own height. Only then (through the frame it lands on):
+    // at rest the field stays scrolled wherever the reader left it.
     LaunchedEffect(expansion, textScroll) {
         var last = 0f
         snapshotFlow { expansion.progress.value to textScroll.maxValue }.collect { (p, _) ->
