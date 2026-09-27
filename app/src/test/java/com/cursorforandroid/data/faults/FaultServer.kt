@@ -111,6 +111,11 @@ class FaultServer(
     val cancelled = CopyOnWriteArrayList<String>()
     /** Answers every `POST /runs` with `409 agent_busy` while set, as the server does during a turn. */
     @Volatile var busy = false
+    /**
+     * A cancel of a run that is over already, or that the server does not know, is refused as Bennett's 0.4.4 Stop
+     * was: "Run is not active", under a code the app has no special reading for. Off, every cancel is taken.
+     */
+    @Volatile var refusesInactiveCancels = false
 
     /**
      * One message in the account's queue for a chat (`AddAsyncFollowupBackgroundComposer` behind a turn under way;
@@ -405,7 +410,9 @@ class FaultServer(
             }
             Route.GetRun -> runs[segments[4]]?.let { json(200, encode(RunDto.serializer(), it)) } ?: notFound()
             Route.CreateRun -> createRun(segments[2], request, processed)
-            Route.CancelRun -> {
+            Route.CancelRun -> if (refusesInactiveCancels && runs[segments[4]]?.status?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } != true) {
+                json(409, error("failed_precondition", "Run is not active"))
+            } else {
                 if (processed) {
                     cancelled += segments[4]
                     runs[segments[4]]?.let { runs[segments[4]] = it.copy(status = "CANCELLED") }
