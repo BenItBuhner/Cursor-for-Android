@@ -87,6 +87,9 @@ import com.cursorforandroid.domain.UserMessage
 import com.cursorforandroid.ui.components.ComposerAnchor
 import com.cursorforandroid.ui.components.ComposerBox
 import com.cursorforandroid.ui.components.LocalSendMotion
+import com.cursorforandroid.ui.components.QueueDeliveries
+import com.cursorforandroid.ui.components.SendLanding
+import com.cursorforandroid.ui.components.rememberQueueFlights
 import com.cursorforandroid.ui.components.arrivalGlide
 import com.cursorforandroid.ui.components.rememberArrivalGlide
 import com.cursorforandroid.ui.components.CursorIcons
@@ -698,9 +701,20 @@ fun ConversationScreen(
         // Chat has its composer glide down from where that one stood.
         val sendMotion = LocalSendMotion.current
         val composerAnchor = remember(agentId) { ComposerAnchor() }
+        val queueFlights = rememberQueueFlights(agentId)
         val arrival = rememberArrivalGlide(agentId)
         // Extended mode keeps the queue on the account, where the desktop and the web keep theirs; otherwise on this device.
         val accountQueue = capabilities.accountQueue && !isDemo
+        // A queued message the run takes flies from its card to its bubble, as a send flies from the composer.
+        QueueDeliveries(
+            flights = queueFlights,
+            rows = LinkedHashMap<String, String>().apply {
+                queue.forEach { put(it.id, it.previewText) }
+                if (accountQueue) controls.queue.forEach { put(it.id, it.previewText) }
+            },
+            transcript = items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id },
+            scrolledAway = { !transcriptScroll.following && TranscriptScroll.offBottom(listState.layoutInfo) },
+        )
         val willQueue = isActive || queue.isNotEmpty() || (accountQueue && controls.queue.isNotEmpty())
         // The composer and the strips over it dock at the bottom (composerDockPadding): the gutter at each side, and
         // under the box a gap a shade wider than the gutter, above the keyboard's edge while there is one and above
@@ -741,7 +755,7 @@ fun ConversationScreen(
                 QueuedFollowUps(
                     queue = queue,
                     thumbnails = thumbnails,
-                    onEdit = { viewModel.editQueued(it.id) },
+                    onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
                     // Sent now while a turn is under way, a message cancels that turn for it.
                     onSteer = { item ->
                         if (isActive) {
@@ -751,8 +765,9 @@ fun ConversationScreen(
                             viewModel.steerQueued(item.id)
                         }
                     },
-                    onRemove = { viewModel.removeQueued(it.id) },
+                    onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
                     modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
+                    flights = queueFlights,
                 )
             }
             if (accountQueue && controls.queue.isNotEmpty()) {
@@ -768,13 +783,14 @@ fun ConversationScreen(
                             viewModel.queueSendNow(item.id)
                         }
                     },
-                    onRemove = { viewModel.queueDelete(it.id) },
+                    onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
                     onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
                     onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
                     // A queued message can be delivered into the turn under way as a steer while there is one to steer.
                     onSteerNow = if (capabilities.steering && isActive) ({ haptics.perform(Haptic.Confirm); viewModel.queueSteerNow(it.id) }) else null,
                     onMove = { item, up -> viewModel.queueMove(item.id, up) },
                     modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
+                    flights = queueFlights,
                 )
             }
             ComposerBox(
@@ -790,7 +806,17 @@ fun ConversationScreen(
                 onSend = {
                     val takeoff = composerAnchor.takeoff()
                     val before = items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id }
-                    viewModel.send()?.let { sent -> sendMotion?.depart(takeoff, sent, before) }
+                    when (val sent = viewModel.submit()) {
+                        is ConversationViewModel.Sent.Bubble -> sendMotion?.depart(takeoff, sent.text, before)
+                        // Into the queue card instead; the rows already standing are not where it lands.
+                        is ConversationViewModel.Sent.Queued -> sendMotion?.depart(
+                            takeoff,
+                            sent.text,
+                            excluded = queue.mapTo(HashSet()) { it.id } + controls.queue.map { it.id },
+                            landing = SendLanding.Queue,
+                        )
+                        null -> Unit
+                    }
                 },
                 anchor = composerAnchor,
                 // Free the moment send is tapped: the message, its files' uploads and its send are the transcript's from then on.
