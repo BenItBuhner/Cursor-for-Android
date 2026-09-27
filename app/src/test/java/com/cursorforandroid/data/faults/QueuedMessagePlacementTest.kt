@@ -110,7 +110,7 @@ class QueuedMessagePlacementTest {
     }
 
     /** The rig, its account queue read every [pollMs]: the card's staleness (production: 10 s). */
-    private fun rig(pollMs: Long): FaultRig = FaultRig(server.baseUrl, folder.newFolder("rig-${System.nanoTime()}"), readTimeoutMs = 8_000L, extended = true, queuePollMs = pollMs).also {
+    private fun rig(pollMs: Long, root: File = folder.newFolder("rig-${System.nanoTime()}")): FaultRig = FaultRig(server.baseUrl, root, readTimeoutMs = 8_000L, extended = true, queuePollMs = pollMs).also {
         it.now = 1_800_000_000_000L
         rig = it
     }
@@ -404,6 +404,10 @@ class QueuedMessagePlacementTest {
         assertThat(row.files.single().mimeType).isEqualTo("application/pdf")
         assertThat(row.imageCount).isEqualTo(1)
         assertThat(rig.steering.state(agentId).value.placed(queued.queuePlacement).queue.map { it.id }).containsExactly(followupId)
+        // The list's row stands for it, in the account's words; the card draws its tiles from this device's copies.
+        val card = rig.steering.state(agentId).value.placed(queued.queuePlacement).queue.single()
+        assertThat(card.attachments.map { it.isFile }).containsExactly(false, true).inOrder()
+        card.attachments.forEach { assertWithMessage("${it.path} should be this device's copy").that(File(it.path).isFile).isTrue() }
         // From the first frame the bubble stood on: never a frame with the message in neither place, nor in both — the
         // recorder saw the bubble, or the card, at every step. (A frame recorded between the tap and the bubble's publish
         // — a queue read's — has the message nowhere yet, rightly.)
@@ -457,6 +461,43 @@ class QueuedMessagePlacementTest {
             assertThat(File(attachment.path).parentFile?.name).isEqualTo(next.id)
         }
         assertThat(File(pdf.path).readBytes()).isEqualTo(spec.bytes)
+    }
+
+    /**
+     * Bennett's frame of v0.4.8: a message he sent mid-turn with a picture, on the account-queue card as its text and
+     * "1 image", no tile — the list's row, which knows the picture by count alone, standing for the message this
+     * device had staged with its copies. The card's row for a message queued from here draws its tiles from those
+     * copies: once the account's list names it, and again from the first frame after a restart.
+     */
+    @Test
+    fun `a message queued on the account from here keeps this device's copies on the card's row, once listed and after a restart`() = runBlocking<Unit> {
+        val root = folder.newFolder("rig-restarted")
+        val first = rig(pollMs = 1_000L, root = root)
+        first.open()
+        val followupId = AccountFollowup.newId()
+        val spec = PromptFile(ByteArray(2_048) { 0x25 }, "Q3-billing-spec.pdf", "application/pdf")
+        val staged = first.conversations.stageFollowUp(agentId, MESSAGE, images = listOf(PromptImage(png(), "image/png")), files = listOf(spec))
+        first.conversations.sendStagedVia(agentId, staged, followupId = followupId, discardOnFailure = false) {
+            first.steering.sendFollowup(agentId, AccountFollowup(text = MESSAGE, followupId = followupId)).getOrThrow()
+        }.getOrThrow()
+        first.awaitUntilOr(10_000, "the list to name it") { first.steering.state(agentId).value.queue.any { it.id == followupId } }
+        val listed = first.steering.state(agentId).value.queue.single { it.id == followupId }
+        assertThat(listed.attachments).isEmpty()
+        val card = first.steering.state(agentId).value.placed(state.queuePlacement).queue.single { it.id == followupId }
+        assertThat(card.attachments.map { it.isFile }).containsExactly(false, true).inOrder()
+        card.attachments.forEach { assertThat(File(it.path).isFile).isTrue() }
+
+        // The app is stopped with the message still waiting, and started again.
+        recorder?.cancel()
+        first.steering.detach(agentId)
+        first.close()
+        val again = rig(pollMs = 1_000L, root = root)
+        again.open()
+        again.awaitUntilOr(10_000, "the waiting message back") { state.queuePlacement.waiting.any { it.id == followupId } }
+        assertThat(state.queuePlacement.waiting.single { it.id == followupId }.attachments).isEqualTo(card.attachments)
+        again.awaitUntilOr(10_000, "the list read again") { again.steering.state(agentId).value.queue.any { it.id == followupId } }
+        val restored = again.steering.state(agentId).value.placed(state.queuePlacement).queue.single { it.id == followupId }
+        assertThat(restored.attachments).isEqualTo(card.attachments)
     }
 
     // -- (7) Bennett's frames: the chat idle, the account starts the run at once, the poll lands in the round trip ------

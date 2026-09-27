@@ -895,7 +895,7 @@ class FollowUpRepository(
                                         // under the run the account starts on it (see ConversationRepository.expectDelivery)
                                         // — the card above the composer showing it meanwhile — and is read again for
                                         // the turn the account is on.
-                                        conversations.expectDelivery(e.agentId, item.previewText, item.images.map { it.image }, followupId = followupId, runId = runId)
+                                        conversations.expectDelivery(e.agentId, item.previewText, item.images.map { it.image }, item.files.map { it.file }, followupId = followupId, runId = runId)
                                         conversations.reload(e.agentId)
                                     }
                                     return
