@@ -754,9 +754,9 @@ class ConversationRepository(
                     // The turn it waited behind may have taken it between its steps and answered it (a Project's
                     // coordinator does): the transcript's copy is followed by an answer that turn's own story carries.
                     // Then it is that turn's, drawn above the answer, not ahead of the named run below it all. Only a
-                    // frame with the transcript read alongside may say which (see [adoptDelivered]): the one in hand
-                    // may predate the turn's taking it.
-                    if (!fileSteers) { adoptWanted = true; continue }
+                    // frame with the transcript read alongside may say which (see [adoptDelivered]), or one whose
+                    // transcript holds the message's copy already: an older one may predate the turn's taking it.
+                    if (!fileSteers && messages.count { it.type == USER_MESSAGE && normalizePrompt(it.text) == wanted } <= a.priorTranscriptCopies) { adoptWanted = true; continue }
                     val intoTurn = takenInto(a.staged.message, wanted, named, minCopies = a.priorTranscriptCopies + 1)
                     if (intoTurn != null) { file(a, intoTurn, wanted, filed); continue }
                     taken += named.id
