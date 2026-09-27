@@ -303,6 +303,9 @@ class OpenLatencyProfileTest {
         repeat(5) {
             last = startElsewhere(coordinator)
             rig.agents.refresh()
+            // Each report a minute after the last: the server stamps a turn's start a minute ahead of its clock and its
+            // end at it, so on a clock standing still every turn after the first would leave the row where it was.
+            rig.now += 61_000L
             server.endTurn(coordinator, durationMs = 5_000L)
         }
         rig.agents.refresh()
