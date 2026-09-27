@@ -892,6 +892,15 @@ class ConversationRepository(
         @Volatile var cancelledRunId: String? = null
         /** The id this chat knew [cancelledRunId] by, when that was a run the account service named (see `AgentRepository.cancelRun`). */
         @Volatile var cancelledAs: String? = null
+        /**
+         * The account's activity time for the chat when a queued message's wait last found it called running with no
+         * `/v1` run under way (see [reconcileRunning]); null when the last look found otherwise.
+         */
+        @Volatile var waitedOnWordAt: Long? = null
+        /** When a load last had the chat reconciled with the server (monotonic millis; see [reconcileAfterLoad]). */
+        @Volatile var reconciledAtMs: Long = Long.MIN_VALUE
+        /** Waits, after the account's running word was set aside, for the account to call the chat running again (see [reconcileRunning]). */
+        var overruleJob: Job? = null
 
         /**
          * The status a run record gives the chat: an active status for a run this device saw end reads as it ended —
@@ -3032,6 +3041,7 @@ class ConversationRepository(
                         if (followed != null && merged.any { it.id == followed && !it.statusEnum().isActive }) e.stopFollowing(over = latest)
                         // No run to stream while the account calls the chat running: kept followed (see [keepFollowing]).
                         if (accountSaysRunning(e)) keepFollowing(e, endedRunId = null)
+                        reconcileAfterLoad(e)
                     }
                     loadTraces(e, agentId, e.shownRuns().filter { it.statusEnum().isTerminal })
                     if (pageOlder) pageOlderRuns(e, agentId)
@@ -3275,6 +3285,7 @@ class ConversationRepository(
                 if (followed != null && merged.any { it.id == followed && !it.statusEnum().isActive }) e.stopFollowing(over = latest)
                 // No run to stream, and the account calls the chat running: the record is the source (see [keepFollowing]).
                 if (accountSaysRunning(e)) keepFollowing(e, endedRunId = null)
+                reconcileAfterLoad(e)
             }
             // The turns the record holds without their steps — or, in a coordinator's chat, without the coordinator's
             // word — get them from their runs' logs, newest first.
@@ -5699,11 +5710,160 @@ class ConversationRepository(
      */
     suspend fun cancelRun(agentId: String, runId: String): Result<Unit> {
         val e = entry(agentId)
-        return agents.cancelRun(agentId, runId).map { stopped ->
+        val result = agents.cancelRun(agentId, runId).map { stopped ->
             e.cancelledRunId = stopped
             e.cancelledAs = runId.takeIf { it != stopped }
             e.state.update { it.copy(runStatus = RunStatus.CANCELLED) }
         }
+        val refusal = result.exceptionOrNull()?.takeIf { it.refusesRun() } ?: return result
+        // The server says the run is not one it can stop — over already, or not a run it has: its word on the chat,
+        // which the screen takes. At rest, the Stop has nothing left to do; another turn under way is the one stopped.
+        if (!reconcileRunning(agentId, refused = runId)) return Result.success(Unit)
+        val next = runToCancel(agentId)?.takeIf { it != runId } ?: return Result.failure(refusal)
+        return agents.cancelRun(agentId, next).map { stopped ->
+            e.cancelledRunId = stopped
+            e.cancelledAs = next.takeIf { it != stopped }
+            e.state.update { it.copy(runStatus = RunStatus.CANCELLED) }
+        }
+    }
+
+    /**
+     * A cancel's failure that is the server's answer about the run rather than a passing fault: "Run is not active"
+     * and its kin (a 4xx that is not about the session or the pace), or no documented run to name at all.
+     */
+    private fun Throwable.refusesRun(): Boolean {
+        if (this is IllegalStateException && message == "No active run.") return true
+        val error = toCursorError() ?: return false
+        return error.httpCode in 400..499 && error.httpCode !in setOf(401, 403, 408, 429)
+    }
+
+    /**
+     * Puts the chat's running state where the server has it (Bennett's 0.4.4 coordinator: shown running after a
+     * reload, its queue waiting on a turn that never ended, Stop answered "not running"). The agent's record and its
+     * latest run are read: a run under way there — other than [refused] — is adopted and followed, and the chat runs.
+     * Otherwise the account is asked too, and its word that the chat runs stands — a Project's injected turns run with
+     * no `/v1` run — unless the server has refused a Stop of the chat as not running ([refused]), or a queued
+     * message's wait ([waited]) has found it saying so twice with nothing moving on the chat between: then the word is
+     * a turn the server no longer has, and is set aside until the account reports activity after it (see
+     * `AgentRepository.overruleAccountRunning`). A chat at rest is settled on screen and on disk — no stream, no
+     * spinner, the row on the server's latest run, runs restored as active that are older than it read as unknown.
+     * True when a turn is under way; a record that cannot be read leaves the chat as it is.
+     */
+    suspend fun reconcileRunning(agentId: String, refused: String? = null, waited: Boolean = false): Boolean {
+        val e = entry(agentId)
+        if (session.isDemo) return synchronized(e) { e.isChatRunning() }
+        val backend = session.current
+        val api = backend.api
+        net(agentId, "agent")
+        val detail = try {
+            api.getAgent(agentId)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (_: Throwable) {
+            return synchronized(e) { e.isChatRunning() }
+        }
+        val refusedWire = refused?.let { agents.documentedRunId(agentId, it) ?: it }
+        val latestId = detail.latestRunId?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) }
+        val latest = latestId?.let { id ->
+            try {
+                net(agentId, "run")
+                agents.runRecord(agentId, id, api)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (_: Throwable) {
+                null
+            }
+        }
+        val refusedLatest = latest != null && (latest.id == refused || latest.id == refusedWire)
+        if (latest != null && !refusedLatest && e.statusOf(latest).isActive) {
+            e.waitedOnWordAt = null
+            if (synchronized(e) { e.attached > 0 && !e.paused }) {
+                if (!followNextRun(e, endedRunId = refusedWire)) agents.recordRun(agentId, latest, adopt = true)
+            } else {
+                agents.recordRun(agentId, latest, adopt = true)
+            }
+            return true
+        }
+        val snapshot = composerStatus?.let { poll ->
+            try {
+                poll(agentId)
+            } catch (c: CancellationException) {
+                throw c
+            } catch (_: Throwable) {
+                null
+            }
+        }
+        snapshot?.let { agents.applyAccountSnapshots(listOf(it)) }
+        val accountRunning = snapshot?.isRunning ?: (agents.runningScan.value.accountWord[agentId]?.running == true)
+        val activity = snapshot?.activityAtMillis ?: agents.agent(agentId)?.activityAtMillis ?: 0L
+        if (accountRunning) {
+            val stale = when {
+                refused != null -> true
+                waited -> (e.waitedOnWordAt == activity).also { e.waitedOnWordAt = activity }
+                else -> false
+            }
+            if (!stale) return true
+            agents.overruleAccountRunning(agentId, activity)
+            // A turn the account reports after this — its activity moved on — is one the server's answer did not
+            // cover: the chat takes the account's word again, as it would have with nothing set aside.
+            synchronized(e) {
+                e.overruleJob?.cancel()
+                e.overruleJob = e.scope.launch {
+                    agents.runningScan.first { it.accountWord[agentId]?.running == true }
+                    e.publish(transform = { copy(runStatus = e.chatStatus(e.latestRun())) })
+                    if (accountSaysRunning(e)) keepFollowing(e, endedRunId = null)
+                }
+            }
+        }
+        e.waitedOnWordAt = null
+        if (latest != null) {
+            if (refusedLatest && latest.statusEnum().isActive) agents.noteRunEnded(agentId, latest.id, RunStatus.UNKNOWN)
+            agents.recordRun(agentId, latest, adopt = true)
+        }
+        settleAtRest(e, latest)
+        persist(e, backend)
+        return false
+    }
+
+    /**
+     * The chat at rest by the server's word (see [reconcileRunning]): [latest] merged as the server has it, any other
+     * run still held as active that began no later than it read as unknown until its record says more — the disk's
+     * copy of a turn followed before the process died, a prompt's run the server never started — the follow ended and
+     * the status taken from the records, in one frame.
+     */
+    private fun settleAtRest(e: Entry, latest: RunDto?) {
+        e.keepFollowingJob?.cancel()
+        val latestAt = latest?.let { parseIsoMillis(it.createdAt) }
+        fun RunDto.settled(): RunDto = when {
+            latest != null && id == latest.id -> e.known(latest)
+            latestAt != null && statusEnum().isActive && parseIsoMillis(createdAt) <= latestAt -> copy(status = RunStatus.UNKNOWN.name)
+            else -> this
+        }
+        e.streamJob?.cancel()
+        e.publish(
+            mutate = {
+                streamJob = null
+                keepStory()
+                live = null
+                runs = runs.map { it.settled() }.let { page -> if (latest == null || page.any { it.id == latest.id }) page else listOf(e.known(latest)) + page }
+                local = local.map { it.copy(run = it.run.settled()) }
+            },
+            transform = { copy(isStreaming = false, isReconnecting = false, runStatus = e.chatStatus(e.latestRun(), streaming = false)) },
+        )
+    }
+
+    /**
+     * After a load that left the chat running with no run record under way — the account's word, a row or a disk copy
+     * that may be behind — the server is asked where the chat stands (see [reconcileRunning]); at most once a
+     * [RECONCILE_AFTER_LOAD_MS].
+     */
+    private fun reconcileAfterLoad(e: Entry) {
+        val active = synchronized(e) { e.state.value.runStatus?.isActive == true && e.latestRun()?.let { e.statusOf(it).isActive } != true }
+        if (!active) return
+        val now = monotonicMillis()
+        if (e.reconciledAtMs != Long.MIN_VALUE && now - e.reconciledAtMs < RECONCILE_AFTER_LOAD_MS) return
+        e.reconciledAtMs = now
+        e.scope.launch { runCatching { reconcileRunning(e.agentId) }.onFailure { if (it is CancellationException) throw it } }
     }
 
     /**
@@ -5875,6 +6035,8 @@ class ConversationRepository(
         const val KEEP_FOLLOWING_MAX_MS = 15_000L
         /** How many looks, [KEEP_FOLLOWING_BASE_MS] apart, find the account idle after a run ended before the records' word is taken (see [keepFollowing]). */
         const val KEEP_FOLLOWING_IDLE_LOOKS = 4
+        /** How seldom a load that left the chat running with no run under way has it reconciled with the server (see [reconcileAfterLoad]). */
+        const val RECONCILE_AFTER_LOAD_MS = 30_000L
         /** How many of the newest runs a chat opens on, and by how many the window widens each time the reader scrolls up to its end. */
         const val WINDOW_RUNS = 10
         /** The widest window the disk copy reopens on: the runs whose traces are read before the first frame. */
