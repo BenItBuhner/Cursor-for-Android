@@ -323,13 +323,7 @@ class SendFlight internal constructor(
     /** Where [attachment] is laid out in the target (window coordinates), once it is. */
     internal fun targetOf(attachment: AttachmentTakeoff): Rect? = placeOf(attachment)?.takeIf { it.isAttached }?.windowRect()
 
-    private fun placeOf(attachment: AttachmentTakeoff): LayoutCoordinates? {
-        val t = target ?: return null
-        return t.attachments[attachment.look.ordinal] ?: t.attachments[AnyAttachment]
-    }
-
-    /** Whether [attachment] lands on a row's line of names rather than on a tile of its own, dissolving into the words. */
-    private fun dissolves(attachment: AttachmentTakeoff): Boolean = target?.attachments?.containsKey(attachment.look.ordinal) == false
+    private fun placeOf(attachment: AttachmentTakeoff): LayoutCoordinates? = target?.attachments?.get(attachment.look.ordinal)
 
     /** Where [attachment]'s copy is drawn now (window coordinates): where it stood until it flies, then on its way to the bubble. */
     internal fun boxOf(attachment: AttachmentTakeoff): Rect {
@@ -342,7 +336,7 @@ class SendFlight internal constructor(
     internal fun alphaOf(attachment: AttachmentTakeoff): Float {
         if (phase != Phase.Flying) return 1f - fade.value
         val e = SendMotion.Emphasized.transform(progress.value)
-        if (targetOf(attachment) == null || dissolves(attachment)) return 1f - e
+        if (targetOf(attachment) == null) return 1f - e
         return copyAlpha() * lerp(1f, target?.look?.fade ?: 1f, e)
     }
 }
@@ -393,9 +387,6 @@ class SendTargetLook(
  */
 @Immutable
 class SendSurface(val fill: Color, val stroke: Color, val page: Color = Color.Transparent)
-
-/** The ordinal a row's line of attachment names is placed under: any attachment without a place of its own lands there. */
-internal const val AnyAttachment = -1
 
 /** The words of a message as they compare across the composer, the card and the transcript: whitespace folded. */
 private fun words(text: String): String = text.replace(Whitespace, " ").trim()
@@ -496,7 +487,7 @@ internal fun Modifier.sendAttachmentSource(motion: SendMotion?, anchor: Composer
 
 /**
  * A bubble's (or, by [landing], a queue row's) attachment [ordinal] as a send's target: it says where it is laid out to
- * a flight bound for it. A row's line of names is placed under [AnyAttachment]: what has no tile of its own lands there.
+ * a flight bound for it.
  */
 internal fun Modifier.sendAttachmentTarget(motion: SendMotion?, id: String, text: String, ordinal: Int, landing: SendLanding = SendLanding.Bubble): Modifier =
     if (motion == null) this else onPlaced { motion.placeAttachment(id, text, landing, ordinal, it) }

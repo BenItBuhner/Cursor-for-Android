@@ -840,12 +840,13 @@ class AppGraph(
                 steering.sendFollowup(agentId, followup).getOrThrow()
             },
             // A queued message the server refuses as busy against every word here goes to the account's queue
-            // (Extended mode), which sends it when the agent is free — where the composer said it would go.
+            // (Extended mode), which sends it when the agent is free — where the composer said it would go — with its
+            // files, uploaded as `accountSend` does.
             accountQueue = { agentId, item ->
                 val followup = AccountFollowup(
                     text = item.previewText,
                     images = item.images.map { it.image },
-                    files = emptyList(),
+                    files = if (item.files.isEmpty()) emptyList() else promptUploads.ensure(item.files.map { it.file }),
                     mode = AgentMode.ofPlanMode(item.planMode),
                     modelId = item.modelId,
                     modelParams = item.modelParams,
