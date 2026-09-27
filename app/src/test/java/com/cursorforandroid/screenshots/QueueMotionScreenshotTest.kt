@@ -12,6 +12,8 @@ import com.cursorforandroid.ui.conversation.QueueMotionScene
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -47,11 +49,14 @@ class QueueMotionScreenshotTest {
     private fun capture(name: String) = compose.onNodeWithTag(QueueMotionScene.Frame).captureRoboImage(File(outDir, "$name.png").path, RoborazziOptions())
 
     /**
-     * On, a frame at a time, to the first frame the flight is [into] its way: counted from the flight's own progress
-     * rather than the clock, since the frame it starts on depends on what ran in the JVM before it.
+     * On to the flight's takeoff, then held exactly [into] its way: the frames its tween lands on depend on what ran in
+     * the JVM before it, so the tween is stopped and the flight pinned there rather than caught on the nearest frame.
      */
     private fun catchAt(flight: SendFlight, into: Float) {
-        while (flight.phase != SendFlight.Phase.Flying || flight.progress.value < into) scene.frames(16)
+        while (flight.phase != SendFlight.Phase.Flying) scene.frames(16)
+        MainScope().launch { flight.progress.snapTo(into) }
+        scene.frame()
+        assertThat(flight.progress.value).isEqualTo(into)
     }
 
     /** The tap while the agent works, and the flight caught [into] its way to the row. */
