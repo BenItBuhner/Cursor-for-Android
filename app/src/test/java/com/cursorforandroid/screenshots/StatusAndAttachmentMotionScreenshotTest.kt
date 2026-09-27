@@ -47,6 +47,7 @@ import com.cursorforandroid.ui.conversation.LocalTranscriptControls
 import com.cursorforandroid.ui.conversation.TimelineItemView
 import com.cursorforandroid.ui.conversation.TranscriptControls
 import com.cursorforandroid.ui.conversation.captionFade
+import com.cursorforandroid.ui.conversation.rememberCaptionFadeIn
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.github.takahirom.roborazzi.RoborazziOptions
@@ -106,12 +107,13 @@ class StatusAndAttachmentMotionScreenshotTest {
         compose.mainClock.autoAdvance = false
         compose.setContent {
             Scene {
+                val fadeIn = rememberCaptionFadeIn(working)
                 LazyColumn(Modifier.fillMaxWidth().height(260.dp).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     item("prompt") { TimelineItemView(UserMessage("u-1", "Why does the release build drop the splash screen?")) }
                     item("reply") { TimelineItemView(AssistantMessage("a-1", "The theme's `windowSplashScreenAnimatedIcon` is stripped by R8; keeping it fixes the launch.")) }
                     if (working) {
                         item("working") {
-                            Box(captionFade()) { RollingText(caption, style = CursorTheme.typography.base) }
+                            Box(captionFade(fadeIn)) { RollingText(caption, style = CursorTheme.typography.base) }
                         }
                     }
                 }
