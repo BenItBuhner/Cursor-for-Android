@@ -29,6 +29,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.rules.ActivityScenarioRule
+import com.cursorforandroid.data.local.AttachmentStore
+import com.cursorforandroid.data.local.StagedAttachments
+import com.cursorforandroid.domain.ConversationControls
+import com.cursorforandroid.domain.QueuePlacement
+import kotlinx.coroutines.runBlocking
 import com.cursorforandroid.domain.DraftFile
 import com.cursorforandroid.domain.DraftImage
 import com.cursorforandroid.domain.MessageAttachment
@@ -69,9 +74,22 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
         UserMessage("u-1", "Profile the cold start and tell me where the time goes."),
     )
     val queue = mutableStateListOf<QueuedFollowUp>()
+    /** The account's queue as last read (`ListPendingFollowups`): its word on each message, names and counts. */
     val account = mutableStateListOf<PendingFollowup>()
+    /** This device's own queued messages (`QueuePlacement.waiting`), with its copies of what each carries. */
+    val waiting = mutableStateListOf<PendingFollowup>()
+    /** The [waiting] rows whose request is still out. */
+    val sending = mutableStateListOf<String>()
     private val thumbnails = mutableStateMapOf<String, ImageBitmap>()
     var scrolledAway = false
+    /** Extended mode: the composer says a send while the agent works queues on the account. */
+    var onAccount = false
+    val store by lazy { AttachmentStore(compose.activity) }
+    private val staged = HashMap<String, StagedAttachments>()
+
+    /** The account's card as the screen draws it: the account's list projected through this device's placement. */
+    val accountRows: List<PendingFollowup>
+        get() = ConversationControls(queue = account.toList()).placed(QueuePlacement(waiting = waiting.toList(), sendingIds = sending.toSet())).queue
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
@@ -85,11 +103,12 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
                                 for (message in messages) key(message.id) { TimelineItemView(message) }
                             }
                             Spacer(Modifier.weight(1f))
+                            val card = ConversationControls(queue = account.toList()).placed(QueuePlacement(waiting = waiting.toList(), sendingIds = sending.toSet()))
                             QueueDeliveries(
                                 flights = flights,
                                 rows = LinkedHashMap<String, String>().apply {
                                     queue.forEach { put(it.id, it.previewText) }
-                                    account.forEach { put(it.id, it.previewText) }
+                                    card.queue.forEach { put(it.id, it.previewText) }
                                 },
                                 transcript = messages.mapTo(HashSet()) { it.id },
                                 scrolledAway = { scrolledAway },
@@ -97,13 +116,13 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
                             if (queue.isNotEmpty()) {
                                 QueuedFollowUps(queue.toList(), thumbnails.toMap(), {}, {}, {}, Modifier.padding(bottom = 4.dp), flights)
                             }
-                            if (account.isNotEmpty()) {
-                                AccountQueueRows(account.toList(), emptySet(), {}, {}, { _, _ -> }, { _, _ -> }, Modifier.padding(bottom = 4.dp), flights = flights)
+                            if (card.queue.isNotEmpty()) {
+                                AccountQueueRows(card.queue, card.inFlightQueueIds, {}, {}, { _, _ -> }, { _, _ -> }, Modifier.padding(bottom = 4.dp), flights = flights)
                             }
                             ComposerBox(
                                 value = composerText,
                                 onValueChange = {},
-                                placeholder = "Follow up (sends when the turn ends)…",
+                                placeholder = if (onAccount) "Follow up (queues on your account)…" else "Follow up (sends when the turn ends)…",
                                 onSend = {},
                                 canSend = composerText.isNotBlank() || images.isNotEmpty() || files.isNotEmpty(),
                                 isRunning = true,
@@ -169,48 +188,111 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
     }
 
     /**
-     * The tap while the agent runs, as the screen makes it: the composer's text and chips lifted off for the queue card,
-     * the composer emptied, and the message on the card as row [id] in the same frame (enqueueing is synchronous).
+     * The tap while the agent runs, as the screen makes it: the composer's text and chips lifted off for the queue card
+     * and the composer emptied. On the device's queue the message is on the card as row [id] in the same frame
+     * (enqueueing is synchronous). On the account's ([onAccount], Extended mode: what a phone signed in runs), as
+     * `accountRoute(queued = true)` makes it: the composer's attachments are staged off the main thread
+     * ([AttachmentStore.stage]) and the message is this device's own row [id] [stagedAfter] ms on, its request still
+     * out, with its copies for the row's tiles; the account's list names it later ([accountTakes]).
      */
-    fun sendQueued(motion: SendMotion, id: String, onAccount: Boolean = false): SendFlight? {
+    fun sendQueued(motion: SendMotion, id: String, onAccount: Boolean = false, stagedAfter: Long = 32L): SendFlight? {
         val text = composerText.trim()
         var flight: SendFlight? = null
+        var drafts = emptyList<DraftImage>()
+        var attached = emptyList<DraftFile>()
         compose.runOnUiThread {
-            val standing = queue.mapTo(HashSet()) { it.id } + account.map { it.id }
+            val standing = queue.mapTo(HashSet()) { it.id } + accountRows.map { it.id }
             flight = motion.depart(anchor.takeoff(), text, excluded = standing, landing = SendLanding.Queue)
-            val drafts = images.map { DraftImage(it.id, it.image) }
+            drafts = images.map { DraftImage(it.id, it.image) }
             images.forEach { image -> image.thumbnail?.let { thumbnails[image.id] = it } }
-            val attached = files.map { DraftFile(it.id, it.file) }
-            if (onAccount) {
-                account += PendingFollowup(id, text, files = attached.map { com.cursorforandroid.domain.PendingAttachment(it.file.name, it.file.mimeType) }, imageCount = drafts.size)
-            } else {
-                queue += QueuedFollowUp(id, text, images = drafts, files = attached, queuedAtMillis = 0L)
-            }
+            attached = files.map { DraftFile(it.id, it.file) }
+            if (!onAccount) queue += QueuedFollowUp(id, text, images = drafts, files = attached, queuedAtMillis = 0L)
             composerText = ""
             images.clear()
             files.clear()
+        }
+        if (onAccount) {
+            frame()
+            val set = runBlocking { store.stage(drafts.map { it.image }, attached.map { it.file }) }
+            staged[id] = set
+            frames(stagedAfter)
+            compose.runOnUiThread {
+                waiting += ownRow(id, text, set.attachments)
+                sending += id
+            }
         }
         frame()
         return flight
     }
 
+    /** This device's row for a message it queued on the account, as `ConversationRepository.queuePlacement` makes it. */
+    fun ownRow(id: String, text: String, carried: List<MessageAttachment>) = PendingFollowup(
+        id = id,
+        text = text,
+        files = carried.filter { it.isFile }.map { com.cursorforandroid.domain.PendingAttachment(it.name ?: "Document", it.mimeType.orEmpty()) },
+        imageCount = carried.count { !it.isFile },
+        attachments = carried,
+    )
+
+    /**
+     * On, a frame at a time, until every picture on the account's card has its tile's preview: decoded off the main
+     * thread, as on a phone, which a held clock does not wait for.
+     */
+    fun awaitTilePreviews() {
+        val paths = accountRows.flatMap { it.attachments }.filterNot { it.isFile }.map { it.path }
+        repeat(400) {
+            if (paths.all { AttachmentImages.get(tileThumbnailKey(it)) != null }) {
+                frame()
+                return
+            }
+            Thread.sleep(5)
+            frames(16)
+        }
+        error("the tiles' previews were never decoded: $paths")
+    }
+
+    /** The account's answer to row [id]'s request, and its list read again: the message named there in the account's words (names and a count). */
+    fun accountTakes(id: String) {
+        compose.runOnUiThread {
+            val own = waiting.first { it.id == id }
+            sending.remove(id)
+            account += PendingFollowup(id, own.text, files = own.files, imageCount = own.imageCount)
+        }
+        frame()
+    }
+
     /**
      * The run taking queued row [id]: the row leaves the card, and its bubble [bubble] is filed in the same frame
      * (the account's queue) or, with [filedAfter], that many milliseconds on (the device's, whose bubble waits for the run).
+     * A message queued on the account from here is filed with the copies it was staged with, which then move under
+     * the run (`commitFiled`: the bubble names them there a frame on, a path read in between following the move);
+     * returns what the bubble lists at the end.
      */
-    fun deliver(id: String, bubble: String, filedAfter: Long = 0L, attachments: List<MessageAttachment> = emptyList()) {
-        val text = queue.firstOrNull { it.id == id }?.previewText ?: account.first { it.id == id }.previewText
+    fun deliver(id: String, bubble: String, filedAfter: Long = 0L, attachments: List<MessageAttachment> = emptyList()): List<MessageAttachment> {
+        val text = queue.firstOrNull { it.id == id }?.previewText ?: accountRows.first { it.id == id }.previewText
+        val set = staged.remove(id)
+        val filed = set?.attachments ?: attachments
         compose.runOnUiThread {
             queue.removeAll { it.id == id }
             account.removeAll { it.id == id }
-            if (filedAfter == 0L) messages += UserMessage(bubble, text, attachments = attachments)
+            waiting.removeAll { it.id == id }
+            sending.remove(id)
+            if (filedAfter == 0L) messages += UserMessage(bubble, text, attachments = filed)
         }
         frame()
         if (filedAfter > 0L) {
             frames(filedAfter)
-            compose.runOnUiThread { messages += UserMessage(bubble, text, attachments = attachments) }
+            compose.runOnUiThread { messages += UserMessage(bubble, text, attachments = filed) }
             frame()
         }
+        if (set == null) return filed
+        val moved = runBlocking { store.commit(AgentId, bubble, set) }
+        compose.runOnUiThread {
+            val at = messages.indexOfFirst { it.id == bubble }
+            messages[at] = messages[at].copy(attachments = moved)
+        }
+        frame()
+        return moved
     }
 
     /** The window as drawn now, into [file]: drawn here rather than through captureToImage, which waits on the held clock. */
@@ -226,5 +308,6 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
 
     companion object {
         const val Frame = "queue_motion_frame"
+        const val AgentId = "bc-queue-motion"
     }
 }

@@ -139,11 +139,13 @@ class AttachmentStore(context: Context) {
 
     /**
      * The set [stage] wrote for [attachments], read back after a restart — for a message still waiting on the account's
-     * queue, whose copies are to be filed under the run it starts; empty when they are gone.
+     * queue, whose copies are to be filed under the run it starts; empty when they are gone. One put back on the card
+     * from under a run that did not carry it ([committed]) is read back where it was filed.
      */
     fun staged(attachments: List<MessageAttachment>): StagedAttachments {
         val dir = attachments.firstOrNull()?.let { File(it.path).parentFile } ?: return StagedAttachments.EMPTY
-        if (dir.parentFile != staging || attachments.any { !File(it.path).isFile }) return StagedAttachments.EMPTY
+        val kept = dir.parentFile == staging || dir.parentFile?.parentFile == root
+        if (!kept || attachments.any { File(it.path).parentFile != dir || !File(it.path).isFile }) return StagedAttachments.EMPTY
         return StagedAttachments(dir, attachments)
     }
 

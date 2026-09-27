@@ -692,8 +692,8 @@ class ConversationRepository(
             }
             for (a in awaiting) {
                 // Waiting: on the card, from this device's own knowledge, until the frame that files it (see
-                // [fileInFrame]) — with what it carries, as the account's own row would say it: its files by name and
-                // type, its pictures by count.
+                // [fileInFrame]) — with what it carries, as the account's own row would say it (its files by name and
+                // type, its pictures by count), and this device's copies of it for the row's tiles.
                 val carried = a.staged.attachments.attachments
                 val id = a.followupId ?: QueuePlacement.LOCAL_ID_PREFIX + a.staged.localId
                 if (a.sending) sendingIds += id
@@ -704,6 +704,7 @@ class ConversationRepository(
                     files = carried.filter { it.isFile }.map { PendingAttachment(it.name ?: "Document", it.mimeType.orEmpty()) },
                     imageCount = carried.count { !it.isFile },
                     note = if (a.queuedOnAccount) null else QueuePlacement.DELIVERING_NOTE,
+                    attachments = carried,
                 )
             }
             if (ids.isEmpty() && texts.isEmpty() && returned.isEmpty() && waiting.isEmpty() && shownIds.isEmpty() && shownTexts.isEmpty()) return QueuePlacement.NONE
