@@ -340,9 +340,12 @@ fun ComposerBox(
     BackHandler(enabled = expansion.expanded) { expansion.collapse() }
     // Collapsing, the field shrinks from the bottom; the caret is kept in sight as it does, so the line being written
     // is still the one showing when the composer is back to its own height.
+    // Only while it collapses (and on the frame it lands): at rest the field scrolls as the reader leaves it.
     LaunchedEffect(expansion, textScroll) {
+        var last = 0f
         snapshotFlow { expansion.progress.value to textScroll.maxValue }.collect { (p, _) ->
-            if (!expansion.expanded && p < 1f) keepCaretInView(textLayout.get?.invoke(), field.selection, textScroll)
+            if (!expansion.expanded && (p > 0f && p < 1f || last > 0f)) keepCaretInView(textLayout.get?.invoke(), field.selection, textScroll)
+            last = p
         }
     }
     val commandTints = commandTints()
@@ -898,8 +901,11 @@ private fun ExpandButton(expansion: ComposerExpansion, offered: Boolean, afterPl
 
 /** Scrolls the field just far enough that the caret at [selection]'s end is inside its viewport. */
 private suspend fun keepCaretInView(layout: TextLayoutResult?, selection: TextRange, scroll: ScrollState) {
-    val viewport = scroll.viewportSize
-    if (layout == null || viewport <= 0) return
+    // A text field scrolls its state without ever setting viewportSize (only verticalScroll does), so the viewport is
+    // what the text's height leaves once the scroll range is taken out; with no range, all of it is in view.
+    if (layout == null || scroll.maxValue <= 0) return
+    val viewport = layout.size.height - scroll.maxValue
+    if (viewport <= 0) return
     val caret = layout.getCursorRect(selection.end.coerceIn(0, layout.layoutInput.text.length))
     val target = when {
         caret.bottom > scroll.value + viewport -> caret.bottom - viewport

@@ -23,6 +23,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -30,6 +31,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.withKeyDown
 import androidx.compose.ui.text.TextRange
@@ -60,6 +62,7 @@ class ComposerExpandTest {
     private var draft by mutableStateOf("")
     private val sent = ArrayList<String>()
     private var density = 1f
+    private val anchor = ComposerAnchor()
 
     private fun show(bounded: Boolean = true) {
         compose.setContent {
@@ -74,6 +77,7 @@ class ComposerExpandTest {
                         plusMenu = ComposerMenuActions(onPickMedia = {}),
                         modelLabel = "Claude Fable 5.1",
                         onModel = {},
+                        anchor = anchor,
                         modifier = Modifier.testTag(COMPOSER),
                     )
                 }
@@ -104,6 +108,16 @@ class ComposerExpandTest {
     private fun rootHeight() = compose.onRoot().fetchSemanticsNode().boundsInRoot.height
     private fun editable() = field.fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
     private fun selection() = field.fetchSemanticsNode().config.getOrNull(SemanticsProperties.TextSelectionRange)
+
+    /** Whether the whole line the caret is on shows inside the field's viewport. */
+    private fun caretLineInView(): Boolean {
+        val caret = checkNotNull(selection()).end
+        val viewport = bounds(hasSetTextAction()).height
+        val scroll = compose.runOnIdle { anchor.scroll() }.toFloat()
+        val layout = checkNotNull(compose.runOnIdle { anchor.layout?.invoke() })
+        val line = layout.getLineForOffset(caret)
+        return layout.getLineTop(line) >= scroll - 0.5f && layout.getLineBottom(line) <= scroll + viewport + 0.5f
+    }
 
     private fun type(text: String) {
         compose.runOnIdle { draft = text }
@@ -186,6 +200,32 @@ class ComposerExpandTest {
         assertThat(editable()).isEqualTo(edited)
         assertThat(selection()).isEqualTo(TextRange(caret.start + " and more".length))
         compose.runOnIdle { assertThat(draft).isEqualTo(edited) }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun `collapsed on the button, the field keeps focus and the caret's line stays in view rather than jumping to the top`() {
+        show()
+        type(lines(30))
+        field.performClick()
+        field.performTextInputSelection(TextRange(lines(30).length))
+        compose.waitForIdle()
+        val atEnd = compose.runOnIdle { anchor.scroll() }
+        assertThat(atEnd).isGreaterThan(0)
+        tapExpand()
+        tapExpand()
+        field.assertIsFocused()
+        assertThat(compose.runOnIdle { anchor.scroll() }).isEqualTo(atEnd)
+        assertThat(caretLineInView()).isTrue()
+
+        // A caret in the middle, lower down the expanded field than the collapsed one shows: scrolled to, not to the top.
+        tapExpand()
+        field.performTextInputSelection(TextRange(lines(20).length))
+        compose.waitForIdle()
+        tapExpand()
+        field.assertIsFocused()
+        assertThat(compose.runOnIdle { anchor.scroll() }).isGreaterThan(0)
+        assertThat(caretLineInView()).isTrue()
     }
 
     @Test

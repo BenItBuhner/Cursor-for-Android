@@ -425,6 +425,12 @@ class AgentRepository(
      */
     private val endedRuns = ConcurrentHashMap<String, EndedRun>()
 
+    /**
+     * Chats the server has put at rest while the account's list called them running, by id, with the account's
+     * activity time for the chat when it did (see [overruleAccountRunning]). Cleared with the list.
+     */
+    private val overruledRunning = ConcurrentHashMap<String, Long>()
+
     /** [startedAtMillis] is the run's `createdAt` when the list has read its record ([runStarts]); null when it never has. */
     private class EndedRun(val runId: String, val status: RunStatus, val startedAtMillis: Long?)
 
@@ -601,6 +607,7 @@ class AgentRepository(
         pinnedUnresolved.clear()
         endedRuns.clear()
         runStarts.clear()
+        overruledRunning.clear()
         synchronized(launchTraces) { launchTraces.clear() }
     }
 
@@ -2453,9 +2460,41 @@ class AgentRepository(
                     // batch's running composers as the set made it flap with the order the batches landed in (a
                     // record read by id emptied it), and with it the running count and how many rows the next pass
                     // fetched by id.
-                    val words = it.accountWord + composers.filter { c -> c.status != null }.associate { c -> c.id to RunningScan.AccountWord(c.isRunning, now) }
+                    val words = it.accountWord + composers.filter { c -> c.status != null }.associate { c -> c.id to RunningScan.AccountWord(c.isRunning && !overruled(c), now) }
                     it.copy(accountIds = words.filterValues { w -> w.running }.keys, accountAtMillis = now, accountWord = words)
                 }
+            }
+        }
+    }
+
+    /**
+     * True when [snap]'s running word is one the server has already answered: nothing has happened on the chat since
+     * (its activity time has not moved). A word of rest, or activity after the answer, ends the overrule.
+     */
+    private fun overruled(snap: ComposerSnapshot): Boolean {
+        val at = overruledRunning[snap.id] ?: return false
+        val activity = snap.activityAtMillis
+        if (!snap.isRunning || (activity != null && activity > at)) {
+            overruledRunning.remove(snap.id)
+            return false
+        }
+        return true
+    }
+
+    /**
+     * The server has said [agentId] is at rest — a Stop it refused as "not running", a queued message's long wait
+     * that found no active run — while the account's list goes on calling it running: that word, a Project's injected
+     * turn's only sign, is set aside until the account reports activity after [activityAtMillis] (a new turn, which
+     * moves the chat's activity) or calls the chat idle. Without it the stale word would keep the send gate shut and
+     * the spinner on for good, the account being asked again and again and saying the same.
+     */
+    fun overruleAccountRunning(agentId: String, activityAtMillis: Long) {
+        synchronized(publishLock) {
+            overruledRunning[agentId] = activityAtMillis
+            _runningScan.update { scan ->
+                val word = scan.accountWord[agentId]?.takeIf { it.running } ?: return@update scan
+                val words = scan.accountWord + (agentId to word.copy(running = false))
+                scan.copy(accountIds = scan.accountIds?.minus(agentId), accountWord = words)
             }
         }
     }
