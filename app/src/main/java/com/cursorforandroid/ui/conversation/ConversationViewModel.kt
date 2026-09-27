@@ -613,7 +613,21 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      * and the attachments the composer's may travel into; empty for attachments sent alone — and null when nothing
      * went there: refused or queued.
      */
-    fun send(): String? {
+    fun send(): String? = (submit() as? Sent.Bubble)?.text
+
+    /** Where a send went, with what was typed ([text]; empty for attachments sent alone): the composer's text flies after it. */
+    sealed interface Sent {
+        val text: String
+
+        /** Out now, into a bubble at the foot of the transcript. */
+        data class Bubble(override val text: String) : Sent
+
+        /** Onto the queue card above the composer, behind the turn under way. */
+        data class Queued(override val text: String) : Sent
+    }
+
+    /** [send], saying where the message went: a bubble, the queue card, or — refused — nowhere (null). */
+    fun submit(): Sent? {
         val text = draft.value.trim()
         val images = attachments.value
         val attached = files.value
@@ -657,7 +671,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
             // composer from the tap, never a bubble first, until it is delivered (see ConversationRepository.queueAhead).
             busy && accountQueue -> {
                 dispatch(message, graph.outgoing.accountRoute(agentId, message, queued = true))
-                return null
+                return Sent.Queued(text)
             }
             // This device's queue sends the documented run request, which cannot carry Ask or Debug: a message in
             // either mode is not put behind the ones waiting there to go out as an agent turn without a word.
@@ -667,13 +681,13 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
             }
             busy || waiting -> {
                 enqueue(text, images, attached, options)
-                return null
+                return Sent.Queued(text)
             }
             // A mode, or files: only the account's follow-up carries them.
             accountMode || withFiles -> dispatch(message, graph.outgoing.accountRoute(agentId, message))
             else -> dispatch(message, graph.outgoing.documentedRoute())
         }
-        return text
+        return Sent.Bubble(text)
     }
 
     /**
