@@ -479,7 +479,7 @@ class HeadlessConversationApi(
             userMessage?.text?.isNotBlank() == true -> HeadlessStep(userMessage = userMessage.text) to "user_message"
             // A `ConversationMessage` typed as the model's is its text, not a prompt, whatever member carries it.
             humanMessage?.text?.isNotBlank() == true && humanMessage.isAssistant -> HeadlessStep(text = humanMessage.text) to "human_message(ai)"
-            humanMessage?.text?.isNotBlank() == true -> HeadlessStep(userMessage = humanMessage.text, projectMode = humanMessage.isProjectMode) to "human_message"
+            humanMessage?.text?.isNotBlank() == true -> HeadlessStep(userMessage = humanMessage.text, projectMode = humanMessage.isProjectMode, steer = humanMessage.turnSteer == true) to "human_message"
             toolCall != null -> readToolCall(toolCall).let { call -> (call?.let { HeadlessStep(toolCall = it) } ?: HeadlessStep()) to "tool_call[${call?.source ?: DROPPED}]" }
             streamedBackToolCall != null -> readToolCall(streamedBackToolCall).let { call -> (call?.let { HeadlessStep(toolCall = it.copy(isStreaming = true)) } ?: HeadlessStep()) to "streamed_back_tool_call[${call?.source ?: DROPPED}]" }
             finalToolResult != null && finalToolResult.toolCallId.isNotBlank() -> HeadlessStep(toolResult = HeadlessToolResult(finalToolResult.toolCallId, finalToolResult.result)) to "final_tool_result"
@@ -508,7 +508,7 @@ class HeadlessConversationApi(
      * (`MessageType`: HUMAN 1, AI 2) are enums, by name or by number.
      */
     @Serializable
-    private data class HumanMessageDto(val text: String? = null, val agentMode: JsonElement? = null, val type: JsonElement? = null) {
+    private data class HumanMessageDto(val text: String? = null, val agentMode: JsonElement? = null, val type: JsonElement? = null, val turnSteer: Boolean? = null) {
         val isProjectMode: Boolean get() = readProjectMode(agentMode)
         val isAssistant: Boolean get() = readAssistantType(type)
     }

@@ -142,6 +142,13 @@ class FaultServer(
     @Volatile var namesQueuedRuns = false
     /** With [namesQueuedRuns], the run list also carries the named run as `CREATING` while it waits (not seen on the account; the app must not follow it either way). */
     @Volatile var listsQueuedRuns = false
+    /**
+     * With [namesQueuedRuns], the named run keeps the date the account gave it when it took the message — mid-turn,
+     * before the turn it waits behind has ended — rather than the moment [deliverNext] starts it: the account creates
+     * the run record with its answer.
+     */
+    @Volatile var datesQueuedRunsAtQueue = false
+    private val queuedRunDates = ConcurrentHashMap<String, String>()
     /** Whether the account may start the next run on a queued message on its own the moment the turn ends (see [endTurn]); tests deliver by hand otherwise. */
     @Volatile var autoDeliver = false
     /** The followups delivered, in order, and the run each started (a steer's run is the one it was delivered into). */
@@ -569,10 +576,9 @@ class FaultServer(
             }
             val sequence = ids.incrementAndGet()
             val runId = "run-followup-$sequence"
-            if (listsQueuedRuns) {
-                val at = Instant.ofEpochMilli(clock() + sequence).toString()
-                runs[runId] = RunDto(id = runId, agentId = agentId, status = "CREATING", createdAt = at, updatedAt = at)
-            }
+            val at = Instant.ofEpochMilli(clock() + sequence).toString()
+            if (datesQueuedRunsAtQueue) queuedRunDates[runId] = at
+            if (listsQueuedRuns) runs[runId] = RunDto(id = runId, agentId = agentId, status = "CREATING", createdAt = at, updatedAt = at)
             pending.getOrPut(agentId) { CopyOnWriteArrayList() } += Pending(followupId, text, clock(), runId = runId)
             return json(200, """{"runId":"$runId"}""")
         }
@@ -685,13 +691,28 @@ class FaultServer(
         return json(200, """{"outcome":"OUTCOME_QUEUED"}""")
     }
 
+    /**
+     * The turn under way takes the queued [followupId] itself, as a Project's coordinator does between its steps: the
+     * account consumes it — the run it named for it, if any, left as it was — and files its words in the transcript
+     * among the turn's messages, the turn's answer to it to follow. Returns the run it went into.
+     */
+    fun takeIntoTurn(agentId: String, followupId: String): String? {
+        val runId = agents[agentId]?.latestRunId ?: return null
+        val p = pending[agentId]?.firstOrNull { it.followupId == followupId && it.consumedAtMs == null } ?: return null
+        p.consumedAtMs = clock()
+        p.consumedAtServerMs = nowMillis()
+        delivered += p.followupId to runId
+        transcripts[agentId] = transcripts[agentId].orEmpty() + V0ConversationMessageDto("$runId-taken-${ids.incrementAndGet()}", "user_message", p.text)
+        return runId
+    }
+
     /** The account starts a run on [text] now — [named] when it named one when it took the message: the run record, the agent's latest, the transcript's prompt. */
     private fun startRun(agentId: String, text: String, named: String? = null): RunDto {
         val agent = agents.getValue(agentId)
         val sequence = ids.incrementAndGet()
         val runId = named ?: "run-followup-$sequence"
         val now = Instant.ofEpochMilli(clock() + sequence).toString()
-        val run = RunDto(id = runId, agentId = agentId, status = "RUNNING", createdAt = now, updatedAt = now)
+        val run = RunDto(id = runId, agentId = agentId, status = "RUNNING", createdAt = named?.let { queuedRunDates[it] } ?: now, updatedAt = now)
         runs[runId] = run
         agents[agentId] = agent.copy(status = "ACTIVE", latestRunId = runId, updatedAt = now)
         v0[agentId]?.let { v0[agentId] = it.copy(status = "RUNNING") }
