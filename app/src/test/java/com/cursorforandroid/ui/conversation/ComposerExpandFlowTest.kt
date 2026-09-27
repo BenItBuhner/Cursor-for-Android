@@ -11,6 +11,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToNodeAction
@@ -234,6 +235,7 @@ class ComposerExpandFlowTest {
         play(14)
         frames(10)
         assertWithMessage("$label: collapsed back to where it was").that(bounds(hasTestTag(COMPOSER)).height).isWithin(2f).of(collapsed.height)
+        field(COMPOSER).assertIsFocused()
         assertThat(editable(COMPOSER)).endsWith(EDIT)
 
         tapExpand(COMPOSER)
