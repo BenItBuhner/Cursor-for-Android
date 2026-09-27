@@ -60,6 +60,14 @@ object RecordPairing {
         fun count(of: Evidence): Int = evidence.indices.count { runs[it] != null && evidence[it] == of }
         /** Turns without a run. */
         val runless: Int get() = runs.count { it == null }
+
+        /** This pairing of some of a window's turns — the [at]th of its [size], in order — as the whole window's, the others without a run. */
+        fun spread(at: List<Int>, size: Int): Pairing {
+            val wide = arrayOfNulls<RunDto>(size)
+            val how = Array(size) { Evidence.NONE }
+            at.forEachIndexed { k, i -> wide[i] = runs[k]; how[i] = evidence[k] }
+            return Pairing(wide, how, loose, candidates)
+        }
     }
 
     /**
