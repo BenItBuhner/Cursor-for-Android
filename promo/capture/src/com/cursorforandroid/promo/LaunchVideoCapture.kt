@@ -23,6 +23,7 @@ import com.cursorforandroid.MainActivity
 import com.cursorforandroid.data.demo.DemoStore
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.data.repo.CursorBackend
+import com.cursorforandroid.data.repo.ReviewRepository
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -101,9 +102,11 @@ class LaunchVideoCapture {
      */
     private fun launch(screen: Screen, name: String): Director {
         val store = DemoStore()
-        val backend = CursorBackend(PromoCursorApi(store), PromoRunStreamer(store, PromoScript.load()), isDemo = true)
+        val script = PromoScript.load()
+        val backend = CursorBackend(PromoCursorApi(store), PromoRunStreamer(store, script), isDemo = true)
         val graph = AppGraph(app, SecureKeyStore(app) { app.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, demo = backend)
         CursorApp::class.java.getDeclaredField("graph").apply { isAccessible = true }.set(app, graph)
+        ReviewRepository::class.java.getDeclaredField("demo").apply { isAccessible = true }.set(graph.reviews, PromoReview(script))
         runBlocking {
             graph.prefs.setComposerDefaults(repoUrl = CESIUM_REPO, ref = "main", modelId = "composer-2.5", params = mapOf("fast" to "true"), autoCreatePr = false)
             graph.prefs.setWhatsNewReadVersion(graph.appVersion)
