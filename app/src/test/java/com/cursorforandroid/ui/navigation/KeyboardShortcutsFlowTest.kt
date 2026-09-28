@@ -38,6 +38,7 @@ import com.cursorforandroid.data.local.CachedConversation
 import com.cursorforandroid.domain.BuiltInSlashCommands
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.ui.agents.AgentRowTags
+import com.cursorforandroid.ui.settings.KeyboardShortcutsCopy
 import com.cursorforandroid.ui.settings.KeyboardShortcutsTags
 import com.cursorforandroid.ui.settings.SettingsTags
 import com.cursorforandroid.ui.shortcuts.KeyChord
@@ -314,6 +315,7 @@ class KeyboardShortcutsFlowTest {
         compose.waitUntil(20_000) { onScreen("Appearance") }
         compose.onNodeWithTag(SettingsTags.KEYBOARD_SHORTCUTS_ROW).performScrollTo().performClick()
         compose.waitUntil(20_000) { exists(hasTestTag(KeyboardShortcutsTags.PAGE)) }
+        assertTrue(onScreen(KeyboardShortcutsCopy.HINT))
         listOf("Search chats and Projects", "Switch between recent chats", "Check for new messages", "Reload transcript").forEach { label ->
             assertTrue(label, exists(hasAnyAncestor(hasTestTag(KeyboardShortcutsTags.PAGE)) and hasText(label, substring = true)))
         }
@@ -333,16 +335,26 @@ class KeyboardShortcutsFlowTest {
 
     private fun savedBindings() = runBlocking { graph.prefs.shortcutBindings.first() }
 
+    /** Whether [shortcut]'s keys field reads [text]: drawn inside the row, whose semantics merge it away. */
+    private fun inField(shortcut: Shortcut, text: String) = compose.onAllNodes(
+        hasAnyAncestor(hasTestTag(KeyboardShortcutsTags.field(shortcut))) and hasText(text),
+        useUnmergedTree = true,
+    ).fetchSemanticsNodes().isNotEmpty()
+
     @Test
     fun `a shortcut moved in Settings answers on its new keys, and its old keys no longer do anything`() {
         showShell(wide = true)
         openShortcutsPage()
+        assertTrue(inField(Shortcut.ToggleSidebar, "B"))
         compose.onNodeWithTag(KeyboardShortcutsTags.row(Shortcut.ToggleSidebar)).performScrollTo().performClick()
         compose.waitUntil(5_000) { exists(hasTestTag(KeyboardShortcutsTags.CAPTURE)) }
+        assertTrue(inField(Shortcut.ToggleSidebar, KeyboardShortcutsCopy.PLACEHOLDER))
         // Pressed for the capture, Ctrl+J is not also read as anything else.
         chord(KeyEvent.KEYCODE_J)
         compose.waitUntil(5_000) { !exists(hasTestTag(KeyboardShortcutsTags.CAPTURE)) }
         compose.waitUntil(5_000) { savedBindings().chords(Shortcut.ToggleSidebar) == listOf(KeyChord.ctrl(KeyEvent.KEYCODE_J)) }
+        assertTrue(inField(Shortcut.ToggleSidebar, "J"))
+        assertFalse(inField(Shortcut.ToggleSidebar, KeyboardShortcutsCopy.PLACEHOLDER))
         assertTrue(compose.onAllNodes(hasTestTag(KeyboardShortcutsTags.reset(Shortcut.ToggleSidebar)), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
 
         back()
@@ -371,6 +383,8 @@ class KeyboardShortcutsFlowTest {
         compose.onNodeWithTag(KeyboardShortcutsTags.SWAP).performScrollTo().performClick()
         compose.waitUntil(5_000) { savedBindings().chords(Shortcut.CatchUp) == listOf(KeyChord.ctrl(KeyEvent.KEYCODE_B)) }
         assertEquals(listOf(KeyChord.ctrl(KeyEvent.KEYCODE_R)), savedBindings().chords(Shortcut.ToggleSidebar))
+        assertTrue(inField(Shortcut.CatchUp, "B"))
+        assertTrue(inField(Shortcut.ToggleSidebar, "R"))
 
         compose.onNodeWithTag(KeyboardShortcutsTags.RESET_ALL).performScrollTo().performClick()
         compose.waitUntil(5_000) { savedBindings() == ShortcutBindings.Defaults }

@@ -1,6 +1,12 @@
 package com.cursorforandroid.ui.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,17 +16,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -41,11 +51,14 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.cursorforandroid.ui.components.CursorButton
 import com.cursorforandroid.ui.components.CursorHeader
 import com.cursorforandroid.ui.components.CursorIcons
@@ -53,7 +66,6 @@ import com.cursorforandroid.ui.components.FlatIconButton
 import com.cursorforandroid.ui.components.HairlineDivider
 import com.cursorforandroid.ui.components.fadingVerticalScroll
 import com.cursorforandroid.ui.components.pressable
-import com.cursorforandroid.ui.shortcuts.Chord
 import com.cursorforandroid.ui.shortcuts.ConflictResolution
 import com.cursorforandroid.ui.shortcuts.KeyChord
 import com.cursorforandroid.ui.shortcuts.LocalKeyboardShortcuts
@@ -74,13 +86,19 @@ object KeyboardShortcutsTags {
 
     fun row(shortcut: Shortcut) = "keyboard_shortcut_${shortcut.id}"
 
+    /** The outlined field on [shortcut]'s row that shows its keys, and waits for new ones. */
+    fun field(shortcut: Shortcut) = "keyboard_shortcut_field_${shortcut.id}"
+
     fun reset(shortcut: Shortcut) = "keyboard_shortcut_reset_${shortcut.id}"
 }
 
 object KeyboardShortcutsCopy {
+    const val HINT = "Tap a shortcut to change it."
+    const val FOOTER = "Shortcuts work from a hardware keyboard, with the composer focused too. The on-screen keyboard is left alone."
+    const val FIXED = "Always the same"
     const val PRESS = "Press the new keys. Esc cancels."
-    const val WAITING = "Press keys"
-    const val CHANGE = "Change keys"
+    const val PLACEHOLDER = "Press keys…"
+    const val WAITING = "Waiting for keys"
     const val SWAP = "Swap"
     const val REPLACE = "Replace"
     const val CANCEL = "Cancel"
@@ -104,12 +122,15 @@ object KeyboardShortcutsCopy {
     }
 }
 
+private val FieldMinWidth = 104.dp
+private val FieldHeight = 34.dp
+
 /**
- * Settings › Keyboard shortcuts: every chord the app answers from a hardware keyboard, in the groups the cheat sheet
- * (Ctrl+/) shows them in, from the same copy ([ShortcutsCopy]). A shortcut that can move is a row to tap: it then
- * waits for the new keys ([ShortcutCapture]), says so when they are kept for something else, and asks whether to swap
- * or replace when another shortcut is on them — never leaving two on the same keys. A moved shortcut has a reset beside
- * its keys, and the page ends on resetting them all. [onChange] saves; [bindings] is what is saved.
+ * Settings › Keyboard shortcuts. Every shortcut that can move shows its keys in an outlined field on the right of its
+ * row, as an input would: tapped, the field waits for the new keys ([ShortcutCapture]), says so when they are kept for
+ * something else, and asks whether to swap or replace when another shortcut is on them — never leaving two on the
+ * same keys. A moved shortcut has a reset beside its field. The chords that never move (Ctrl+Tab, Ctrl+1 … 0, Esc)
+ * follow in a group of their own, as plain key caps with no field. [onChange] saves; [bindings] is what is saved.
  */
 @Composable
 fun KeyboardShortcutsScreen(
@@ -140,6 +161,9 @@ fun KeyboardShortcutsScreen(
     }
     BackHandler(enabled = capturing) { capture.cancel() }
 
+    val groups = ShortcutsCopy.groups(shown)
+    val fixed = groups.flatMap { group -> group.lines.filter { it.shortcut == null } }
+
     Column(modifier.fillMaxSize().background(colors.canvas).testTag(KeyboardShortcutsTags.PAGE)) {
         CursorHeader(
             title = ShortcutsCopy.TITLE,
@@ -155,19 +179,27 @@ fun KeyboardShortcutsScreen(
         ) {
             // A reading column, centred on a wide pane.
             Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
-                Text(ShortcutsCopy.SETTINGS_INTRO, style = type.small, color = colors.textTertiary, modifier = Modifier.padding(top = 12.dp, start = 2.dp))
-                ShortcutsCopy.groups(shown).forEach { group ->
+                Row(Modifier.padding(top = 12.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(CursorIcons.Pencil, null, tint = colors.iconTertiary, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(KeyboardShortcutsCopy.HINT, style = type.small, color = colors.textSecondary)
+                }
+                groups.forEach { group ->
+                    val editable = group.lines.mapNotNull { line -> line.shortcut?.let { line to it } }
+                    if (editable.isEmpty()) return@forEach
                     Group(group.title)
                     SettingsCard {
-                        group.lines.forEachIndexed { index, line ->
+                        editable.forEachIndexed { index, (line, shortcut) ->
                             if (index > 0) HairlineDivider()
-                            val shortcut = line.shortcut
-                            if (shortcut == null) {
-                                ShortcutLineRow(line, Modifier.heightIn(min = CursorDimens.listRow).padding(horizontal = RowInset, vertical = 11.dp))
-                            } else {
-                                BindingRow(line, shortcut, customized = !shown.isDefault(shortcut), capture = capture)
-                            }
+                            BindingRow(line, shortcut, customized = !shown.isDefault(shortcut), capture = capture)
                         }
+                    }
+                }
+                Group(KeyboardShortcutsCopy.FIXED)
+                SettingsCard {
+                    fixed.forEachIndexed { index, line ->
+                        if (index > 0) HairlineDivider()
+                        ShortcutLineRow(line, Modifier.heightIn(min = CursorDimens.listRow).padding(horizontal = RowInset, vertical = 11.dp))
                     }
                 }
                 SettingsCard(Modifier.padding(top = 18.dp)) {
@@ -180,62 +212,140 @@ fun KeyboardShortcutsScreen(
                         leading = { RowGlyph(CursorIcons.Reset) },
                     )
                 }
-                Text(ShortcutsCopy.TEXT_EDITING, style = type.small, color = colors.textQuaternary, modifier = Modifier.padding(top = 12.dp, start = 2.dp))
+                Text(
+                    "${KeyboardShortcutsCopy.FOOTER} ${ShortcutsCopy.TEXT_EDITING}",
+                    style = type.small,
+                    color = colors.textQuaternary,
+                    modifier = Modifier.padding(top = 12.dp, start = 2.dp),
+                )
             }
         }
     }
 }
 
-/** A shortcut whose keys can change: tapped, it waits for them, and the panel under it says what happens next. */
+/** A shortcut whose keys can change: its keys in a field to tap, which then waits for new ones above the panel. */
 @Composable
 private fun BindingRow(line: ShortcutsCopy.Line, shortcut: Shortcut, customized: Boolean, capture: ShortcutCapture) {
     val colors = CursorTheme.colors
+    val type = CursorTheme.typography
     val capturing = capture.target == shortcut
     Column(Modifier.fillMaxWidth().background(if (capturing) colors.fillFaint else Color.Transparent)) {
-        ShortcutLineRow(
-            line,
+        Row(
             Modifier
+                .fillMaxWidth()
                 .testTag(KeyboardShortcutsTags.row(shortcut))
                 .pressable({ if (capturing) capture.cancel() else capture.start(shortcut) }, RectangleShape)
+                .semantics { if (capturing) stateDescription = KeyboardShortcutsCopy.WAITING }
                 .heightIn(min = CursorDimens.listRow)
-                .padding(horizontal = RowInset, vertical = 11.dp),
-            beforeChords = if (customized && !capturing) {
-                {
-                    FlatIconButton(
-                        CursorIcons.Reset,
-                        KeyboardShortcutsCopy.resetTo(shortcut),
-                        onClick = { capture.reset(shortcut) },
-                        modifier = Modifier.testTag(KeyboardShortcutsTags.reset(shortcut)),
-                        size = 28.dp,
-                        iconSize = 14.dp,
-                        tint = colors.iconTertiary,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                }
-            } else {
-                null
-            },
-            trailing = if (capturing) ({ CapturePill(capture) }) else null,
-        )
+                .padding(horizontal = RowInset, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(line.label, style = type.base, color = colors.textPrimary)
+                line.detail?.let { Text(it, style = type.small, color = colors.textTertiary) }
+            }
+            Spacer(Modifier.width(12.dp))
+            if (customized && !capturing) {
+                FlatIconButton(
+                    CursorIcons.Reset,
+                    KeyboardShortcutsCopy.resetTo(shortcut),
+                    onClick = { capture.reset(shortcut) },
+                    modifier = Modifier.testTag(KeyboardShortcutsTags.reset(shortcut)),
+                    size = 28.dp,
+                    iconSize = 14.dp,
+                    tint = colors.iconTertiary,
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+            KeysField(
+                active = capturing,
+                warning = capturing && capture.problem != null,
+                modifier = Modifier.testTag(KeyboardShortcutsTags.field(shortcut)),
+            ) {
+                if (capturing) CapturingKeys(capture) else IdleKeys(line.chords)
+            }
+        }
         if (capturing) CapturePanel(capture)
     }
 }
 
-/** Where the keys will go: the chord waiting on a choice, the modifiers held so far, or a prompt. */
+/**
+ * The outlined box a shortcut's keys sit in, drawn as an input: a faint well with a clear border, the keys at its end.
+ * [active] while it waits for keys — the accent border breathing, the well tinted; [warning] once the keys pressed
+ * cannot be used.
+ */
 @Composable
-private fun CapturePill(capture: ShortcutCapture) {
+private fun KeysField(active: Boolean, warning: Boolean, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val colors = CursorTheme.colors
+    val shape = CursorTheme.shapes.base
+    val pulse = if (active && !warning) {
+        rememberInfiniteTransition(label = "keysFieldPulse").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.45f,
+            animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "border",
+        ).value
+    } else {
+        1f
+    }
+    val border = when {
+        warning -> colors.orange
+        active -> colors.accent.copy(alpha = colors.accent.alpha * pulse)
+        else -> colors.strokeStrong
+    }
+    Row(
+        modifier
+            .widthIn(min = FieldMinWidth)
+            .height(FieldHeight)
+            .background(if (active) colors.accent.copy(alpha = 0.08f) else colors.fillFaint, shape)
+            .border(if (active) 1.5.dp else 1.dp, border, shape)
+            .padding(start = 8.dp, end = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        content()
+    }
+}
+
+/** A shortcut's keys at rest, with the pencil that says they can change; "Not set" in an empty field for none. */
+@Composable
+private fun IdleKeys(chords: List<List<String>>) {
+    val colors = CursorTheme.colors
+    if (chords.isEmpty()) {
+        Text(ShortcutsCopy.NOT_SET, style = CursorTheme.typography.small, color = colors.textQuaternary, maxLines = 1)
+    }
+    chords.forEachIndexed { index, chord ->
+        if (index > 0) Text("or", style = CursorTheme.typography.small, color = colors.textQuaternary, modifier = Modifier.padding(horizontal = 2.dp))
+        chord.forEach { FieldKey(it) }
+    }
+    Spacer(Modifier.width(2.dp))
+    Icon(CursorIcons.Pencil, null, tint = colors.iconQuaternary, modifier = Modifier.size(12.dp))
+}
+
+/** What the field shows while it waits: the chord waiting on a choice, the modifiers held so far, or the placeholder. */
+@Composable
+private fun CapturingKeys(capture: ShortcutCapture) {
+    val pending = capture.pending?.takeUnless { it.reset }?.chords?.single()
+    when {
+        pending != null -> pending.keys.forEach { FieldKey(it) }
+        capture.held.isNotEmpty() -> {
+            capture.held.forEach { FieldKey(it) }
+            Text("…", style = CursorTheme.typography.small, color = CursorTheme.colors.accent)
+        }
+        else -> Text(KeyboardShortcutsCopy.PLACEHOLDER, style = CursorTheme.typography.small, color = CursorTheme.colors.accent, maxLines = 1)
+    }
+}
+
+/** One key inside the field: a filled cap with no border of its own, the field being the outline. */
+@Composable
+private fun FieldKey(label: String) {
     val colors = CursorTheme.colors
     val shape = CursorTheme.shapes.sm
-    val pending = capture.pending?.takeUnless { it.reset }?.chords?.single()
     Box(
-        Modifier.height(26.dp).border(CursorDimens.hairline, colors.accent, shape).padding(horizontal = 4.dp),
+        Modifier.defaultMinSize(minWidth = 20.dp).height(20.dp).background(colors.fill, shape).padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            pending != null -> Chord(pending.keys)
-            capture.held.isNotEmpty() -> Chord(capture.held + "…")
-            else -> Text(KeyboardShortcutsCopy.WAITING, style = CursorTheme.typography.small, color = colors.accent, modifier = Modifier.padding(horizontal = 4.dp))
-        }
+        Text(label, style = CursorTheme.typography.small.copy(fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.Medium), color = colors.textPrimary, maxLines = 1)
     }
 }
 

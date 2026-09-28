@@ -8,7 +8,6 @@ object ShortcutsCopy {
     const val TITLE = "Keyboard shortcuts"
     const val SETTINGS_DETAIL = "For a hardware keyboard: search, switch chats, toggle the sidebar and panel."
     const val HARDWARE_ONLY = "These work from a hardware keyboard, with the composer focused too. The on-screen keyboard is left alone."
-    const val SETTINGS_INTRO = "These work from a hardware keyboard, with the composer focused too. Tap a shortcut to change its keys."
     const val CHANGE_IN_SETTINGS = "Change them in Settings › Keyboard shortcuts."
     const val TEXT_EDITING = "Ctrl+A, C, V, X and Z keep editing text as usual."
     const val NOT_SET = "Not set"

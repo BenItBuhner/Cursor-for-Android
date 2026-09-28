@@ -37,8 +37,9 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
 /**
- * Settings › Keyboard shortcuts with its shortcuts to change: the page as it comes, a row waiting for its new keys,
- * keys another shortcut is on (swap or replace), keys Android keeps, and moved shortcuts with their resets, in light.
+ * Settings › Keyboard shortcuts, each changeable shortcut showing its keys in an outlined field: the page as it comes,
+ * a field waiting for its new keys (dark and light), keys another shortcut is on (swap or replace), keys Android keeps,
+ * and moved shortcuts with their resets and an empty "Not set" field, in light.
  * The keys reach the page as a hardware keyboard's do, through the shell's reader. Written to `screenshots/`; CI
  * compares them pixel for pixel.
  */
@@ -105,6 +106,13 @@ class KeyboardShortcutsScreenshotTest {
         show()
         tap(Shortcut.ToggleSidebar)
         capture("701_keyboard_shortcuts_capture")
+    }
+
+    @Test
+    fun keyboardShortcutsCaptureLight() {
+        show(mode = ThemeMode.Light)
+        tap(Shortcut.NewChat)
+        capture("705_keyboard_shortcuts_capture_light")
     }
 
     @Test
