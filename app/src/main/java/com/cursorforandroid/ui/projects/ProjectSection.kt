@@ -235,7 +235,7 @@ internal fun WorkerRow(
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
     val agent = worker.agent
-    val row = AgentListOrganizer.toRow(agent, local, nowMillis)
+    val row = remember(agent, local, nowMillis) { AgentListOrganizer.toRow(agent, local, nowMillis) }
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var menuAt by remember { mutableStateOf<IntOffset?>(null) }
     // Pause and Stop ask first while Settings › Confirm before stopping is on; the question goes with the run.
@@ -294,7 +294,7 @@ internal fun WorkerRow(
 internal fun AgentLine(agent: Agent, local: LocalAgentState, nowMillis: Long, subtitle: String, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
-    val row = AgentListOrganizer.toRow(agent, local, nowMillis)
+    val row = remember(agent, local, nowMillis) { AgentListOrganizer.toRow(agent, local, nowMillis) }
     Row(
         modifier
             .fillMaxWidth()
