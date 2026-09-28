@@ -144,7 +144,7 @@ class StartupMainThreadIoTest {
         }
 
         private companion object {
-            val JAVA_HOME: String = File(System.getProperty("java.home")).canonicalPath
+            val JAVA_HOME: String = File(checkNotNull(System.getProperty("java.home"))).canonicalPath
             val OPENS = listOf(
                 "java.io.FileInputStream" to "<init>",
                 "java.io.FileOutputStream" to "<init>",
