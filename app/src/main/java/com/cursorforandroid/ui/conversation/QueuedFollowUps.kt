@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -102,24 +103,40 @@ fun QueuedFollowUps(
     modifier: Modifier = Modifier,
     flights: QueueFlights? = null,
 ) {
-    val motion = LocalSendMotion.current
     Column(modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEachIndexed { index, item ->
             key(item.id) {
-                QueuedFollowUpRow(
-                    item = item,
-                    position = index + 1,
-                    count = queue.size,
-                    thumbnails = thumbnails,
-                    onEdit = { onEdit(item) },
-                    onSteer = { onSteer(item) },
-                    onRemove = { onRemove(item) },
-                    motion = motion,
-                    anchor = flights?.anchor(item.id),
-                )
+                QueuedFollowUpCard(item, index + 1, queue.size, thumbnails, onEdit, onSteer, onRemove, flights)
             }
         }
     }
+}
+
+/** One card of [QueuedFollowUps], alone: as a [QueueStack] draws it, told its [face]. */
+@Composable
+internal fun QueuedFollowUpCard(
+    item: QueuedFollowUp,
+    position: Int,
+    count: Int,
+    thumbnails: Map<String, ImageBitmap>,
+    onEdit: (QueuedFollowUp) -> Unit,
+    onSteer: (QueuedFollowUp) -> Unit,
+    onRemove: (QueuedFollowUp) -> Unit,
+    flights: QueueFlights?,
+    face: QueueCardFace = QueueCardFace.Plain,
+) {
+    QueuedFollowUpRow(
+        item = item,
+        position = position,
+        count = count,
+        thumbnails = thumbnails,
+        onEdit = { onEdit(item) },
+        onSteer = { onSteer(item) },
+        onRemove = { onRemove(item) },
+        motion = LocalSendMotion.current,
+        anchor = flights?.anchor(item.id),
+        face = face,
+    )
 }
 
 /** A queued row's card as a flight draws it: the card's own surface. */
@@ -137,6 +154,7 @@ private fun QueuedFollowUpRow(
     onRemove: () -> Unit,
     motion: SendMotion?,
     anchor: ComposerAnchor?,
+    face: QueueCardFace,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
@@ -146,7 +164,7 @@ private fun QueuedFollowUpRow(
             .fillMaxWidth()
             // The card's own surface, stood in from the composer's sides so its corners are concentric with the box's.
             // The description sits on the surface, so the row's node is the card as drawn.
-            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface()))
+            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface(), face.contentAlpha, face.cover))
             .semantics {
                 contentDescription = when (val note = item.warning) {
                     null -> "Queued follow-up $position of $count"
@@ -154,7 +172,8 @@ private fun QueuedFollowUpRow(
                 }
             }
             .heightIn(min = RowHeight)
-            .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp),
+            .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp)
+            .faceOf(face),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (item.warning != null) {
@@ -260,27 +279,46 @@ fun AccountQueueRows(
     /** The rows as ends of the send's flight, as on [QueuedFollowUps]. */
     flights: QueueFlights? = null,
 ) {
-    val motion = LocalSendMotion.current
     Column(modifier.animateContentSize().testTag("account-queue"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEachIndexed { index, item ->
             key(item.id) {
-                AccountQueueRow(
-                    motion = motion,
-                    anchor = flights?.anchor(item.id),
-                    item = item,
-                    position = index + 1,
-                    count = queue.size,
-                    inFlight = item.id in inFlightIds,
-                    onSendNow = { onSendNow(item) },
-                    onSteerNow = onSteerNow?.let { steer -> { steer(item) } },
-                    onMove = onMove?.takeIf { queue.size > 1 }?.let { move -> { up -> move(item, up) } },
-                    onRemove = { onRemove(item) },
-                    onUpdate = { text -> onUpdate(item, text) },
-                    onEditing = { editing -> onEditing(item, editing) },
-                )
+                AccountQueueCard(item, index + 1, queue.size, inFlightIds, onSendNow, onRemove, onUpdate, onEditing, onSteerNow, onMove, flights)
             }
         }
     }
+}
+
+/** One card of [AccountQueueRows], alone: as a [QueueStack] draws it, told its [face]. */
+@Composable
+internal fun AccountQueueCard(
+    item: PendingFollowup,
+    position: Int,
+    count: Int,
+    inFlightIds: Set<String>,
+    onSendNow: (PendingFollowup) -> Unit,
+    onRemove: (PendingFollowup) -> Unit,
+    onUpdate: (PendingFollowup, String) -> Unit,
+    onEditing: (PendingFollowup, Boolean) -> Unit,
+    onSteerNow: ((PendingFollowup) -> Unit)?,
+    onMove: ((PendingFollowup, up: Boolean) -> Unit)?,
+    flights: QueueFlights?,
+    face: QueueCardFace = QueueCardFace.Plain,
+) {
+    AccountQueueRow(
+        motion = LocalSendMotion.current,
+        anchor = flights?.anchor(item.id),
+        item = item,
+        position = position,
+        count = count,
+        inFlight = item.id in inFlightIds,
+        onSendNow = { onSendNow(item) },
+        onSteerNow = onSteerNow?.let { steer -> { steer(item) } },
+        onMove = onMove?.takeIf { count > 1 }?.let { move -> { up -> move(item, up) } },
+        onRemove = { onRemove(item) },
+        onUpdate = { text -> onUpdate(item, text) },
+        onEditing = { editing -> onEditing(item, editing) },
+        face = face,
+    )
 }
 
 @Composable
@@ -297,6 +335,7 @@ private fun AccountQueueRow(
     onRemove: () -> Unit,
     onUpdate: (String) -> Unit,
     onEditing: (Boolean) -> Unit,
+    face: QueueCardFace,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
@@ -309,12 +348,13 @@ private fun AccountQueueRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface()))
+            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface(), face.contentAlpha, face.cover))
             .onContextClick(enabled = onMove != null && !editing && !inFlight) { at -> menuAt = at; menuOpen = true }
             .testTag("account-queue-row")
             .heightIn(min = RowHeight)
             .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp)
-            .semantics { contentDescription = "Queued on your account, $position of $count" },
+            .semantics { contentDescription = "Queued on your account, $position of $count" }
+            .faceOf(face),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(CursorIcons.Cloud, null, tint = colors.iconQuaternary, modifier = Modifier.size(12.dp))
@@ -496,6 +536,10 @@ private fun GlyphButton(icon: ImageVector, contentDescription: String, tint: Col
         Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(Glyph))
     }
 }
+
+/** A queued card's face — what it draws on its surface — at the share its stack shows of it; a plain card's as ever. */
+private fun Modifier.faceOf(face: QueueCardFace): Modifier =
+    if (face === QueueCardFace.Plain) this else graphicsLayer { alpha = face.contentAlpha() }
 
 /** One line of composer text plus the composer's vertical padding, so a row reads as a single-line composer. */
 private val RowHeight = 40.dp
