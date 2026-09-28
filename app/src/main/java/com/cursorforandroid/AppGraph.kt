@@ -304,9 +304,12 @@ class AppGraph(
         if (lazyNewChatDrafts.isInitialized()) newChatDrafts.flush()
     }
 
+    /** The connection pool and threads every OkHttp client below is built on (see [CursorApiFactory.newRoot]). */
+    private val httpRoot = lazy { CursorApiFactory.newRoot() }
+
     /** The account's API: one client, with the SSE stream sharing its dispatcher and connection pool. */
     private val realParts = lazy {
-        val client = CursorApiFactory.okHttp { keyStore.apiKey() }
+        val client = CursorApiFactory.okHttp(httpRoot.value) { keyStore.apiKey() }
         CursorApiFactory.retrofit(client) to SseRunStreamer(CursorApiFactory.sseClient(client), { keyStore.apiKey() })
     }
     private val realBackend = real ?: CursorBackend(isDemo = false, parts = realParts)
@@ -351,7 +354,7 @@ class AppGraph(
      * around it: at OkHttp's five per host a figure's presign queued there behind the record's blobs and the open
      * chats' streams, where no call timeout runs yet.
      */
-    private val lazyAccountClient = lazy { CursorApiFactory.loginClient().also { it.dispatcher.maxRequestsPerHost = ApiThrottle.ON_THE_WIRE + 2 } }
+    private val lazyAccountClient = lazy { CursorApiFactory.loginClient(httpRoot.value).also { it.dispatcher.maxRequestsPerHost = ApiThrottle.ON_THE_WIRE + 2 } }
     private val lazyAccountRpc = lazy { ConnectJsonClient(lazyAccountClient.value, CursorLoginEndpoints.API_URL) }
 
     /** How long the account's calls are still held off by a pause the server asked for (a `429`, see `ApiThrottle`); 0 when none, or before any call. */
@@ -374,7 +377,7 @@ class AppGraph(
     /** The agent's live VM: its workspace files and its branch diff (the panel's Files › Workspace and Changes). */
     private val lazyAgentFiles = lazy { AgentFilesApi(lazyAccountRpc.value, lazySessionTokens.value) }
     /** The machine's cursor-server, for a picture a tool call read outside the workspace (see [CursorServerApi]). */
-    private val lazyCursorServer = lazy { CursorServerApi(lazyAccountRpc.value, lazySessionTokens.value, CursorApiFactory.cursorServerClient()) }
+    private val lazyCursorServer = lazy { CursorServerApi(lazyAccountRpc.value, lazySessionTokens.value, CursorApiFactory.cursorServerClient(httpRoot.value)) }
     /** The account's view of a pull request on any host it connects, and opening one from here. */
     private val lazyPullRequestApi = lazy { PullRequestApi(lazyAccountRpc.value, lazySessionTokens.value) }
     /** Where the agent's machine is, for its desktop. */
@@ -422,7 +425,7 @@ class AppGraph(
      * GitHub's REST API, anonymous: what stands in for the account service while Extended mode is off, for the
      * repositories it hosts — pull request states and the `.cursor/` skills and commands in a repository's tree.
      */
-    private val lazyGitHub = lazy { GitHubApi(CursorApiFactory.gitHubClient()) }
+    private val lazyGitHub = lazy { GitHubApi(CursorApiFactory.gitHubClient(httpRoot.value)) }
     private val lazyGitHubPullRequests = lazy { GitHubPullRequestSource(lazyGitHub.value) }
     private val lazyGitHubSlashCommands = lazy { GitHubSlashCommandApi(lazyGitHub.value) }
 
@@ -431,7 +434,7 @@ class AppGraph(
      * the app has no documented way to mint (the CLI's exchange is not in the reference), so the provider answers
      * null and every Origin read degrades to "open in browser" until one exists.
      */
-    private val lazyOrigin = lazy { OriginApi(CursorApiFactory.originClient(), tokenProvider = { null }) }
+    private val lazyOrigin = lazy { OriginApi(CursorApiFactory.originClient(httpRoot.value), tokenProvider = { null }) }
 
     /**
      * The panel's reads of a pull request, a repository's files and the agent's token usage: the documented and
@@ -909,7 +912,7 @@ class AppGraph(
     val artifacts: ArtifactRepository get() = lazyArtifacts.value
 
     /** The files `/cursor/stores/…` paths in replies point at, read through the account's store reads (Extended mode). */
-    private val lazyMediaClient = lazy { CursorApiFactory.mediaClient() }
+    private val lazyMediaClient = lazy { CursorApiFactory.mediaClient(httpRoot.value) }
     private val lazyStoreFiles = lazy {
         StoreFileRepository(
             api = { projectAccount },
@@ -944,7 +947,7 @@ class AppGraph(
      */
     private val lazyReleases = lazy {
         GitHubReleasesClient(
-            CursorApiFactory.updateClient(),
+            CursorApiFactory.updateClient(httpRoot.value),
             BuildConfig.GITHUB_REPO,
             apiBaseUrl = BuildConfig.UPDATE_API_BASE_URL,
             freeSpace = { allocatableBytes(app, it) },
