@@ -282,6 +282,7 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.browser)
+    implementation(libs.androidx.profileinstaller)
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
