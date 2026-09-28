@@ -329,6 +329,35 @@ class ConversationViewModelTest {
     }
 
     /**
+     * The edited message is the composer's the moment the edit is tapped: a send straight after queues it, with its
+     * picture, and not the displaced draft a second time — which also emptied the repository's copy of the edited
+     * text, and had the composer put it back after the send.
+     */
+    @Test
+    fun `a send straight after editing a queued follow-up sends the edited text, not the displaced draft again`() {
+        val vm = open(RUNNING)
+        vm.addAttachments(listOf(PendingAttachment("img-1", PromptImage(byteArrayOf(1, 2, 3), "image/png"), null)))
+        vm.sendAndWait("First thought")
+        val queued = runBlocking { withTimeout(5_000) { vm.queue.first { it.isNotEmpty() } } }.single()
+        vm.setDraft("Second thought")
+
+        vm.editQueued(queued.id)
+        assertThat(vm.draftText.value).isEqualTo("First thought")
+        assertThat(vm.pendingAttachments.value.map { it.id }).containsExactly("img-1")
+        assertThat(vm.submit()).isEqualTo(ConversationViewModel.Sent.Queued("First thought"))
+
+        val queue = { graph.followUps.state(RUNNING).value.queue }
+        assertThat(queue().map { it.text }).containsExactly("Second thought", "First thought").inOrder()
+        assertThat(queue().last().images.map { it.id }).containsExactly("img-1")
+        // Nothing comes back into the composer afterwards: the edit's decode has no draft of its own to put there.
+        runBlocking { delay(500) }
+        assertThat(vm.draftText.value).isEmpty()
+        assertThat(vm.pendingAttachments.value).isEmpty()
+        assertThat(graph.followUps.state(RUNNING).value.draft.isBlank).isTrue()
+        assertThat(queue().map { it.text }).containsExactly("Second thought", "First thought").inOrder()
+    }
+
+    /**
      * What `send` hands the screen is what a bubble at the foot of the transcript reads, for the composer's text to
      * travel into: nothing for a message that waits in this device's queue, which shows no bubble, or for a composer
      * with no text; the trimmed text for one that goes out now.
