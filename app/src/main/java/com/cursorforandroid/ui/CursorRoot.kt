@@ -39,15 +39,8 @@ fun CursorRoot(
     // sign-in screen until the choice screen settles it, false for a restored session, null until the stored flag
     // has been read below.
     val modeChoicePending by graph.onboarding.modeChoicePending.collectAsStateWithLifecycle()
-    // The first-run flag is read ahead of the restore, so a session the restore finds signed in has its answer by
-    // the frame that shows it. The session settles itself to signed-out when a store cannot be read; this only keeps
-    // a future throw from taking the composition (and the process) with it. The Extended mode upgrade step follows
-    // the restore: it reads the same stores, and an install it finds signed in is the one it owes a notice and a wipe.
-    LaunchedEffect(Unit) {
-        runCatching { graph.onboarding.load() }
-        runCatching { graph.session.restoreIfNeeded() }
-        runCatching { graph.extendedMode.migrateInstall() }
-    }
+    // Started by the activity's creation already; a root composed without it starts it here (see AppGraph.startSession).
+    LaunchedEffect(Unit) { graph.startSession(this) }
     Box(Modifier.fillMaxSize().background(CursorTheme.colors.canvas)) {
         when (val s = session) {
             SessionState.Loading -> Unit

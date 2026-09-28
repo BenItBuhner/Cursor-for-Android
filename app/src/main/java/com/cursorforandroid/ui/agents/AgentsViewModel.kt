@@ -262,11 +262,18 @@ class AgentsViewModel(
         // stand-in; the list surface being up is when that matters.
         graph.projects.watchList()
         viewModelScope.launch {
+            val pullRequestsRestored = launch { graph.pullRequests.restoreFromCache() }
             // Disk first, so the list is on screen before the network is consulted; the refresh is then silent
-            // when there was something to show and visible (pull-to-refresh indicator) on a truly cold start.
-            graph.agents.restoreFromCache()
-            graph.pullRequests.restoreFromCache()
-            graph.agents.refresh(silent = graph.agents.state.value.hasLoaded)
+            // when there was something to show and visible (pull-to-refresh indicator) on a truly cold start. A
+            // launch into a restored session has begun exactly that already (see AppGraph.startSession).
+            val started = graph.takeStartupListFetch()
+            if (started != null) {
+                started.join()
+            } else {
+                graph.agents.restoreFromCache()
+                graph.agents.refresh(silent = graph.agents.state.value.hasLoaded)
+            }
+            pullRequestsRestored.join()
             refreshPullRequests()
         }
         viewModelScope.launch {

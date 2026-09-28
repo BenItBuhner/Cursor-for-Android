@@ -172,15 +172,18 @@ import com.cursorforandroid.update.allocatableBytes
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Hand-rolled dependency graph. Small enough that a DI framework would only add build time.
@@ -1003,6 +1006,80 @@ class AppGraph(
         }
     }
 
+    /** Where a launch's own background work runs: the warm-up, and what a restored session needs next. */
+    private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * Opens what the session's restore reads first — the key store with the Android Keystore behind it, and the
+     * settings file — on background threads, for `Application.onCreate`: the restore the activity starts a moment
+     * later finds both open instead of paying for them while the splash screen waits.
+     */
+    fun warmUp() {
+        startupScope.launch(Dispatchers.IO) { runCatching { keyStore.apiKey() } }
+        startupScope.launch { runCatching { prefs.sessionSnapshot() } }
+    }
+
+    private val sessionStartLock = Any()
+    @Volatile private var sessionStart: Job? = null
+    private val restoredHandOff = AtomicBoolean(false)
+
+    /**
+     * A launch's way to its first screen, once per process: the first-run flag, read ahead of the restore so a session
+     * the restore finds signed in has its answer by the frame that shows it; the session's restore; then the Extended
+     * mode upgrade step, which reads the same stores, and owes an install it finds signed in a notice and a wipe.
+     * The activity starts it from its creation in the process's [scope], so the restore is under way while the first
+     * frame is still being built; `CursorRoot` asks as well — for a root composed without that activity — and gets
+     * the start already under way. A start cancelled with the scope it ran in is begun again by the next caller.
+     */
+    fun startSession(scope: CoroutineScope): Job = synchronized(sessionStartLock) {
+        sessionStart?.takeUnless { it.isCancelled }?.let { return it }
+        // Off the caller's thread: on the main thread it would wait out the first screen's composition, which the
+        // session it waits for is what starts.
+        if (restoredHandOff.compareAndSet(false, true)) startupScope.launch { runCatching { handOffRestored() } }
+        scope.launch {
+            // The session settles itself to signed-out when a store cannot be read; these only keep a future throw
+            // from taking the caller (and the process) with it.
+            runCatching { onboarding.load() }
+            runCatching { session.restoreIfNeeded() }
+            runCatching { extendedMode.migrateInstall() }
+        }.also { sessionStart = it }
+    }
+
+    /** The list fetch [handOffRestored] started, until the sidebar takes it (see [takeStartupListFetch]). */
+    private val startupListFetch = AtomicReference<Job?>(null)
+
+    /**
+     * A session the launch restored signed in, with nothing left to settle before the shell shows it (not the demo,
+     * no first-run choice owed): the sidebar's list is read from disk and fetched now, and its pull requests' saved
+     * states read beside it, rather than once the sidebar's view model is built after the first frame. With the
+     * account service allowed, its session is exchanged for at the same time, so the account's list and a chat's
+     * record find it minted or on its way: callers wait on the one exchange in flight (see [SessionTokenProvider]).
+     * The upgrade step goes first — it runs once, whichever caller asks first — since the wipe it may owe is of
+     * exactly what this reads.
+     */
+    private suspend fun handOffRestored() {
+        val signedIn = session.state.first { it !is SessionState.Loading } as? SessionState.SignedIn ?: return
+        if (signedIn.isDemo || onboarding.modeChoicePending.first { it != null } != false) return
+        runCatching { extendedMode.migrateInstall() }
+        if (session.state.value !== signedIn) return
+        if (capabilities().accountSession) startupScope.launch { runCatching { lazySessionTokens.value.accessToken() } }
+        startupScope.launch { runCatching { pullRequests.restoreFromCache() } }
+        startupListFetch.set(
+            startupScope.launch {
+                runCatching {
+                    agents.restoreFromCache()
+                    agents.refresh(silent = agents.state.value.hasLoaded)
+                }
+            },
+        )
+    }
+
+    /**
+     * The list fetch the launch started for a restored session, once: the first sidebar joins it rather than fetching
+     * again; null for any later one, and after a sign-out.
+     */
+    fun takeStartupListFetch(): Job? = startupListFetch.getAndSet(null)
+
     init {
         session.onSignedIn = {
             // A sign-in through the sign-in screen owes the first-run choice; a restored session never does.
@@ -1016,6 +1093,7 @@ class AppGraph(
             // Read before anything is reset: the account the drafts belong to — and what it typed a moment ago,
             // written before the saves are stopped.
             val owner = draftOwner()
+            startupListFetch.set(null)
             if (owner != null && lazyFollowUps.isInitialized()) followUps.saveAll()
             if (owner != null && lazyNewChatDrafts.isInitialized()) newChatDrafts.saveOpen()
             // The choice the account owed goes with it (its stored flag is among the session keys cleared below).
