@@ -771,6 +771,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     fun editQueued(id: String) {
         val displaced = !draft.value.isBlank() || attachments.value.isNotEmpty() || files.value.isNotEmpty()
         graph.followUps.takeForEdit(agentId, id) ?: return
+        picker.update { it.adopting(graph.followUps.state(agentId).value.draft) }
         viewModelScope.launch {
             adoptDraft(graph.followUps.state(agentId).value.draft)
             if (displaced) toast.value = "Your draft was queued in its place."
