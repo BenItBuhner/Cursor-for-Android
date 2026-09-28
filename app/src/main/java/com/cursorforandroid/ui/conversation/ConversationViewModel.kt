@@ -569,8 +569,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     private fun composerIsEmpty(): Boolean = draft.value.isEmpty() && attachments.value.isEmpty() && files.value.isEmpty()
 
     /**
-     * Puts the repository's draft in the composer: a restored one, or a queued message taken back for editing. The
-     * previews are decoded off the main thread first; with [unlessWrittenInto], a composer written into meanwhile —
+     * Puts the repository's draft in the composer: a restored one. The previews are decoded off the main thread first; with [unlessWrittenInto], a composer written into meanwhile —
      * a word typed, a file attached — keeps what it has, and the restored draft stays on disk for the next time.
      * Nor is a draft that is no longer the repository's put back: [saved] was read before the decode (and the
      * repository's draft is the composer's own as typed), so an empty composer by now may be one a send emptied.
@@ -766,14 +765,37 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         graph.attachmentUploads.forget(attached.map { it.id })
     }
 
-    /** Takes a queued follow-up back into the composer; a draft already there is queued in its place, so nothing is lost. */
+    /**
+     * Takes a queued follow-up back into the composer; a draft already there is queued in its place, so nothing is lost.
+     * Its text and chips are the composer's before this returns: a send the moment after acts on them, never on the
+     * draft just queued (which went out a second time, and emptied the repository's copy of the edited text). Only the
+     * chips' previews wait on a decode off the main thread, filled in once it is done.
+     */
     fun editQueued(id: String) {
         val displaced = !draft.value.isBlank() || attachments.value.isNotEmpty() || files.value.isNotEmpty()
         graph.followUps.takeForEdit(agentId, id) ?: return
-        viewModelScope.launch {
-            adoptDraft(graph.followUps.state(agentId).value.draft)
-            if (displaced) toast.value = "Your draft was queued in its place."
+        val taken = graph.followUps.state(agentId).value.draft
+        draft.value = taken.text
+        val images = taken.images.map { PendingAttachment(it.id, it.image, thumbnails.value[it.id]) }
+        val takenFiles = taken.files.map { PendingFile(it.id, it.file) }
+        attachments.value = images
+        files.value = takenFiles
+        // A file that came back with its reference is up already; one without goes up now.
+        takenFiles.forEach { graph.attachmentUploads.start(it.id, it.file) }
+        keepModesExclusive(taken.text)
+        if (displaced) toast.value = "Your draft was queued in its place."
+        if (images.isNotEmpty() || takenFiles.isNotEmpty()) viewModelScope.launch { fillPreviews(images, takenFiles) }
+    }
+
+    /** The thumbnails of chips put in the composer without one, decoded off the main thread, onto the chips still there. */
+    private suspend fun fillPreviews(images: List<PendingAttachment>, taken: List<PendingFile>) {
+        val decoded = withContext(Dispatchers.Default) { images.map { PendingAttachment.of(it.image, it.id, it.thumbnail) } }
+        val decodedFiles = withContext(Dispatchers.Default) { taken.map { PendingFile.of(it.file, it.id) } }
+        thumbnails.update { cache -> cache + decoded.mapNotNull { a -> a.thumbnail?.let { a.id to it } } }
+        attachments.value = attachments.value.map { a ->
+            decoded.firstOrNull { it.id == a.id }?.thumbnail?.takeIf { a.thumbnail == null }?.let { PendingAttachment(a.id, a.image, it) } ?: a
         }
+        files.value = files.value.map { f -> decodedFiles.firstOrNull { it.id == f.id }?.let { f.withPreview(it.thumbnail, null) } ?: f }
     }
 
     fun removeQueued(id: String) = graph.followUps.remove(agentId, id)
