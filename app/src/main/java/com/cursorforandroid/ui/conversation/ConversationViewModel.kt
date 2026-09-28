@@ -318,7 +318,6 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     init {
         outgoing.listener = outgoingListener
         graph.conversations.attach(agentId)
-        graph.steering.attach(agentId)
         viewModelScope.launch { graph.prefs.markTouchedHere(agentId) }
         viewModelScope.launch { loadModels() }
         viewModelScope.launch {
@@ -390,7 +389,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         // The sends go on in the graph's scope; only this composer stops hearing of them.
         if (outgoing.listener === outgoingListener) outgoing.listener = null
         graph.conversations.detach(agentId)
-        graph.steering.detach(agentId)
+        if (steeringAttached) graph.steering.detach(agentId)
         graph.followUps.flush(agentId)
         super.onCleared()
     }
@@ -981,11 +980,31 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      */
     suspend fun loadDiagnosticsReport(): String = graph.transcriptDiagnosticsReport(agentId)
 
-    /** The screen is back in the foreground: pick the run back up and catch up on what it did while away. */
-    fun resume() = graph.conversations.resume(agentId)
+    private var steeringAttached = false
 
-    /** The screen stopped. The run keeps going — the notification service is what watches it now. */
-    fun pause() = graph.conversations.pause(agentId)
+    /**
+     * The screen is back in the foreground: pick the run back up and catch up on what it did while away, and read the
+     * account's queue again (and keep reading it) while the chat is on screen.
+     */
+    fun resume() {
+        graph.conversations.resume(agentId)
+        if (!steeringAttached) {
+            steeringAttached = true
+            graph.steering.attach(agentId)
+        }
+    }
+
+    /**
+     * The screen stopped. The run keeps going — the notification service is what watches it now — and the account's
+     * queue is no longer polled for a chat nobody can see.
+     */
+    fun pause() {
+        graph.conversations.pause(agentId)
+        if (steeringAttached) {
+            steeringAttached = false
+            graph.steering.detach(agentId)
+        }
+    }
 
     fun togglePinned() = viewModelScope.launch {
         // The pin is applied either way; the toast only says when the account has not been told yet.

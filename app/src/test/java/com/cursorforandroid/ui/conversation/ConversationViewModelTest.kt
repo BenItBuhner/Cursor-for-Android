@@ -566,6 +566,20 @@ class ConversationViewModelTest {
         assertThat(vm.picker { it.mode == null }.modePill).isNull()
     }
 
+    /**
+     * The account's queue is polled for a chat on screen, not for one merely alive on the back stack: the view model
+     * alone reads nothing, the screen starting reads it at once (in the demo that read says the queue is unavailable).
+     */
+    @Test
+    fun `the account queue is read when the screen starts, not when the view model is made`() = runBlocking {
+        val vm = ConversationViewModel(graph, RUNNING)
+        delay(300)
+        assertThat(graph.steering.state(RUNNING).value.queueLoad).isEqualTo(com.cursorforandroid.domain.QueueLoad.Idle)
+        vm.resume()
+        withTimeout(5_000) { graph.steering.state(RUNNING).first { it.queueLoad != com.cursorforandroid.domain.QueueLoad.Idle } }
+        vm.pause()
+    }
+
     private companion object {
         /** "Revenue Scaling Pipeline Research": finished, so it takes a follow-up. */
         const val IDLE = "bc-demo-0002"
