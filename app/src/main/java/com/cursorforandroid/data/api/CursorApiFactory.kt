@@ -218,7 +218,10 @@ class OneShotWritesInterceptor : Interceptor {
 
 object CursorApiFactory {
 
-    fun okHttp(apiKeyProvider: () -> String?): OkHttpClient = OkHttpClient.Builder()
+    fun okHttp(apiKeyProvider: () -> String?): OkHttpClient = okHttp(HostPause(), apiKeyProvider)
+
+    /** [pauses]: the hosts' pauses this client's reads hold to, shared with the run streams (see [SseRunStreamer]). */
+    fun okHttp(pauses: HostPause, apiKeyProvider: () -> String?): OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -232,7 +235,7 @@ object CursorApiFactory {
         .addInterceptor(AuthInterceptor(apiKeyProvider))
         // Writes go out once: a lost reply is reported, not resent behind the app's back (see the class).
         .addInterceptor(OneShotWritesInterceptor())
-        .addInterceptor(RetryInterceptor())
+        .addInterceptor(RetryInterceptor(pauses = pauses))
         .apply {
             if (BuildConfig.DEBUG) {
                 addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BASIC })
