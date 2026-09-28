@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.view.KeyEvent
 import android.view.PixelCopy
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
@@ -24,6 +25,7 @@ import com.cursorforandroid.data.demo.DemoStore
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.data.repo.CursorBackend
 import com.cursorforandroid.data.repo.ReviewRepository
+import com.cursorforandroid.ui.shortcuts.PaletteTags
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -260,6 +262,61 @@ class LaunchVideoCapture {
     }
 
     /**
+     * Take B, on a desktop-mode window with a hardware keyboard, from the keys alone: Ctrl held numbers the sidebar's
+     * rows, Ctrl+1 opens the Project at the top, Ctrl+Shift+B its panel, Ctrl+K finds one of its workers by name and
+     * Enter opens it, and Ctrl+Tab goes back to the Project.
+     */
+    @Test
+    @Config(qualifiers = DESKTOP)
+    fun desktop() {
+        val d = launch(Screen.Desktop, "desktop")
+        try {
+            // A desktop window's mdpi text is small on a monitor seen whole; the cut pushes in on the palette.
+            d.segment("desktop", 1.5f)
+            d.hold(1.4)
+            d.dump("desktop-home")
+            d.ctrlDown()
+            d.mark("numbers")
+            d.hold(1.6)
+            d.dump("desktop-numbers")
+            d.press(KeyEvent.KEYCODE_1, ctrl = true, label = "project")
+            d.hold(0.25)
+            d.ctrlUp()
+            d.until("the Project", 10.0) { d.exists(hasTestTag("chat-header") and hasContentDescription(PROJECT)) }
+            d.hold(1.8)
+            d.dump("desktop-project")
+            d.chord(KeyEvent.KEYCODE_B, shift = true, label = "panel")
+            d.until("the panel", 5.0) { d.exists(hasTestTag("conversation-panel")) }
+            d.hold(2.6)
+            d.dump("desktop-panel")
+            d.chord(KeyEvent.KEYCODE_K, label = "search")
+            d.until("the palette", 5.0) { d.exists(hasTestTag(PaletteTags.FIELD)) }
+            d.hold(0.6)
+            d.type(d.node(hasTestTag(PaletteTags.FIELD)), "webhook")
+            d.until("the worker", 10.0) { d.exists(hasTestTag(PaletteTags.result(0)) and hasText(WORKER, substring = true)) }
+            d.hold(1.2)
+            d.dump("desktop-search")
+            d.press(KeyEvent.KEYCODE_ENTER, label = "open")
+            d.until("the worker's chat", 10.0) { d.exists(hasTestTag("chat-header") and hasContentDescription(WORKER)) }
+            d.hold(2.2)
+            d.dump("desktop-worker")
+            d.ctrlDown()
+            d.frames(3)
+            d.press(KeyEvent.KEYCODE_TAB, ctrl = true, label = "switch")
+            d.hold(1.1)
+            d.dump("desktop-switcher")
+            d.ctrlUp()
+            d.until("the Project again", 10.0) { d.exists(hasTestTag("chat-header") and hasContentDescription(PROJECT)) }
+            d.hold(2.0)
+            d.dump("desktop-end")
+            d.still("desktop-end", 0.5f)
+        } catch (_: EnoughFrames) {
+            d.still("desktop-last", 0.5f)
+        }
+        finish("desktop")
+    }
+
+    /**
      * The compositor against Robolectric's own PixelCopy of the window, which renders it the same way at full size,
      * and its byte order through to a PNG: a red fill has to come back red.
      */
@@ -299,5 +356,7 @@ class LaunchVideoCapture {
         const val HOME_PLACEHOLDER = "Ask Cursor to build, fix bugs, explore"
         const val HERO_PROMPT = "Add a usage meter to the account page"
         const val QUEUED_PROMPT = "Then open a PR"
+        const val PROJECT = "Cesium billing launch"
+        const val WORKER = "Stripe webhook handler"
     }
 }

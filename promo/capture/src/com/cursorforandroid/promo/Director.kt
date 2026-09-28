@@ -3,6 +3,7 @@ package com.cursorforandroid.promo
 import android.graphics.Color
 import android.os.Looper
 import android.os.SystemClock
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -118,6 +119,9 @@ class Director(
     private val marks = ArrayList<String>()
     private var finger: Finger? = null
     private var releaseFrames = 0
+
+    /** The hardware keys down, as their caps read, in the order they went down. */
+    private val held = LinkedHashSet<String>()
     private var emitsSeen = VirtualTime.emits
     private var framesThisRun = 0
 
@@ -316,6 +320,7 @@ class Director(
                 put("down", f.down)
             }
         }
+        if (held.isNotEmpty()) putJsonArray("keys") { held.forEach { add(it) } }
         if (marks.isNotEmpty()) putJsonArray("marks") { marks.forEach { add(it) } }
     }
 
@@ -386,9 +391,30 @@ class Director(
         }
     }
 
+    /**
+     * A key from a hardware keyboard, handed on as the platform hands it with no keyboard app standing in the way: the
+     * views' pass before the IME (where the shell reads it with a field focused), then the activity. The app ignores
+     * the on-screen keyboard's keys, which the platform's short constructors would make this.
+     */
     private fun key(action: Int, keyCode: Int, meta: Int) {
         val now = SystemClock.uptimeMillis()
-        activity.dispatchKeyEvent(KeyEvent(now, now, action, keyCode, 0, meta))
+        val event = KeyEvent(now, now, action, keyCode, 0, meta, HARDWARE_KEYBOARD, 0, 0, InputDevice.SOURCE_KEYBOARD)
+        val cap = keycap(keyCode)
+        if (action == KeyEvent.ACTION_DOWN) held += cap else held -= cap
+        if (activity.window.decorView.dispatchKeyEventPreIme(event)) return
+        activity.dispatchKeyEvent(event)
+    }
+
+    private fun keycap(keyCode: Int): String = when (keyCode) {
+        KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> "Ctrl"
+        KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> "Shift"
+        KeyEvent.KEYCODE_TAB -> "Tab"
+        KeyEvent.KEYCODE_ENTER -> "Enter"
+        KeyEvent.KEYCODE_ESCAPE -> "Esc"
+        in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> ('A' + (keyCode - KeyEvent.KEYCODE_A)).toString()
+        in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> ('0' + (keyCode - KeyEvent.KEYCODE_0)).toString()
+        // Robolectric has no native key names: `keyCodeToString` gives the bare number.
+        else -> KeyEvent.keyCodeToString(keyCode).removePrefix("KEYCODE_")
     }
 
     /** The back gesture's key, to whichever window is on top: a sheet's dialog before the activity under it. */
@@ -463,6 +489,8 @@ class Director(
         /** Frames a lifted finger stays in the metadata, for the video to let its touch mark fade. */
         const val RELEASE_FRAMES = 12
         val TYPING_GAPS = intArrayOf(4, 3, 5, 4, 3, 4, 6, 3, 4, 5, 3, 4)
+        /** Any real input device's id: the app tells a physical keyboard's keys from the on-screen one's by it. */
+        const val HARDWARE_KEYBOARD = 7
         const val CTRL = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
         const val SHIFT = KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
         val CLOCK: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("H:mm")
