@@ -65,6 +65,19 @@ class PreferencesStoreTest {
     }
 
     @Test
+    fun `a long queue stacks for whoever never opened it, and an opened one stays open through a sign-out`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertThat(PreferencesStore(context).queueStacked.first()).isTrue()
+        PreferencesStore(context).setQueueStacked(false)
+        val prefs = PreferencesStore(context)
+        assertThat(prefs.queueStacked.first()).isFalse()
+        prefs.clearSession()
+        assertThat(prefs.queueStacked.first()).isFalse()
+        prefs.setQueueStacked(true)
+        assertThat(prefs.queueStacked.first()).isTrue()
+    }
+
+    @Test
     fun `signing out drops the account's state and keeps the device's`() = runBlocking {
         val prefs = PreferencesStore(ApplicationProvider.getApplicationContext())
         prefs.setDemoMode(true)

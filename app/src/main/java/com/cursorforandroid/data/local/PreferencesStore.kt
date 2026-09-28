@@ -173,6 +173,8 @@ class PreferencesStore(
         val dismissedNotices = stringPreferencesKey("dismissed_notices")
         /** Settings › Confirm before stopping; absent reads as on (see [confirmStop]). */
         val confirmStop = booleanPreferencesKey("confirm_stop")
+        /** Whether a long queue over the composer stands stacked, as the reader last left one; absent reads as stacked (see [queueStacked]). */
+        val queueStacked = booleanPreferencesKey("queue_stacked")
         /** The widget kinds whose picker previews the system holds, each with the build and boot it was published on (see `WidgetPreviews`). */
         val widgetPreviewsPublished = stringSetPreferencesKey("widget_previews_published")
         /** The conversation panel's width beside the chat on a wide window, as a share of the window, as last dragged; absent until it has been. */
@@ -289,6 +291,14 @@ class PreferencesStore(
     val confirmStop: Flow<Boolean> = data.map { it[Keys.confirmStop] ?: true }
 
     suspend fun setConfirmStop(enabled: Boolean) = edit { it[Keys.confirmStop] = enabled }
+
+    /**
+     * Whether a queue of more than a couple of follow-ups stands as a deck over the composer (`QueueStack`) rather than
+     * as the full list: stacked until the reader opens one, then open in every chat until they stack one again.
+     */
+    val queueStacked: Flow<Boolean> = data.map { it[Keys.queueStacked] ?: true }
+
+    suspend fun setQueueStacked(stacked: Boolean) = edit { it[Keys.queueStacked] = stacked }
 
     // ---- Extended mode (device-level; deliberately untouched by clearSession) ------------------------------------
 

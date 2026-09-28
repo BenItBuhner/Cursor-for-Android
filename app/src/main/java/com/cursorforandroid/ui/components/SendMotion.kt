@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -357,18 +358,25 @@ enum class SendLanding {
 /**
  * How a flight's target is drawn at rest, for the copy to arrive at it: its surface (null: a bubble's, from the theme)
  * and the fade it is drawn at, its text as laid out (null: measured to the box, in the bubble's style) and the colour
- * of that text (null: the theme's, at [fade]). Each part says what it knows; [merge] keeps both.
+ * of that text (null: the theme's), which is drawn at [fade] too. A target whose fade moves — a queued card behind the
+ * front of a stacked queue, its face fading as it springs — says so with [fading], read at each frame. Each part says
+ * what it knows; [merge] keeps both.
  */
 @Immutable
 class SendTargetLook(
     val surface: SendSurface? = null,
-    val fade: Float = 1f,
+    private val fixedFade: Float = 1f,
     val layout: (() -> TextLayoutResult?)? = null,
     val textColor: Color? = null,
+    private val fading: (() -> Float)? = null,
+    /** Where, in the window, something stands in front of the target (the front card of a stacked queue): the copy goes behind it. */
+    val cover: (() -> Rect?)? = null,
 ) {
+    val fade: Float get() = fading?.invoke() ?: fixedFade
+
     internal fun merge(part: SendTargetPart, other: SendTargetLook): SendTargetLook = when (part) {
-        SendTargetPart.Surface -> SendTargetLook(other.surface, other.fade, layout, textColor)
-        SendTargetPart.Text -> SendTargetLook(surface, fade, other.layout, other.textColor)
+        SendTargetPart.Surface -> SendTargetLook(other.surface, other.fixedFade, layout, textColor, other.fading, other.cover)
+        SendTargetPart.Text -> SendTargetLook(surface, fixedFade, other.layout, other.textColor, fading, cover)
     }
 
     companion object {
@@ -504,7 +512,7 @@ internal fun Modifier.sendTarget(
     part: SendTargetPart,
     fade: Float = 1f,
     landing: SendLanding = SendLanding.Bubble,
-    look: SendTargetLook = if (fade == 1f) SendTargetLook.Bubble else SendTargetLook(fade = fade),
+    look: SendTargetLook = if (fade == 1f) SendTargetLook.Bubble else SendTargetLook(fixedFade = fade),
 ): Modifier {
     if (motion == null) return this
     val placed = onPlaced { motion.place(id, text, landing, part, it, look) }
@@ -596,7 +604,15 @@ private fun AttachmentFlights(flight: SendFlight) {
                         }
                         .testTag(FlyingAttachmentTag),
                 ) {
-                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = flight.alphaOf(attachment) }) { AttachmentFace(attachment.look) }
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .drawWithContent {
+                                val box = flight.boxOf(attachment)
+                                behind(flight.target?.look?.cover?.invoke()?.translate(-box.topLeft)) { this@drawWithContent.drawContent() }
+                            }
+                            .graphicsLayer { alpha = flight.alphaOf(attachment) },
+                    ) { AttachmentFace(attachment.look) }
                 }
             }
         }
@@ -786,6 +802,25 @@ private fun DrawScope.drawFlight(
             .let { Rect(it.left - padH, it.top - padV, it.right + padH, it.bottom + padV) }
     }
     val box = lerpRect(from, surface, e).translate(shift)
+    behind(look.cover?.invoke()?.translate(shift)) { drawCopy(flight, box, textBox, card, landing, fade, alpha, e, shift, measurer, style, textColor) }
+}
+
+private fun DrawScope.drawCopy(
+    flight: SendFlight,
+    box: Rect,
+    textBox: Rect?,
+    card: SendSurface?,
+    landing: SendSurface,
+    fade: Float,
+    alpha: Float,
+    e: Float,
+    shift: Offset,
+    measurer: TextMeasurer,
+    style: androidx.compose.ui.text.TextStyle,
+    textColor: Color,
+) {
+    val takeoff = flight.takeoff
+    val look = flight.target?.look ?: return
     val grown = if (card != null) 1f else (e / SurfaceGrow).coerceIn(0f, 1f)
     fun tone(start: Color?, end: Color): Color {
         val rest = end.copy(alpha = end.alpha * fade)
@@ -796,7 +831,7 @@ private fun DrawScope.drawFlight(
     drawSurface(box, tone(card?.page, landing.page), tone(card?.fill, landing.fill), tone(card?.stroke, landing.stroke), alpha)
     if (textBox == null || flight.text.isEmpty()) return
     val origin = lerpOffset(takeoff.origin, textBox.topLeft, e) + shift
-    val color = lerp(textColor, look.textColor ?: textColor.copy(alpha = textColor.alpha * fade), e)
+    val color = lerp(textColor, (look.textColor ?: textColor).let { it.copy(alpha = it.alpha * fade) }, e)
     val source = takeoff.layout
     // A row says how its one line is laid out; a bubble's text is measured to its box, in the bubble's style.
     val landed = look.layout?.invoke()
@@ -823,9 +858,15 @@ private fun sameLines(a: TextLayoutResult, b: TextLayoutResult): Boolean {
     return true
 }
 
+/** [block] drawn everywhere but inside [cover], when there is one: behind what stands there. */
+private inline fun DrawScope.behind(cover: Rect?, block: DrawScope.() -> Unit) {
+    if (cover == null) block() else clipRect(cover.left, cover.top, cover.right, cover.bottom, ClipOp.Difference, block)
+}
+
 private inline fun DrawScope.clipTo(rect: Rect, block: DrawScope.() -> Unit) = clipRect(rect.left, rect.top, rect.right, rect.bottom, block = block)
 
-private fun LayoutCoordinates.windowRect(): Rect = Rect(positionInWindow(), Size(size.width.toFloat(), size.height.toFloat()))
+/** Where this is drawn in the window, through any layer that scales it (a card at the back of a stacked queue). */
+private fun LayoutCoordinates.windowRect(): Rect = Rect(localToWindow(Offset.Zero), localToWindow(Offset(size.width.toFloat(), size.height.toFloat())))
 
 private fun lerpOffset(a: Offset, b: Offset, f: Float) = Offset(lerp(a.x, b.x, f), lerp(a.y, b.y, f))
 
@@ -914,13 +955,23 @@ fun QueueDeliveries(flights: QueueFlights, rows: Map<String, String>, transcript
 
 /**
  * A queued row's card, between the dock's inset and its surface: where it stands, for it to lift off from, and — for a
- * send landing on the card — the row the copy flies to, undrawn, surface and all, until the hand-over.
+ * send landing on the card — the row the copy flies to, undrawn, surface and all, until the hand-over. [fade] is how
+ * much of the card's face shows (all of it but at the back of a stacked queue, where a send sinks into the deck), and
+ * [cover] where the card in front of it stands, for the copy to go behind.
  */
-internal fun Modifier.queueCard(motion: SendMotion?, anchor: ComposerAnchor?, id: String, text: String, card: SendSurface): Modifier {
+internal fun Modifier.queueCard(
+    motion: SendMotion?,
+    anchor: ComposerAnchor?,
+    id: String,
+    text: String,
+    card: SendSurface,
+    fade: (() -> Float)? = null,
+    cover: (() -> Rect?)? = null,
+): Modifier {
     if (motion == null || anchor == null) return this
     anchor.card = card
     return onPlaced { anchor.surface = it }
-        .sendTarget(motion, id, text, SendTargetPart.Surface, landing = SendLanding.Queue, look = SendTargetLook(surface = card))
+        .sendTarget(motion, id, text, SendTargetPart.Surface, landing = SendLanding.Queue, look = SendTargetLook(surface = card, fading = fade, cover = cover))
 }
 
 /** A queued row's one line, laid out as [layout] says, in [color]: the text a delivery lifts off, and where a queued send's text lands. */
