@@ -921,7 +921,7 @@ class FollowUpRepositoryTest {
 
     @Test
     fun `steering while the chat is still being created waits for its first turn rather than stopping the launch`() = runBlocking<Unit> {
-        val request = LaunchRequest(prompt = "Do the thing", repoUrl = "https://github.com/acme/app", ref = "main", modelId = "auto-smart", modelParams = emptyList(), autoCreatePr = false, planMode = false)
+        val request = LaunchRequest(prompt = "Do the thing", repoUrl = "https://github.com/acme/app", ref = "main", modelId = "auto-smart", modelParams = emptyList(), planMode = false)
             .let { it.copy(agentId = LaunchIdempotency.agentId(it, "nonce")) }
         val id = request.agentId!!
         api.createGate = CompletableDeferred()
