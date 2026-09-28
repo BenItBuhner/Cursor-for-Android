@@ -927,6 +927,12 @@ class ConversationRepository(
         var inputsUpdatedAt = 0L
         /** True once this session fetched the inputs from the network (as opposed to disk). */
         var fetched = false
+        /**
+         * The inputs came from the disk as a read of an earlier process left them — the transcript with the runs it
+         * was read beside — so the next read's run list may be compared with them as with a copy fetched here (see
+         * [load]). Spent by that read, whatever it comes to.
+         */
+        var diskHeld = false
         /** When the inputs were last fetched; a return to the foreground moments later does not fetch them again. */
         var fetchedAt = 0L
         /** Per run: the images its prompt carried. A prompt in flight is keyed by its placeholder run. */
@@ -2529,6 +2535,7 @@ class ConversationRepository(
                 recordedFinishes.clear()
                 transcriptUnavailable = false
                 fetched = false
+                diskHeld = false
                 fetchedAt = 0L
                 inputsUpdatedAt = 0L
             },
@@ -3027,6 +3034,7 @@ class ConversationRepository(
         val tokens = cacheTokens()
         val api = backend.api
         if (!e.hasInputs) restoreFromCache(e, agentId)
+        val fromDisk = synchronized(e) { e.diskHeld.also { e.diskHeld = false } }
         e.state.update { it.copy(isLoading = true, error = null) }
         // Extended mode: the account's own record is the transcript (see [loadFromRecord]); the documented path
         // below stands in only for a chat the record has nothing for, or when the record cannot be read before
@@ -3072,7 +3080,13 @@ class ConversationRepository(
                 // nothing new in the transcript, and the copy in hand stands (see [runsUnchanged]).
                 // Compared with the runs as held before this load: the run page landing first is merged into the
                 // entry meanwhile (see [publishRunsFirst]), and compared with itself it would always read unchanged.
-                val held = synchronized(e) { if (!force && e.fetched && e.messages.isNotEmpty() && e.recordWindow == null) e.runs.associateBy { it.id } to e.local.isEmpty() else null }
+                // A copy from the disk is held so only while the agent's row has not moved since it was read: a row
+                // that moved is the chat changed on the server, whatever its newest runs say.
+                val rowAt = agents.agent(agentId)?.updatedAtMillis ?: 0L
+                val held = synchronized(e) {
+                    val trusted = e.fetched || (fromDisk && rowAt > 0L && rowAt == e.inputsUpdatedAt)
+                    if (!force && trusted && e.messages.isNotEmpty() && e.recordWindow == null) e.runs.associateBy { it.id } to e.local.isEmpty() else null
+                }
                 val conversation = async {
                     if (held != null) {
                         val page = runPage.await().getOrNull()
@@ -3141,7 +3155,9 @@ class ConversationRepository(
                             this.transcriptUnavailable = unavailable
                             transcriptError = transcriptIssue
                             unreached = (transcriptFailed && convResult.exceptionOrNull().isUnreached()) || (runsFailed && runResult.exceptionOrNull().isUnreached())
-                            inputsUpdatedAt = agents.agent(agentId)?.updatedAtMillis ?: 0L
+                            // Runs merged over a transcript that could not be read: the copy is of no date the row
+                            // could vouch for, so neither the prefetch nor the next start takes it as current.
+                            inputsUpdatedAt = if (transcriptFailed) 0L else agents.agent(agentId)?.updatedAtMillis ?: 0L
                             pruneLocal()
                             // The disk knows every filed prompt; only prompts still in flight exist solely in memory.
                             promptImages = onDevice + promptImages.filterKeys { key -> local.any { it.run.id == key } }
@@ -3232,6 +3248,8 @@ class ConversationRepository(
                 mergeNewestPage(newest.page, endKnown = newest.endKnown)
                 runOrder = if (newest.ascending) RunOrder.OLDEST_FIRST else RunOrder.NEWEST_FIRST
                 latestFetchedById = newest.latestFetched
+                // Newer runs than the transcript in hand: undated until the transcript lands (see [load]).
+                inputsUpdatedAt = 0L
                 pruneLocal()
                 promptImages = onDevice + promptImages.filterKeys { key -> local.any { it.run.id == key } }
                 latest = latestRun()
@@ -4518,8 +4536,13 @@ class ConversationRepository(
     private suspend fun restoreFromCache(e: Entry, agentId: String) {
         // An entry that already has its inputs has nothing to restore.
         if (synchronized(e) { e.hasInputs || e.fetched }) return
-        val betaSaved = readBetaWindow(agentId)
-        val cached = readCache(agentId) ?: betaSaved?.let { CachedConversation(agentId, messages = emptyList(), runs = emptyList(), window = it.turns.size) } ?: return
+        // Under Beta both files are read, the engine's window and the chat's: side by side, not one after the other.
+        val (betaSaved, documented) = coroutineScope {
+            val window = async { readBetaWindow(agentId) }
+            val chat = async { readCache(agentId) }
+            window.await() to chat.await()
+        }
+        val cached = documented ?: betaSaved?.let { CachedConversation(agentId, messages = emptyList(), runs = emptyList(), window = it.turns.size) } ?: return
         // The inputs arrived while the file was being read: the memory copy wins.
         if (synchronized(e) { e.hasInputs || e.fetched }) return
         val latest = (cached.runs + cached.local.filter { it.waitsBehind == null }.map { saved -> saved.run }).maxByOrNull { parseIsoMillis(it.createdAt) }
@@ -4547,6 +4570,9 @@ class ConversationRepository(
                 if (cached.window > 0) window = cached.window.coerceIn(WINDOW_RUNS, if (cached.record?.turnIndexed == true) MAX_WINDOW_TURNS else MAX_RESTORED_WINDOW)
                 transcriptUnavailable = cached.transcriptUnavailable
                 inputsUpdatedAt = cached.agentUpdatedAtMillis
+                // The documented path's own copy — no record window in it, whose transcript is another source's —
+                // with the runs it was read beside.
+                diskHeld = trusted && cached.record == null && cached.messages.isNotEmpty() && cached.runs.isNotEmpty() && !cached.transcriptUnavailable
                 // The prompts sent from here go on standing in, exactly as they did when the copy was written — bar one
                 // an earlier build drew in a Project's transcript while it waited behind the turn: the account's queue,
                 // and so the card, still holds it until its run starts.
