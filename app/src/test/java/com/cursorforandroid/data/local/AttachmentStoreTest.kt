@@ -79,6 +79,30 @@ class AttachmentStoreTest {
     }
 
     /**
+     * After a restart, a message still waiting on the account's queue reads its copies back for its row's tiles and
+     * for the run it starts: a set still in staging, and one filed under a run that did not carry it and put back on
+     * the card ([AttachmentStore.committed]), which the next commit moves on. Anything else reads back as nothing.
+     */
+    @Test
+    fun `a waiting message's copies read back after a restart, staged or put back from under a run, and nothing else does`() = runBlocking {
+        val waiting = store.stage(listOf(png(40, 30)), listOf(PromptFile(byteArrayOf(1, 2, 3), "notes.txt", "text/plain")))
+        assertThat(AttachmentStore(context).staged(waiting.attachments).attachments).isEqualTo(waiting.attachments)
+
+        val filed = store.commit("bc-1", "run-1", waiting)
+        val restored = AttachmentStore(context).staged(filed)
+        assertThat(restored.attachments).isEqualTo(filed)
+        val refiled = store.commit("bc-1", "run-2", restored)
+        refiled.forEach { assertThat(File(it.path).isFile).isTrue() }
+        assertThat(refiled.map { File(it.path).parentFile?.name }.distinct()).containsExactly("run-2")
+        filed.forEach { assertThat(File(it.path).exists()).isFalse() }
+
+        assertThat(store.staged(filed).attachments).isEmpty()
+        val elsewhere = File(context.cacheDir, "not-ours").apply { mkdirs() }
+        val stray = File(elsewhere, "0.png").apply { writeBytes(png(4, 4).bytes) }
+        assertThat(store.staged(listOf(refiled[0].copy(path = stray.path))).attachments).isEmpty()
+    }
+
+    /**
      * A bubble drawn from the staged paths can still be holding them when the send settles and moves the files: the
      * old paths lead to the new ones, through a set that went back to waiting and was filed under another run too.
      */

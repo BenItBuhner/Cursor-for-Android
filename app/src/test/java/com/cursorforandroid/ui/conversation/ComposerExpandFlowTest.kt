@@ -4,13 +4,18 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.TouchInjectionScope
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -25,6 +30,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -48,6 +54,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
@@ -151,10 +158,44 @@ class ComposerExpandFlowTest {
         dir.mkdirs()
         // Drawn here rather than through captureToImage, which waits for a redraw the held clock never lets happen.
         val root = compose.activity.window.decorView
-        val bitmap = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
-        compose.runOnUiThread { root.draw(Canvas(bitmap)) }
+        val out = File(dir, "%s_%04d.png".format(scene, frame++))
+        val bitmap = try {
+            Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888).also { compose.runOnUiThread { root.draw(Canvas(it)) } }
+        } catch (_: IllegalArgumentException) {
+            // A software canvas cannot draw a graphics layer's render node (the transcript's rows animating away after
+            // a send); PixelCopy renders the window through the hardware path instead.
+            System.setProperty("robolectric.pixelCopyRenderMode", "hardware")
+            val copy = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+            var result = -1
+            compose.runOnUiThread {
+                PixelCopy.request(compose.activity.window, copy, { result = it }, Handler(Looper.getMainLooper()))
+            }
+            shadowOf(Looper.getMainLooper()).idle()
+            check(result == PixelCopy.SUCCESS) { "PixelCopy failed: $result" }
+            copy
+        }
         if (imePx > 0) paintKeyboard(bitmap, imePx, density)
-        File(dir, "%s_%04d.png".format(scene, frame++)).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        out.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /** A finger drawn [dyDp] down the field in [steps] moves, a frame of the video after each, so the scroll shows, then lifted. */
+    private fun drag(tag: String, dyDp: Float, steps: Int) {
+        val step = dyDp * density / steps
+        touch(tag) { down(Offset(centerX, top + height * 0.25f)) }
+        repeat(steps) {
+            touch(tag) { moveBy(Offset(0f, step)) }
+            frames(1)
+        }
+        // Held still before lifting, so the scroll stops where the finger does rather than flinging on.
+        frames(6)
+        touch(tag) { up() }
+    }
+
+    /** Touch input the field acts on: injected events are only dispatched to it while the clock runs. */
+    private fun touch(tag: String, block: TouchInjectionScope.() -> Unit) {
+        compose.mainClock.autoAdvance = true
+        field(tag).performTouchInput(block)
+        compose.mainClock.autoAdvance = false
     }
 
     /** [count] frames of the video, two of the app's apart (30 fps), the clock stepped between them. */
@@ -215,6 +256,11 @@ class ComposerExpandFlowTest {
         val collapsed = bounds(hasTestTag(COMPOSER))
         val transcript = bounds(hasTestTag("transcript"))
         frames(10)
+        // Scrolled back up the prompt: the fade at the field's top gives way to one at its bottom.
+        repeat(4) {
+            drag(COMPOSER, dyDp = 60f, steps = 8)
+            frames(10)
+        }
 
         tapExpand(COMPOSER)
         play(14)

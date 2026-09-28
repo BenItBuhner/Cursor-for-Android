@@ -6,6 +6,11 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
+import kotlinx.coroutines.runBlocking
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.domain.PendingFollowup
 import com.cursorforandroid.domain.QueuedFollowUp
@@ -32,7 +37,11 @@ import java.nio.ByteBuffer
  * moved, nor one the reader removed); a row taken while a send is still landing on it flies on from where it stood;
  * with the reader scrolled off the newest turn the copy fades where it stood; with animations off nothing flies.
  *
- * With `QUEUE_DEMO_DIR` set, every frame of [demo] is written there as a PNG (the demo video's frames).
+ * On the account's card (Extended mode, what a phone signed in runs) the row's tiles are this device's copies of what
+ * the message carries, kept when the account's list names it in names and a count, and a delivery carries them into
+ * the bubble; a message queued elsewhere shows the account's word as plain tiles.
+ *
+ * With `QUEUE_DEMO_DIR` set, every frame of [demo] and [accountDemo] is written there as a PNG (the demo videos' frames).
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -252,52 +261,162 @@ class QueueMotionTest {
         assertThat(off.hides("u-2", "Run the migration first")).isFalse()
     }
 
-    @Test
-    fun `on the account's card a send's files land on the row's line of names and dissolve into it`() {
-        scene.composerText = "Match the header to these"
+    /** The account card's tiles, left to right, as laid out. */
+    private fun accountTiles() = listOf("Attached image", "Attached video", "Attached file").flatMap { what ->
+        compose.onAllNodes(hasContentDescription(what, substring = true) and hasAnyAncestor(hasTestTag("account-queue-row")), useUnmergedTree = true)
+            .fetchSemanticsNodes().map { it.config[SemanticsProperties.ContentDescription].single() to it.boundsInWindow }
+    }.sortedBy { it.second.left }
+
+    /** A send while the agent works in Extended mode, as a phone signed in makes it: onto the account's card, with two pictures and a spec. */
+    private fun sendOnAccount(id: String = "a-1"): SendFlight {
+        scene.onAccount = true
+        scene.composerText = "Match the header to these, and follow the spec"
         scene.attach()
         scene.show(motion)
-        val flight = checkNotNull(scene.sendQueued(motion, "a-1", onAccount = true))
-        scene.frames(48)
-        assertThat(flight.targetId).isEqualTo("a-1")
-        val names = compose.onAllNodesWithTag("queued-attachments", useUnmergedTree = true)[0].fetchSemanticsNode().boundsInWindow
-        for (attachment in flight.takeoff.attachments) assertThat(flight.targetOf(attachment)).isEqualTo(names)
-        scene.frames(SendMotion.FlightMillis / 2L)
-        for (attachment in flight.takeoff.attachments) assertThat(flight.alphaOf(attachment)).isLessThan(0.5f)
+        return checkNotNull(scene.sendQueued(motion, id, onAccount = true))
     }
 
     @Test
-    fun `a device row handed to the account's queue flies into the account's row`() {
-        scene.queue += queued("q-1", "Run the migration first")
+    fun `on the account's card a send's pictures and file land on the row's own tiles, drawn from this device's copies`() {
+        val flight = sendOnAccount()
+        assertThat(flight.takeoff.attachments.map { it.look.ordinal }).containsExactly(0, 1, 2).inOrder()
+        scene.frames(48)
+        assertThat(flight.phase).isEqualTo(SendFlight.Phase.Flying)
+        assertThat(flight.targetId).isEqualTo("a-1")
+        assertThat(flight.landedOn).isEqualTo(SendLanding.Queue)
+        // The row the account's card shows for it has a tile for each, in the prompt's order — no line of names to dissolve into.
+        val tiles = accountTiles()
+        assertThat(tiles.map { it.first }).containsExactly("Attached image", "Attached image", "Attached file Q3-header-spec.pdf").inOrder()
+        val chips = flight.takeoff.attachments.map { it.rect }
+        flight.takeoff.attachments.forEachIndexed { i, attachment ->
+            val tile = checkNotNull(flight.targetOf(attachment))
+            assertThat(tile).isEqualTo(tiles[i].second)
+            assertThat(tile.width).isLessThan(chips[i].width)
+        }
+        // Whole on the way, as on the device's card: each lands on its tile rather than fading into words.
+        scene.frames(SendMotion.FlightMillis / 2L)
+        for (attachment in flight.takeoff.attachments) assertThat(flight.alphaOf(attachment)).isGreaterThan(0.5f)
+        scene.frames(SendMotion.FlightMillis.toLong() + 64)
+        assertThat(motion.flight).isNull()
+        compose.onAllNodesWithTag(FlyingAttachmentTag, useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    @Test
+    fun `the account's row keeps this device's pictures when its list names the message in names and a count`() {
+        sendOnAccount()
+        scene.frames(SendMotion.FlightMillis.toLong() + 200)
+        val before = accountTiles()
+        scene.accountTakes("a-1")
+        scene.frames(64)
+        // The list's row, not this device's: the account's word on it is names and a count, the tiles this device's copies.
+        val row = scene.accountRows.single()
+        assertThat(scene.account.single().attachments).isEmpty()
+        assertThat(row.attachments.map { File(it.path).isFile }).containsExactly(true, true, true)
+        assertThat(accountTiles()).isEqualTo(before)
+        compose.onAllNodesWithTag("queued-attachments", useUnmergedTree = true).fetchSemanticsNodes().single().let { names ->
+            assertThat(names.config[SemanticsProperties.Text].single().text).isEqualTo("Q3-header-spec.pdf")
+        }
+    }
+
+    @Test
+    fun `a delivery from the account's card carries its tiles into the bubble's thumbnails, through the copies' move under the run`() {
+        sendOnAccount()
+        scene.frames(SendMotion.FlightMillis.toLong() + 200)
+        scene.accountTakes("a-1")
+        scene.awaitTilePreviews()
+        val tiles = accountTiles().map { it.second }
+        val row = scene.flights.anchor("a-1")
+        val filed = scene.deliver("a-1", bubble = "u-2")
+        val flight = checkNotNull(motion.flight)
+        assertThat(flight.takeoff.anchor).isSameInstanceAs(row)
+        // Lifted off the row's tiles, pictures and all: the row's copies, not placeholders.
+        assertThat(flight.takeoff.attachments.map { it.look.ordinal }).containsExactly(0, 1, 2).inOrder()
+        assertThat(flight.takeoff.attachments.map { it.rect }).isEqualTo(tiles)
+        assertThat(flight.takeoff.attachments.take(2).map { it.look.thumbnail }).doesNotContain(null)
+        // The copies moved under the run as the bubble was filed; the bubble names them there.
+        assertThat(filed.map { File(it.path).parentFile?.name }).containsExactly("u-2", "u-2", "u-2")
+        scene.frames(48)
+        assertThat(flight.phase).isEqualTo(SendFlight.Phase.Flying)
+        assertThat(flight.targetId).isEqualTo("u-2")
+        flight.takeoff.attachments.forEachIndexed { i, attachment ->
+            val landing = checkNotNull(flight.targetOf(attachment)) { "attachment $i has no place in the bubble" }
+            assertThat(landing.width).isGreaterThan(tiles[i].width)
+        }
+        scene.frames(SendMotion.FlightMillis / 3L)
+        for (attachment in flight.takeoff.attachments) assertThat(flight.alphaOf(attachment)).isGreaterThan(0.5f)
+        scene.frames(SendMotion.FlightMillis.toLong() + 64)
+        assertThat(motion.flight).isNull()
+        assertThat(scene.messages.single { it.id == "u-2" }.attachments).isEqualTo(filed)
+    }
+
+    @Test
+    fun `a message queued elsewhere shows the account's word as plain tiles, which fade where they stood if the bubble has nowhere for them`() {
+        scene.onAccount = true
+        scene.account += PendingFollowup(
+            "a-1",
+            "Match the header to these",
+            files = listOf(com.cursorforandroid.domain.PendingAttachment("Q3-header-spec.pdf", "application/pdf")),
+            imageCount = 2,
+        )
         scene.show(motion)
+        assertThat(accountTiles().map { it.first }).containsExactly("Attached image", "Attached image", "Attached file Q3-header-spec.pdf").inOrder()
+        scene.deliver("a-1", bubble = "u-2")
+        val flight = checkNotNull(motion.flight)
+        assertThat(flight.takeoff.attachments).hasSize(3)
+        scene.frames(48 + SendMotion.FlightMillis / 2L)
+        assertThat(flight.targetId).isEqualTo("u-2")
+        for (attachment in flight.takeoff.attachments) {
+            assertThat(flight.targetOf(attachment)).isNull()
+            assertThat(flight.alphaOf(attachment)).isLessThan(0.5f)
+        }
+    }
+
+    @Test
+    fun `a device row handed to the account's queue flies into the account's row, its pictures onto the row's tiles`() {
+        scene.composerText = "Match the header to these, and follow the spec"
+        scene.attach()
+        scene.show(motion)
+        scene.sendQueued(motion, "q-1")
+        scene.frames(SendMotion.FlightMillis.toLong() + 200)
+        assertThat(motion.flight).isNull()
+        // Refused as busy, the message goes to the account's queue with what it carries, staged here again
+        // (`ConversationRepository.expectDelivery`): the account's row in the frame the device's goes.
+        val item = scene.queue.single()
+        val set = runBlocking { scene.store.stage(item.images.map { it.image }, item.files.map { it.file }) }
         compose.runOnUiThread {
             scene.queue.clear()
-            scene.account += PendingFollowup("a-1", "Run the migration first")
+            scene.waiting += scene.ownRow("a-1", item.text, set.attachments)
         }
         scene.frame()
         val flight = checkNotNull(motion.flight)
+        assertThat(flight.takeoff.attachments).hasSize(3)
         scene.frames(48)
         assertThat(flight.targetId).isEqualTo("a-1")
         assertThat(flight.landedOn).isEqualTo(SendLanding.Queue)
+        val tiles = accountTiles().map { it.second }
+        assertThat(flight.takeoff.attachments.map { flight.targetOf(it) }).isEqualTo(tiles)
     }
 
     /**
      * The demo: two follow-ups sent while the agent works — the second with two pictures and a spec — each landing in
      * its row on the card, then the run taking them one after the other into the transcript.
      */
+    private val demoDir = System.getenv("QUEUE_DEMO_DIR")?.let(::File)
+    private var demoFrame = 0
+
+    /** On by [millis], a frame at a time, each written to [demoDir] when it is set. */
+    private fun film(millis: Long) {
+        var left = millis
+        while (left > 0) {
+            demoDir?.let { scene.drawTo(File(it, "queue_%04d.png".format(demoFrame++))) }
+            compose.mainClock.advanceTimeBy(16)
+            compose.waitForIdle()
+            left -= 16
+        }
+    }
+
     @Test
     fun demo() {
-        val dir = System.getenv("QUEUE_DEMO_DIR")?.let(::File)
-        var frame = 0
-        fun film(millis: Long) {
-            var left = millis
-            while (left > 0) {
-                dir?.let { scene.drawTo(File(it, "queue_%04d.png".format(frame++))) }
-                compose.mainClock.advanceTimeBy(16)
-                compose.waitForIdle()
-                left -= 16
-            }
-        }
         scene.composerText = "Run the migration first"
         scene.show(motion)
         film(500)
@@ -317,5 +436,42 @@ class QueueMotionTest {
         film(SendMotion.FlightMillis + 900L)
         assertThat(motion.flights).isEmpty()
         assertThat(scene.messages.map { it.id }).containsExactly("u-1", "u-2", "u-3").inOrder()
+    }
+
+    /**
+     * The demo of the path a phone signed in runs (Extended mode): two follow-ups sent while the agent works, onto the
+     * account's card — the second with two pictures and a spec, which land on its row's tiles — the account's list
+     * naming them, then the run taking them one after the other into the transcript, the pictures flying off the
+     * tiles into the bubble's thumbnails.
+     */
+    @Test
+    fun accountDemo() {
+        scene.onAccount = true
+        scene.composerText = "Run the migration first"
+        scene.show(motion)
+        film(500)
+        assertThat(scene.sendQueued(motion, "a-1", onAccount = true)).isNotNull()
+        film(400)
+        scene.accountTakes("a-1")
+        film(SendMotion.FlightMillis + 300L)
+        compose.runOnUiThread {
+            scene.composerText = "Then match the header to these, and follow the spec"
+            scene.attach()
+        }
+        film(600)
+        assertThat(scene.sendQueued(motion, "a-2", onAccount = true)).isNotNull()
+        film(400)
+        scene.accountTakes("a-2")
+        film(SendMotion.FlightMillis + 500L)
+        scene.awaitTilePreviews()
+        film(300)
+        assertThat(accountTiles()).hasSize(3)
+        scene.deliver("a-1", bubble = "u-2")
+        film(SendMotion.FlightMillis + 900L)
+        val filed = scene.deliver("a-2", bubble = "u-3")
+        film(SendMotion.FlightMillis + 1_200L)
+        assertThat(motion.flights).isEmpty()
+        assertThat(scene.messages.map { it.id }).containsExactly("u-1", "u-2", "u-3").inOrder()
+        assertThat(scene.messages.last().attachments).isEqualTo(filed)
     }
 }

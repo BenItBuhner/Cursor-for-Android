@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -43,7 +44,9 @@ import androidx.compose.ui.unit.dp
 import com.cursorforandroid.domain.PendingFollowup
 import com.cursorforandroid.domain.QueuedFollowUp
 import androidx.compose.ui.text.TextLayoutResult
-import com.cursorforandroid.ui.components.AnyAttachment
+import androidx.compose.runtime.produceState
+import com.cursorforandroid.domain.PromptFileKind
+import com.cursorforandroid.util.ioThenMain
 import com.cursorforandroid.ui.components.ComposerAnchor
 import com.cursorforandroid.ui.components.LocalSendMotion
 import com.cursorforandroid.ui.components.QueueFlights
@@ -100,24 +103,40 @@ fun QueuedFollowUps(
     modifier: Modifier = Modifier,
     flights: QueueFlights? = null,
 ) {
-    val motion = LocalSendMotion.current
     Column(modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEachIndexed { index, item ->
             key(item.id) {
-                QueuedFollowUpRow(
-                    item = item,
-                    position = index + 1,
-                    count = queue.size,
-                    thumbnails = thumbnails,
-                    onEdit = { onEdit(item) },
-                    onSteer = { onSteer(item) },
-                    onRemove = { onRemove(item) },
-                    motion = motion,
-                    anchor = flights?.anchor(item.id),
-                )
+                QueuedFollowUpCard(item, index + 1, queue.size, thumbnails, onEdit, onSteer, onRemove, flights)
             }
         }
     }
+}
+
+/** One card of [QueuedFollowUps], alone: as a [QueueStack] draws it, told its [face]. */
+@Composable
+internal fun QueuedFollowUpCard(
+    item: QueuedFollowUp,
+    position: Int,
+    count: Int,
+    thumbnails: Map<String, ImageBitmap>,
+    onEdit: (QueuedFollowUp) -> Unit,
+    onSteer: (QueuedFollowUp) -> Unit,
+    onRemove: (QueuedFollowUp) -> Unit,
+    flights: QueueFlights?,
+    face: QueueCardFace = QueueCardFace.Plain,
+) {
+    QueuedFollowUpRow(
+        item = item,
+        position = position,
+        count = count,
+        thumbnails = thumbnails,
+        onEdit = { onEdit(item) },
+        onSteer = { onSteer(item) },
+        onRemove = { onRemove(item) },
+        motion = LocalSendMotion.current,
+        anchor = flights?.anchor(item.id),
+        face = face,
+    )
 }
 
 /** A queued row's card as a flight draws it: the card's own surface. */
@@ -135,6 +154,7 @@ private fun QueuedFollowUpRow(
     onRemove: () -> Unit,
     motion: SendMotion?,
     anchor: ComposerAnchor?,
+    face: QueueCardFace,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
@@ -144,7 +164,7 @@ private fun QueuedFollowUpRow(
             .fillMaxWidth()
             // The card's own surface, stood in from the composer's sides so its corners are concentric with the box's.
             // The description sits on the surface, so the row's node is the card as drawn.
-            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface()))
+            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface(), face.contentAlpha, face.cover))
             .semantics {
                 contentDescription = when (val note = item.warning) {
                     null -> "Queued follow-up $position of $count"
@@ -152,47 +172,20 @@ private fun QueuedFollowUpRow(
                 }
             }
             .heightIn(min = RowHeight)
-            .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp),
+            .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp)
+            .faceOf(face),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (item.warning != null) {
             Icon(CursorIcons.Warning, null, tint = colors.red, modifier = Modifier.size(13.dp))
             Spacer(Modifier.width(8.dp))
         } else if (item.images.isNotEmpty() || item.files.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Each tile at its place in the prompt's attachments, the images first: where a send's copy of it lands, and lifts off from.
-                item.images.forEachIndexed { ordinal, image ->
-                    Box(
-                        Modifier
-                            .size(Tile)
-                            .sendAttachmentSource(motion, anchor, "queued:${item.id}:$ordinal", SendAttachment(ordinal, thumbnails[image.id], media = true))
-                            .sendAttachmentTarget(motion, item.id, words, ordinal, SendLanding.Queue)
-                            .cursorSurface(colors.fill, colors.stroke, CursorTheme.shapes.sm),
-                    ) {
-                        val bitmap = thumbnails[image.id]
-                        if (bitmap != null) {
-                            Image(bitmap, contentDescription = "Attached image", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        } else {
-                            Icon(CursorIcons.Image, null, tint = colors.iconTertiary, modifier = Modifier.size(10.dp).align(Alignment.Center))
-                        }
-                    }
+            // The images first, then the files (a file keeps its glyph where an image has its tile; its name follows the message line below).
+            val looks = item.images.mapIndexed { ordinal, image -> SendAttachment(ordinal, thumbnails[image.id], media = true) } +
+                item.files.mapIndexed { index, file ->
+                    SendAttachment(item.images.size + index, thumbnail = null, media = false, name = file.file.name, kind = file.file.kind, sizeBytes = file.file.sizeBytes.toLong())
                 }
-                // A file keeps its glyph where an image has its tile; its name follows the message line below.
-                item.files.forEachIndexed { index, file ->
-                    val ordinal = item.images.size + index
-                    val look = SendAttachment(ordinal, thumbnail = null, media = false, name = file.file.name, kind = file.file.kind, sizeBytes = file.file.sizeBytes.toLong())
-                    Box(
-                        Modifier
-                            .size(Tile)
-                            .sendAttachmentSource(motion, anchor, "queued:${item.id}:$ordinal", look)
-                            .sendAttachmentTarget(motion, item.id, words, ordinal, SendLanding.Queue)
-                            .cursorSurface(colors.fill, colors.stroke, CursorTheme.shapes.sm)
-                            .semantics { contentDescription = "Attached file ${file.file.name}" },
-                    ) {
-                        Icon(file.file.kind.icon(), null, tint = colors.iconTertiary, modifier = Modifier.size(10.dp).align(Alignment.Center))
-                    }
-                }
-            }
+            QueueTiles(looks, motion, anchor, item.id, words)
             Spacer(Modifier.width(8.dp))
         }
         // A message the server keeps refusing as busy reads as waiting, steadily — one line, the time waited on it —
@@ -286,27 +279,46 @@ fun AccountQueueRows(
     /** The rows as ends of the send's flight, as on [QueuedFollowUps]. */
     flights: QueueFlights? = null,
 ) {
-    val motion = LocalSendMotion.current
     Column(modifier.animateContentSize().testTag("account-queue"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEachIndexed { index, item ->
             key(item.id) {
-                AccountQueueRow(
-                    motion = motion,
-                    anchor = flights?.anchor(item.id),
-                    item = item,
-                    position = index + 1,
-                    count = queue.size,
-                    inFlight = item.id in inFlightIds,
-                    onSendNow = { onSendNow(item) },
-                    onSteerNow = onSteerNow?.let { steer -> { steer(item) } },
-                    onMove = onMove?.takeIf { queue.size > 1 }?.let { move -> { up -> move(item, up) } },
-                    onRemove = { onRemove(item) },
-                    onUpdate = { text -> onUpdate(item, text) },
-                    onEditing = { editing -> onEditing(item, editing) },
-                )
+                AccountQueueCard(item, index + 1, queue.size, inFlightIds, onSendNow, onRemove, onUpdate, onEditing, onSteerNow, onMove, flights)
             }
         }
     }
+}
+
+/** One card of [AccountQueueRows], alone: as a [QueueStack] draws it, told its [face]. */
+@Composable
+internal fun AccountQueueCard(
+    item: PendingFollowup,
+    position: Int,
+    count: Int,
+    inFlightIds: Set<String>,
+    onSendNow: (PendingFollowup) -> Unit,
+    onRemove: (PendingFollowup) -> Unit,
+    onUpdate: (PendingFollowup, String) -> Unit,
+    onEditing: (PendingFollowup, Boolean) -> Unit,
+    onSteerNow: ((PendingFollowup) -> Unit)?,
+    onMove: ((PendingFollowup, up: Boolean) -> Unit)?,
+    flights: QueueFlights?,
+    face: QueueCardFace = QueueCardFace.Plain,
+) {
+    AccountQueueRow(
+        motion = LocalSendMotion.current,
+        anchor = flights?.anchor(item.id),
+        item = item,
+        position = position,
+        count = count,
+        inFlight = item.id in inFlightIds,
+        onSendNow = { onSendNow(item) },
+        onSteerNow = onSteerNow?.let { steer -> { steer(item) } },
+        onMove = onMove?.takeIf { count > 1 }?.let { move -> { up -> move(item, up) } },
+        onRemove = { onRemove(item) },
+        onUpdate = { text -> onUpdate(item, text) },
+        onEditing = { editing -> onEditing(item, editing) },
+        face = face,
+    )
 }
 
 @Composable
@@ -323,6 +335,7 @@ private fun AccountQueueRow(
     onRemove: () -> Unit,
     onUpdate: (String) -> Unit,
     onEditing: (Boolean) -> Unit,
+    face: QueueCardFace,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
@@ -335,12 +348,13 @@ private fun AccountQueueRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface()))
+            .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface(), face.contentAlpha, face.cover))
             .onContextClick(enabled = onMove != null && !editing && !inFlight) { at -> menuAt = at; menuOpen = true }
             .testTag("account-queue-row")
             .heightIn(min = RowHeight)
             .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp)
-            .semantics { contentDescription = "Queued on your account, $position of $count" },
+            .semantics { contentDescription = "Queued on your account, $position of $count" }
+            .faceOf(face),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(CursorIcons.Cloud, null, tint = colors.iconQuaternary, modifier = Modifier.size(12.dp))
@@ -372,19 +386,16 @@ private fun AccountQueueRow(
                 GlyphButton(CursorIcons.Check, "Save queued follow-up", colors.iconPrimary, save)
             }
         } else {
+            val looks = accountTileLooks(item)
+            if (looks.isNotEmpty()) {
+                QueueTiles(looks, motion, anchor, item.id, words)
+                Spacer(Modifier.width(8.dp))
+            }
             Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
                 val textColor = if (inFlight) colors.textTertiary else colors.textPrimary
                 QueueLine(words, textColor, motion, anchor, item.id)
-                // What the account says the message carries (`selected_context`): its files by name, its images by count.
-                // A send's attachments, which have no tiles here, land on the line and dissolve into its words.
-                if (item.files.isNotEmpty() || item.imageCount > 0) {
-                    val images = when (item.imageCount) {
-                        0 -> emptyList()
-                        1 -> listOf("1 image")
-                        else -> listOf("${item.imageCount} images")
-                    }
-                    AttachedFileNames(item.files.map { it.name } + images, Modifier.sendAttachmentTarget(motion, item.id, words, AnyAttachment, SendLanding.Queue))
-                }
+                val names = looks.mapNotNull { it.name }
+                if (names.isNotEmpty()) AttachedFileNames(names)
                 if (item.isEditing) Text("Being edited on another device", style = type.small, color = colors.textQuaternary, maxLines = 1)
                 // A message put back on the card: the transcript had shown it under a run that ended without it (see QueuePlacement.returned).
                 item.note?.let { Text(it, style = type.small, color = colors.textQuaternary, maxLines = 2, modifier = Modifier.testTag("account-queue-note")) }
@@ -410,6 +421,75 @@ private fun AccountQueueRow(
                     GlyphButton(CursorIcons.Trash, "Remove queued follow-up", colors.iconTertiary, onRemove)
                     GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", colors.iconTertiary) { text = TextFieldValue(item.text, TextRange(item.text.length)); editing = true; onEditing(true) }
                     GlyphButton(CursorIcons.ArrowUp, "Send now", colors.iconPrimary, onSendNow)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * An account row's tiles, at their places in the prompt's attachments: this device's copies of what a message queued
+ * from here carries ([PendingFollowup.attachments]) — its pictures' previews, its files' glyphs — or, for one queued
+ * elsewhere or whose copies are gone, the account's word for it: a plain tile for each picture, a glyph for each file.
+ */
+@Composable
+private fun accountTileLooks(item: PendingFollowup): List<SendAttachment> {
+    if (item.attachments.isEmpty()) {
+        return List(item.imageCount) { ordinal -> SendAttachment(ordinal, thumbnail = null, media = true) } +
+            item.files.mapIndexed { index, file -> SendAttachment(item.imageCount + index, thumbnail = null, media = false, name = file.name, kind = file.kind) }
+    }
+    return item.attachments.mapIndexed { ordinal, attachment ->
+        key(attachment.path) {
+            if (!attachment.isFile) {
+                SendAttachment(ordinal, rememberTileThumbnail(attachment.path), media = true)
+            } else {
+                // A recording is a tile in the bubble, as it is here: it flies as one.
+                val video = attachment.kind == PromptFileKind.Video
+                SendAttachment(ordinal, thumbnail = null, media = video, video = video, name = attachment.name, kind = attachment.kind, sizeBytes = attachment.sizeBytes)
+            }
+        }
+    }
+}
+
+/**
+ * A picture's preview for a tile, decoded off the main thread wherever the file is now ([decodeFollowingMoves]: the
+ * copies move under the run the message starts as it is delivered) and big enough for the copy a delivery flies up
+ * to the bubble's thumbnail; null until decoded, and for a file that will not decode.
+ */
+@Composable
+private fun rememberTileThumbnail(path: String): ImageBitmap? {
+    val key = tileThumbnailKey(path)
+    return produceState(AttachmentImages.get(key), key) {
+        if (value == null) value = ioThenMain { decodeFollowingMoves(path, TileThumbnailPx) }?.also { AttachmentImages.put(key, it) }
+    }.value
+}
+
+/** A queued row's attachments as small tiles before its line, in the prompt's order: where a send's copies land, and what a delivery lifts off. */
+@Composable
+private fun QueueTiles(looks: List<SendAttachment>, motion: SendMotion?, anchor: ComposerAnchor?, id: String, words: String) {
+    val colors = CursorTheme.colors
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (look in looks) {
+            key(look.ordinal) {
+                val description = when {
+                    look.video -> "Attached video"
+                    look.media -> "Attached image"
+                    else -> "Attached file ${look.name.orEmpty()}"
+                }
+                Box(
+                    Modifier
+                        .size(Tile)
+                        .sendAttachmentSource(motion, anchor, "queued:$id:${look.ordinal}", look)
+                        .sendAttachmentTarget(motion, id, words, look.ordinal, SendLanding.Queue)
+                        .cursorSurface(colors.fill, colors.stroke, CursorTheme.shapes.sm)
+                        .semantics { contentDescription = description },
+                ) {
+                    val picture = look.thumbnail?.takeIf { look.media }
+                    if (picture != null) {
+                        Image(picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    } else {
+                        Icon(look.kind.icon(), null, tint = colors.iconTertiary, modifier = Modifier.size(10.dp).align(Alignment.Center))
+                    }
                 }
             }
         }
@@ -457,7 +537,15 @@ private fun GlyphButton(icon: ImageVector, contentDescription: String, tint: Col
     }
 }
 
+/** A queued card's face — what it draws on its surface — at the share its stack shows of it; a plain card's as ever. */
+private fun Modifier.faceOf(face: QueueCardFace): Modifier =
+    if (face === QueueCardFace.Plain) this else graphicsLayer { alpha = face.contentAlpha() }
+
 /** One line of composer text plus the composer's vertical padding, so a row reads as a single-line composer. */
 private val RowHeight = 40.dp
 private val Tile = 18.dp
 private val Glyph = 14.dp
+private const val TileThumbnailPx = 256
+
+/** Where a tile's preview of the picture at [path] is kept once decoded ([AttachmentImages]). */
+internal fun tileThumbnailKey(path: String): String = "$path@$TileThumbnailPx"

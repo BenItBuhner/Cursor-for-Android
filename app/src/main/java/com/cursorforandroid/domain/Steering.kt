@@ -86,6 +86,13 @@ data class PendingFollowup(
      * the transcript had shown it under a run that ended without it (see [QueuePlacement.returned]).
      */
     val note: String? = null,
+    /**
+     * This device's own copies of what the message carries, in the prompt's order — pictures as previews, files as
+     * kept — for a message queued from here (see [QueuePlacement.waiting]): the row's tiles, and what a delivery
+     * carries into the bubble. Empty for one queued elsewhere, or whose copies are gone; the account's word
+     * ([files], [imageCount]) stands in then.
+     */
+    val attachments: List<MessageAttachment> = emptyList(),
 ) {
     /** The line a card shows: the message, or a word for one that carries only attachments. */
     val previewText: String get() = text.ifBlank { attachmentOnlyText(imageCount, files.size) }
@@ -238,17 +245,23 @@ data class ConversationControls(
     fun placed(placement: QueuePlacement): ConversationControls {
         if (placement.isEmpty) return this
         var changed = false
+        // By id; by words only for one queued without an id of the account's (the list's row for it is the account's
+        // own name for the same message) — the same words are other queued messages' too.
+        fun same(listed: PendingFollowup, w: PendingFollowup) =
+            listed.id == w.id || (w.id.startsWith(QueuePlacement.LOCAL_ID_PREFIX) && QueuePlacement.textKey(listed.text) == QueuePlacement.textKey(w.text))
         val shown = queue.mapNotNull { item ->
+            // A message queued from here keeps this device's copies of what it carries on the list's row for it: the
+            // account describes them (names, a count), only this device has the pictures to draw.
+            val own = if (item.attachments.isEmpty()) placement.waiting.firstOrNull { w -> w.attachments.isNotEmpty() && same(item, w) }?.attachments else null
+            val withOwn = own?.let { changed = true; item.copy(attachments = it) } ?: item
             when {
                 placement.holds(item) -> { changed = true; null }
-                placement.returned[item.id] != null -> { changed = true; item.copy(note = placement.returned[item.id]) }
-                else -> item
+                placement.returned[item.id] != null -> { changed = true; withOwn.copy(note = placement.returned[item.id]) }
+                else -> withOwn
             }
         }
-        // This device's queued messages the list does not name (yet, or any more): kept on the card until the transcript
-        // shows them. By id; by words only for one queued without an id of the account's (the list's row for it is the
-        // account's own name for the same message) — the same words are other queued messages' too.
-        val kept = placement.waiting.filter { w -> shown.none { it.id == w.id || (w.id.startsWith(QueuePlacement.LOCAL_ID_PREFIX) && QueuePlacement.textKey(it.text) == QueuePlacement.textKey(w.text)) } }
+        // This device's queued messages the list does not name (yet, or any more): kept on the card until the transcript shows them.
+        val kept = placement.waiting.filter { w -> shown.none { same(it, w) } }
         if (kept.isNotEmpty()) changed = true
         val sending = placement.sendingIds.mapTo(HashSet()) { QUEUE_ACTION_PREFIX + it }
         return when {
