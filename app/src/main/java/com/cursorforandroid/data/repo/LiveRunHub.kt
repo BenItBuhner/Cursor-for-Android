@@ -89,6 +89,11 @@ class LiveRunHub(
     private val lookMaxMs: Long = 30_000L,
     private val lookQuietMs: Long = 1_000L,
     private val lookWindowMs: Long = 5_000L,
+    /**
+     * How long a stream that has said the run ended (a terminal `status`) may go on without its `result` — heartbeats
+     * only — before the pass is let go and the run finished on the stream's word (see [finishOnStreamWord]).
+     */
+    private val terminalGraceMs: Long = TERMINAL_GRACE_MS,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     /** Everything known about a run right now. Items are the same timeline entries the conversation renders. */
@@ -435,6 +440,7 @@ class LiveRunHub(
                 // The connection is gone for now. Whether the run is too, the record knows; if not, come back to the
                 // stream — right away after a healthy connection, more patiently after repeated failures.
                 if (settleFromRecord(entry, self, backend) == Record.Over) break
+                if (finishOnStreamWord(entry, self)) break
                 drops = if (pass.progressed) 1 else drops + 1
                 resumeFrom = pass.error?.resumeFrom
                 if (resumeFrom == null) restartAccumulator(entry, timed = true)
@@ -487,6 +493,8 @@ class LiveRunHub(
         var lastEventAt = 0L
         var atPosition = true
         var restOwed = false
+        // When the stream said the run ended without its `result` yet (see [terminalGraceMs]); 0 while it has not.
+        var endSaidAt = 0L
         try {
             beats.collect { beat ->
                 if (!owns(entry, self)) return@collect
@@ -515,6 +523,11 @@ class LiveRunHub(
                     lastEventAt = System.nanoTime()
                     atPosition = false
                 }
+                if (event is RunStreamEvent.Status) endSaidAt = if (event.status.isTerminal) System.nanoTime() else 0L
+                // Said over, and nothing but the connection's keep-alives since for longer than a result takes: the
+                // `result` is not coming on this connection, and holding it open kept the chat on this run while the
+                // account had started the next (Bennett's 0.4.12 coordinator, a stream at FINISHED left unfinished).
+                if (endSaidAt != 0L && event !is RunStreamEvent.Result && !historical && System.nanoTime() - endSaidAt >= terminalGraceMs * NANOS_PER_MS) throw EndOfPass
                 when (event) {
                     is RunStreamEvent.Error -> {
                         // The last event of the pass. An expired log is a fact about the run; the rest is about the
@@ -588,6 +601,22 @@ class LiveRunHub(
         if (!row.isRunning || row.latestRunId != run.id) return false
         val recordAt = parseIsoMillis(run.updatedAt).takeIf { it > 0 } ?: return false
         return row.updatedAtMillis > recordAt + STALE_RUN_RECORD_SLACK_MS
+    }
+
+    /**
+     * The connection ended — or was let go (see [terminalGraceMs]) — after the stream said the run ended, and no
+     * `result` came: the run is finished on the stream's own word when the record does not settle it. The record can
+     * lag its run's stream by minutes on a long coordinator chat, and a stale record calling the run running kept it
+     * followed, reconnecting for a result the server would not send, with the account's next run left unfollowed.
+     * The trace is not claimed whole (`streamed` false), so the chat reads it again.
+     */
+    private fun finishOnStreamWord(entry: Entry, self: Job?): Boolean {
+        val said = entry.live.status.takeIf { it.isTerminal } ?: entry.fallback?.status?.takeIf { it.isTerminal } ?: return false
+        if (!owns(entry, self)) return true
+        val result = RunStreamEvent.Result(entry.runId, said, text = null, durationMs = null, git = null, fromRecord = true)
+        settledAccumulator(entry).apply(result)
+        finish(entry, self, result, historical = false, streamed = false)
+        return true
     }
 
     /**
@@ -777,6 +806,8 @@ class LiveRunHub(
     private companion object {
         val ALWAYS_WATCHED: StateFlow<Boolean> = MutableStateFlow(true)
         const val NANOS_PER_MS = 1_000_000L
+        /** See [terminalGraceMs]: a `result` follows its terminal `status` within a moment on a healthy stream. */
+        const val TERMINAL_GRACE_MS = 15_000L
         const val PARKED_VERSION = 1
         /** Parked turns kept on disk, the last parked first; past these a reopen replays, as it did before there was parking. */
         const val MAX_PARKED = 64

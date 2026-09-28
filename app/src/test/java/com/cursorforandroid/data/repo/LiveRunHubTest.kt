@@ -610,4 +610,63 @@ class LiveRunHubTest {
         assertThat(streamer.connections.distinct()).containsExactly(documented)
         subscription.cancel()
     }
+
+    /**
+     * Bennett's 0.4.12 coordinator: the stream said FINISHED and closed without its `result`, and the record — minutes
+     * behind on a long chat — still called the run running. The run was reconnected to for a result that never came,
+     * and the chat stayed on it while the account's next run was under way.
+     */
+    @Test
+    fun `a stream that says the run ended and closes with no result finishes the run, though the record still calls it running`() = runBlocking {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
+        streamer.emit("run-1", RunStreamEvent.Assistant("Workers dispatched."))
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.FINISHED))
+        streamer.emit("run-1", RunStreamEvent.Done)
+        val subscription = scope.launch { hub.snapshots("bc-1", "run-1").collect { } }
+
+        awaitUntil { snapshot()?.finished == true }
+        assertThat(current().status).isEqualTo(RunStatus.FINISHED)
+        assertThat(current().items.filterIsInstance<AssistantMessage>().map { it.markdown }).containsExactly("Workers dispatched.")
+        assertThat(current().items.filterIsInstance<NoticeCard>()).isEmpty()
+        assertThat(api.runs.getValue("run-1").status).isEqualTo("RUNNING")
+        assertThat(connections()).isEqualTo(1)
+        subscription.cancel()
+    }
+
+    @Test
+    fun `a stream that says the run ended and then only keeps the connection alive is let go after the grace, the run finished`() = runBlocking {
+        hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 50, releaseGraceMs = releaseGrace, reconnectBaseMs = 20, reconnectMaxMs = 40, terminalGraceMs = 300, scope = scope)
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
+        streamer.emit("run-1", RunStreamEvent.Assistant("Workers dispatched."))
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.FINISHED))
+        val beats = scope.launch { while (true) { delay(50); streamer.emit("run-1", RunStreamEvent.Heartbeat) } }
+        val subscription = scope.launch { hub.snapshots("bc-1", "run-1").collect { } }
+
+        awaitUntil { snapshot()?.finished == true }
+        assertThat(current().status).isEqualTo(RunStatus.FINISHED)
+        assertThat(current().items.filterIsInstance<AssistantMessage>().map { it.markdown }).containsExactly("Workers dispatched.")
+        assertThat(connections()).isEqualTo(1)
+        beats.cancel()
+        subscription.cancel()
+    }
+
+    @Test
+    fun `a result that follows its terminal status within the grace is the run's ending, as streamed`() = runBlocking {
+        hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 50, releaseGraceMs = releaseGrace, reconnectBaseMs = 20, reconnectMaxMs = 40, terminalGraceMs = 5_000, scope = scope)
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.FINISHED))
+        streamer.emit("run-1", RunStreamEvent.Heartbeat)
+        streamer.emit("run-1", RunStreamEvent.Result("run-1", RunStatus.FINISHED, "Done.", 12_000, null))
+        streamer.emit("run-1", RunStreamEvent.Done)
+        val subscription = scope.launch { hub.snapshots("bc-1", "run-1").collect { } }
+
+        awaitUntil { snapshot()?.finished == true }
+        assertThat(current().result?.text).isEqualTo("Done.")
+        assertThat(current().result?.durationMs).isEqualTo(12_000L)
+        assertThat(api.getRunCalls).isEqualTo(0)
+        subscription.cancel()
+    }
 }

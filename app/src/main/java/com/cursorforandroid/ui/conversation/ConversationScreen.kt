@@ -1000,6 +1000,9 @@ internal const val RECORD_FALLBACK_TITLE = "Account transcript unavailable"
 internal const val RECORD_FALLBACK_ASKED = "Asked:"
 internal const val RECORD_FALLBACK_DETAIL = "Showing the transcript and the runs' logs. Turns older than about a day have no activity to show until the account's copy can be read again."
 
+/** Under a transcript that could not be refreshed (see [LoadNotices.loadError]): the agent is not what failed. */
+internal const val TRANSCRIPT_REFRESH_DETAIL = "The agent isn't affected: this is only the app's copy of the chat, shown as last read."
+
 /**
  * The same row when Cursor's server failed to send the record, its retries spent (see `RecordFallback.serverError`):
  * a 5xx — Bennett's frame of 2026-09-23, a bare `HTTP 502` from the load balancer on one blob — or, with no answer

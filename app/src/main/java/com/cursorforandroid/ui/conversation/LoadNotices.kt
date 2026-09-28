@@ -50,8 +50,15 @@ object LoadNotices {
     fun shown(state: ConversationState, hidden: Set<String>?): List<LoadNotice> =
         if (hidden == null) emptyList() else of(state).filterNot { it.identity in hidden }
 
-    fun loadError(state: ConversationState): LoadNotice? =
-        (state.error ?: state.transcriptError?.let { "Couldn't refresh the transcript: $it" })?.takeIf { state.items.isNotEmpty() }?.let { LoadNotice(LoadNotice.Kind.LoadError, it) }
+    /**
+     * The transcript's failure is said as the app's copy not refreshing, not as the agent failing: the detail says
+     * the agent is not affected — its turn's own failure is the turn's footer, never this notice.
+     */
+    fun loadError(state: ConversationState): LoadNotice? {
+        if (state.items.isEmpty()) return null
+        state.error?.let { return LoadNotice(LoadNotice.Kind.LoadError, it) }
+        return state.transcriptError?.let { LoadNotice(LoadNotice.Kind.LoadError, "Couldn't refresh the transcript: $it", TRANSCRIPT_REFRESH_DETAIL) }
+    }
 
     fun recordFallback(state: ConversationState): LoadNotice? = state.recordFallback?.takeIf { state.error == null }?.let(::recordFallback)
 
