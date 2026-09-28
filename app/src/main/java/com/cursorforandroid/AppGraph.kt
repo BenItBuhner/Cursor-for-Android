@@ -74,6 +74,7 @@ import com.cursorforandroid.data.auth.CursorLoginEndpoints
 import com.cursorforandroid.data.auth.SessionTokenProvider
 import com.cursorforandroid.data.demo.DemoBackendFactory
 import com.cursorforandroid.data.demo.DemoData
+import com.cursorforandroid.data.demo.DemoPace
 import com.cursorforandroid.data.demo.DemoPerfSeeds
 import com.cursorforandroid.data.demo.DemoMcpConnectorApi
 import com.cursorforandroid.data.demo.DemoPullRequests
@@ -339,7 +340,14 @@ class AppGraph(
     private val perfSeeds = BuildConfig.DEBUG && DemoPerfSeeds.enabled(app.cacheDir)
     private val scaleFleet = if (BuildConfig.DEBUG) DemoPerfSeeds.scaleFleet(app.cacheDir) else null
     private val scaleDataset = scaleFleet?.let(DemoPerfSeeds::scaleDataset)
-    private val demoParts = lazy { DemoBackendFactory.create(perfSeeds = perfSeeds, scaleFleet = scaleFleet) }
+    private val demoParts = lazy {
+        val realistic = BuildConfig.DEBUG && DemoPace.enabled(app.cacheDir)
+        DemoBackendFactory.create(
+            perfSeeds = perfSeeds,
+            scaleFleet = scaleFleet,
+            pace = if (realistic) DemoPace.Realistic else DemoPace.Brisk,
+        )
+    }
 
     init {
         // A debug build measuring the transcript on a device: the `perf:` block after each presentation, in logcat.
