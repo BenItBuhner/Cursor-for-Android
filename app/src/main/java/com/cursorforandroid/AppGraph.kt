@@ -153,9 +153,11 @@ import com.cursorforandroid.domain.SlashCatalog
 import com.cursorforandroid.domain.SlashCommand
 import com.cursorforandroid.domain.SteerOutcome
 import com.cursorforandroid.domain.QueuedFollowUp
+import com.cursorforandroid.domain.ReleaseNotes
 import com.cursorforandroid.domain.ToolPayload
 import com.cursorforandroid.domain.TranscriptDiagnostics
 import com.cursorforandroid.domain.TranscriptPresenters
+import com.cursorforandroid.domain.UpdateState
 import com.cursorforandroid.domain.WorkerMembership
 import com.cursorforandroid.domain.WorkerSpawnKind
 import com.cursorforandroid.domain.WorkspaceTree
@@ -172,11 +174,15 @@ import com.cursorforandroid.update.allocatableBytes
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -921,7 +927,7 @@ class AppGraph(
     }
     val storeFiles: StoreFileRepository get() = lazyStoreFiles.value
 
-    private val lazyMedia = lazy { MediaLoader(app, lazyMediaClient.value, artifacts, stores = { storeFiles }, files = { agentFileReads }) }
+    private val lazyMedia = lazy { MediaLoader(app, { lazyMediaClient.value }, artifacts, stores = { storeFiles }, files = { agentFileReads }) }
     val media: MediaLoader get() = lazyMedia.value
 
     /** The media viewer's saves to the gallery: the process's, so a save runs on past the viewer's close and shows when it opens again. */
@@ -965,9 +971,21 @@ class AppGraph(
             // The background service streaming a run is the one thing a silent self-update would cut off; a monitor
             // this process never built is holding no stream, and asking is not worth building one.
             agentsRunning = { lazyRunMonitor.isInitialized() && runMonitor.isRunning },
-        )
+        ).also { builtUpdates.value = it }
     }
     val updates: UpdateManager get() = lazyUpdates.value
+
+    private val builtUpdates = MutableStateFlow<UpdateManager?>(null)
+
+    /**
+     * [UpdateManager.state] for the sidebar's hint, without building the updater: Idle until something has — the
+     * deferred startup, Settings — which is all the updater itself says before then, as it restores on first use.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val updateState: Flow<UpdateState> = builtUpdates.flatMapLatest { it?.state ?: flowOf(UpdateState.Idle) }
+
+    /** What [updateState] says right now, for a composition's first frame. */
+    fun currentUpdateState(): UpdateState = builtUpdates.value?.state?.value ?: UpdateState.Idle
 
     /**
      * The installed version's release notes — the What's new page, its row in Settings and its card in the sidebar.
@@ -979,9 +997,18 @@ class AppGraph(
             prefs = prefs,
             cache = JsonDiskCache(File(app.cacheDir, "whats-new")),
             installedVersionName = appVersion,
-        )
+        ).also { builtWhatsNew.value = it }
     }
     val whatsNew: WhatsNewRepository get() = lazyWhatsNew.value
+
+    private val builtWhatsNew = MutableStateFlow(releaseNotes)
+
+    /**
+     * [WhatsNewRepository.unread] for the sidebar's card, without building the repository: null until something has
+     * (the deferred startup's refresh, Settings), which is all it says itself before its first refresh.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val whatsNewUnread: Flow<ReleaseNotes?> = builtWhatsNew.flatMapLatest { it?.unread ?: flowOf(null) }
 
     private val swept = AtomicBoolean(false)
 

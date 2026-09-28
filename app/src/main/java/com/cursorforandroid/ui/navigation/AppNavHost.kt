@@ -447,7 +447,7 @@ internal fun AppShell(
         Screen.Settings -> SidebarDestination.Settings
         Screen.WhatsNew, Screen.KeyboardShortcuts, is Screen.Agent -> null
     }
-    val updateState by graph.updates.state.collectAsStateWithLifecycle()
+    val updateState by graph.updateState.collectAsStateWithLifecycle(initialValue = graph.currentUpdateState())
     val updateHint = when (val s = updateState) {
         is UpdateState.Available -> if (s.signatureMismatch) null else UpdateCopy.available(s.release)
         is UpdateState.Downloaded -> "Update ready to install · ${s.release.versionName}"
@@ -455,7 +455,7 @@ internal fun AppShell(
         else -> null
     }
     // The installed version's notes, until the page has been opened once; the Settings row reads the same flow.
-    val whatsNewUnread by graph.whatsNew.unread.collectAsStateWithLifecycle(initialValue = null)
+    val whatsNewUnread by graph.whatsNewUnread.collectAsStateWithLifecycle(initialValue = null)
     val whatsNewHint = whatsNewUnread?.let { WhatsNewCopy.title(it.versionName) }
 
     @Composable
