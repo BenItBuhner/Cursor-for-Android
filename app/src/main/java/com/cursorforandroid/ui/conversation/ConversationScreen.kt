@@ -218,7 +218,8 @@ fun ConversationScreen(
     // [ConversationViewModel.presented]); everything below reads the two together so they agree.
     val presentedTranscript by viewModel.presented.collectAsStateWithLifecycle()
     val conversation = presentedTranscript.state
-    val draft by viewModel.draftText.collectAsStateWithLifecycle()
+    // Read by followUpComposer alone, below.
+    val draftState = viewModel.draftText.collectAsStateWithLifecycle()
     val toast by viewModel.toastMessage.collectAsStateWithLifecycle()
     val isPinned by viewModel.isPinned.collectAsStateWithLifecycle()
     val isSnoozed by viewModel.isSnoozed.collectAsStateWithLifecycle()
@@ -713,13 +714,17 @@ fun ConversationScreen(
         // Extended mode keeps the queue on the account, where the desktop and the web keep theirs; otherwise on this device.
         val accountQueue = capabilities.accountQueue && !isDemo
         // A queued message the run takes flies from its card to its bubble, as a send flies from the composer.
-        QueueDeliveries(
-            flights = queueFlights,
-            rows = LinkedHashMap<String, String>().apply {
+        val queuedRows = remember(queue, accountQueue, controls.queue) {
+            LinkedHashMap<String, String>().apply {
                 queue.forEach { put(it.id, it.previewText) }
                 if (accountQueue) controls.queue.forEach { put(it.id, it.previewText) }
-            },
-            transcript = items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id },
+            }
+        }
+        val transcriptMessageIds = remember(items) { items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id } }
+        QueueDeliveries(
+            flights = queueFlights,
+            rows = queuedRows,
+            transcript = transcriptMessageIds,
             scrolledAway = { !transcriptScroll.following && TranscriptScroll.offBottom(listState.layoutInfo) },
         )
         val willQueue = isActive || queue.isNotEmpty() || (accountQueue && controls.queue.isNotEmpty())
@@ -741,7 +746,8 @@ fun ConversationScreen(
             // exports), and an X that puts it away (see LoadNotices, NoticeDismissals). First in the stack, at the
             // seam between the transcript they are about and the strips under them: the queue keeps its place on the
             // box it came from, as the desktop stacks its trays.
-            for (notice in LoadNotices.shown(conversation, hiddenNotices)) {
+            val loadNotices = remember(conversation, hiddenNotices) { LoadNotices.shown(conversation, hiddenNotices) }
+            for (notice in loadNotices) {
                 key(notice.identity) {
                     LoadNoticeRow(
                         notice = notice,
@@ -761,8 +767,9 @@ fun ConversationScreen(
             // device's and, in Extended mode, the account's in one stack, a deck once there are more than a couple.
             val accountRows = if (accountQueue) controls.queue else emptyList()
             if (queue.isNotEmpty() || accountRows.isNotEmpty()) {
+                val queueKeys = remember(queue, accountRows) { queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" } }
                 QueueStack(
-                    keys = queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" },
+                    keys = queueKeys,
                     stacked = queueStackedHere,
                     onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
                     modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
@@ -807,67 +814,73 @@ fun ConversationScreen(
                     }
                 }
             }
-            ComposerBox(
-                value = draft,
-                onValueChange = viewModel::setDraft,
-                placeholder = when {
-                    archived -> "Unarchive to follow up"
-                    // A send now joins the queue rather than interrupting; the placeholder says so before the tap.
-                    willQueue && accountQueue -> "Follow up (queues on your account)…"
-                    willQueue -> "Follow up (sends when the turn ends)…"
-                    else -> "Follow up…"
-                },
-                onSend = {
-                    val takeoff = composerAnchor.takeoff()
-                    val before = items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id }
-                    when (val sent = viewModel.submit()) {
-                        is ConversationViewModel.Sent.Bubble -> sendMotion?.depart(takeoff, sent.text, before)
-                        // Into the queue card instead; the rows already standing are not where it lands.
-                        is ConversationViewModel.Sent.Queued -> sendMotion?.depart(
-                            takeoff,
-                            sent.text,
-                            excluded = queue.mapTo(HashSet()) { it.id } + controls.queue.map { it.id },
-                            landing = SendLanding.Queue,
-                        )
-                        null -> Unit
-                    }
-                },
-                anchor = composerAnchor,
-                // Free the moment send is tapped: the message, its files' uploads and its send are the transcript's from then on.
-                canSend = (draft.isNotBlank() || attachments.isNotEmpty() || files.isNotEmpty()) && !archived,
-                isRunning = isActive,
-                onStop = { stopConfirmation.ask(RunInterruption.Stop, agentId, viewModel::cancelRun) },
-                plusMenu = plusMenu,
-                commands = commands,
-                attachments = attachments,
-                onRemoveAttachment = viewModel::removeAttachment,
-                onAddAttachments = viewModel::addAttachments,
-                onAttachmentError = viewModel::showMessage,
-                files = files,
-                onRemoveFile = viewModel::removeFile,
-                fileUploads = fileUploads,
-                onRetryFile = viewModel::retryFile,
-                sendHint = uploadHint,
-                mediaAgentId = agentId,
-                media = graph.media,
-                // The chip names the model the chat runs on and, like on cursor.com/agents, switches it for the next
-                // follow-up; an archived chat takes no follow-ups, so there is nothing to switch.
-                modelLabel = picker.chipLabel,
-                onModel = if (archived) null else ({ modelSheet = true }),
-                // The mode for the next run is a pill beside "+", as on cursor.com/agents, not a suffix on the chip:
-                // Plan in either mode; Ask and Debug where the account's follow-up can carry them (Extended mode).
-                modePill = picker.modePill,
-                onModePill = viewModel::setModePill,
-                extendedModes = capabilities.agentModes && !isDemo,
-                // The `/` popover's models switch the next follow-up's model, as the chip's picker does.
-                models = picker.models,
-                currentModel = picker.selected,
-                onPickModel = if (archived) null else ({ viewModel.selectModel(it.model, it.variant) }),
-                focusRequests = composerFocusRequests,
-                // An archived chat takes no follow-ups, so there is nothing to dictate into.
-                voice = voice.takeUnless { archived },
-                modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).testTag("follow-up-composer"),
-            )
+            // The draft is read here and nowhere else in the screen: typing recomposes the composer, never the transcript or
+            // the strips docked over the box.
+            val followUpComposer: @Composable () -> Unit = {
+                val draft = draftState.value
+                ComposerBox(
+                    value = draft,
+                    onValueChange = viewModel::setDraft,
+                    placeholder = when {
+                        archived -> "Unarchive to follow up"
+                        // A send now joins the queue rather than interrupting; the placeholder says so before the tap.
+                        willQueue && accountQueue -> "Follow up (queues on your account)…"
+                        willQueue -> "Follow up (sends when the turn ends)…"
+                        else -> "Follow up…"
+                    },
+                    onSend = {
+                        val takeoff = composerAnchor.takeoff()
+                        val before = items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id }
+                        when (val sent = viewModel.submit()) {
+                            is ConversationViewModel.Sent.Bubble -> sendMotion?.depart(takeoff, sent.text, before)
+                            // Into the queue card instead; the rows already standing are not where it lands.
+                            is ConversationViewModel.Sent.Queued -> sendMotion?.depart(
+                                takeoff,
+                                sent.text,
+                                excluded = queue.mapTo(HashSet()) { it.id } + controls.queue.map { it.id },
+                                landing = SendLanding.Queue,
+                            )
+                            null -> Unit
+                        }
+                    },
+                    anchor = composerAnchor,
+                    // Free the moment send is tapped: the message, its files' uploads and its send are the transcript's from then on.
+                    canSend = (draft.isNotBlank() || attachments.isNotEmpty() || files.isNotEmpty()) && !archived,
+                    isRunning = isActive,
+                    onStop = { stopConfirmation.ask(RunInterruption.Stop, agentId, viewModel::cancelRun) },
+                    plusMenu = plusMenu,
+                    commands = commands,
+                    attachments = attachments,
+                    onRemoveAttachment = viewModel::removeAttachment,
+                    onAddAttachments = viewModel::addAttachments,
+                    onAttachmentError = viewModel::showMessage,
+                    files = files,
+                    onRemoveFile = viewModel::removeFile,
+                    fileUploads = fileUploads,
+                    onRetryFile = viewModel::retryFile,
+                    sendHint = uploadHint,
+                    mediaAgentId = agentId,
+                    media = graph.media,
+                    // The chip names the model the chat runs on and, like on cursor.com/agents, switches it for the next
+                    // follow-up; an archived chat takes no follow-ups, so there is nothing to switch.
+                    modelLabel = picker.chipLabel,
+                    onModel = if (archived) null else ({ modelSheet = true }),
+                    // The mode for the next run is a pill beside "+", as on cursor.com/agents, not a suffix on the chip:
+                    // Plan in either mode; Ask and Debug where the account's follow-up can carry them (Extended mode).
+                    modePill = picker.modePill,
+                    onModePill = viewModel::setModePill,
+                    extendedModes = capabilities.agentModes && !isDemo,
+                    // The `/` popover's models switch the next follow-up's model, as the chip's picker does.
+                    models = picker.models,
+                    currentModel = picker.selected,
+                    onPickModel = if (archived) null else ({ viewModel.selectModel(it.model, it.variant) }),
+                    focusRequests = composerFocusRequests,
+                    // An archived chat takes no follow-ups, so there is nothing to dictate into.
+                    voice = voice.takeUnless { archived },
+                    modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).testTag("follow-up-composer"),
+                )
+            }
+            followUpComposer()
         }
     }
     }
