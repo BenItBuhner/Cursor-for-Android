@@ -231,7 +231,8 @@ class LaunchVideoCapture {
             d.dump("hero-phone-end")
 
             d.window(Screen.FoldInner)
-            d.segment("large", 0.5f, largest = Screen.Tablet)
+            // Finer than the video shows it whole: the cut pushes in on the panel and the answer.
+            d.segment("large", 0.75f, largest = Screen.Tablet)
             d.mark("unfold")
             d.hold(2.6)
             d.dump("hero-inner")
