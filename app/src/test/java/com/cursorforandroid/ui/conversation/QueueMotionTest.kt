@@ -263,7 +263,7 @@ class QueueMotionTest {
 
     /** The account card's tiles, left to right, as laid out. */
     private fun accountTiles() = listOf("Attached image", "Attached video", "Attached file").flatMap { what ->
-        compose.onAllNodes(hasContentDescription(what, substring = true) and hasAnyAncestor(hasTestTag("account-queue")), useUnmergedTree = true)
+        compose.onAllNodes(hasContentDescription(what, substring = true) and hasAnyAncestor(hasTestTag("account-queue-row")), useUnmergedTree = true)
             .fetchSemanticsNodes().map { it.config[SemanticsProperties.ContentDescription].single() to it.boundsInWindow }
     }.sortedBy { it.second.left }
 
