@@ -138,6 +138,7 @@ import com.cursorforandroid.ui.panel.rememberPanelTabStates
 import com.cursorforandroid.ui.panel.rememberSidePanelState
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -401,8 +402,10 @@ fun ConversationScreen(
     // The order the list was last measured in, which is what its scroll bounds are in: the fades read the two together.
     val listReversed by remember(listState) { derivedStateOf { listState.layoutInfo.reverseLayout } }
     // Following, a new row lands past the bottom edge, where the list's keyed anchoring leaves it; the list is taken
-    // back to it. Pinned, it stays there.
+    // back to it. Pinned, it stays there. The jump button's glide aims at rows landing under way itself; taking the
+    // list there at once would cut it short, so this waits for it.
     LaunchedEffect(listedRows.size, listedRows.lastOrNull()?.key, showWorking) {
+        snapshotFlow { transcriptScroll.isJumping }.first { !it }
         if (transcriptScroll.following) listState.requestScrollToItem(0)
     }
     // The chat opens on its newest turns; the ones before them are paged in when the reader scrolls up to them:
