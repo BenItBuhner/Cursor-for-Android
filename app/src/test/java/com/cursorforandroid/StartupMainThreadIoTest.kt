@@ -50,9 +50,10 @@ class StartupMainThreadIoTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val keyStoreOpenedOnMain = CopyOnWriteArrayList<String>()
+    private fun standIn() = context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE)
     private val keyStore = SecureKeyStore(context, openRetryDelayMs = 0) {
         if (Looper.getMainLooper().isCurrentThread) keyStoreOpenedOnMain += Throwable().stackTraceToString()
-        context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE)
+        standIn()
     }
     private val api = FakeCursorApi().apply {
         repeat(12) { i -> addIdleAgent("bc-$i", "Startup chat $i", "run-$i", createdAt = "2026-04-13T18:%02d:00.000Z".format(i)) }
@@ -72,13 +73,14 @@ class StartupMainThreadIoTest {
         AppClock.nowMillis = System::currentTimeMillis
     }
 
-    private fun graph() = AppGraph(context, keyStore, real = CursorBackend(api, FakeRunStreamer(), isDemo = false))
+    private fun graph(keyStore: SecureKeyStore = this.keyStore) = AppGraph(context, keyStore, real = CursorBackend(api, FakeRunStreamer(), isDemo = false))
 
     /** What an earlier process left: the account, and its list on disk. */
     private fun signedInEarlier() {
-        val earlier = graph()
+        val earlierKeyStore = SecureKeyStore(context, openRetryDelayMs = 0) { standIn() }
+        val earlier = graph(earlierKeyStore)
         runBlocking {
-            keyStore.setApiKey("key_stored")
+            earlierKeyStore.setApiKey("key_stored")
             earlier.prefs.setCredentialInfo(CredentialInfo(SignInMethod.ApiKey, expiresAtMs = null))
             earlier.prefs.setCachedUser(CursorUser("u1", "dev@example.com", "Dev", "Eloper", 1L))
             earlier.prefs.setExtendedModeIntroduced(noticePending = false)
