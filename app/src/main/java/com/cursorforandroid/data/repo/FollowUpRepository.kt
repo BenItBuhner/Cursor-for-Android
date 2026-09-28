@@ -342,14 +342,28 @@ class FollowUpRepository(
         return item
     }
 
-    /** Takes a queued follow-up away. One in flight, or steered, stays until the server has answered. */
-    fun remove(agentId: String, id: String) {
+    /**
+     * Takes a queued follow-up away. False when nothing was taken: the message is gone, or [isOnItsWay] — its request
+     * is out, and the run it asks for cannot be called back, so it stays until the server has answered.
+     */
+    fun remove(agentId: String, id: String): Boolean {
         val e = entry(agentId)
-        synchronized(e) {
-            e.update { copy(queue = queue.filterNot { it.id == id && !it.isSending && !it.isSteered }) }
+        val removed = synchronized(e) {
+            if (e.state.value.queue.none { it.id == id && !it.isSending && !it.isSteered }) return@synchronized false
+            e.update { copy(queue = queue.filterNot { it.id == id }) }
+            true
         }
-        e.scheduleSave()
+        if (removed) e.scheduleSave()
+        return removed
     }
+
+    /**
+     * Whether queued follow-up [id] is on its way to the server — its request out (a held message's retry among them,
+     * though its card still reads as waiting), or steered — so it can be neither removed, edited nor sent again until
+     * the server has answered.
+     */
+    fun isOnItsWay(agentId: String, id: String): Boolean =
+        entry(agentId).state.value.queue.any { it.id == id && (it.isSending || it.isSteered) }
 
     /**
      * Hands a queued follow-up back to the composer to be reworked: it leaves the queue with its model and mode, and
@@ -448,7 +462,7 @@ class FollowUpRepository(
             val claimed = found.copy(error = null, needsConfirmation = false, isSending = true, sendStartedAtMillis = AppClock.now())
             e.update { copy(queue = queue.map { if (it.id == id) claimed else it }) }
             claimed
-        } ?: return Result.failure(IllegalStateException("That message is no longer queued."))
+        } ?: return Result.failure(IllegalStateException(if (isOnItsWay(agentId, id)) ON_ITS_WAY else "That message is no longer queued."))
         e.scheduleSave()
         return work.async { steerInto(e, item, steering, startedIn) }.await()
     }
@@ -1127,6 +1141,8 @@ class FollowUpRepository(
         private const val AGENT_BUSY = "agent_busy"
         /** What a waiting card's up arrow says mid-turn with no account to steer through (default mode, the demo). */
         const val STEER_NEEDS_EXTENDED = "Steering into a running turn needs Extended mode; this message sends when the turn ends."
+        /** What a remove, edit or up arrow on a message [isOnItsWay] says: the request is out and cannot be called back. */
+        const val ON_ITS_WAY = "That message is being sent. It can't be changed until Cursor answers."
         private const val RUN_NOT_CANCELLABLE = "run_not_cancellable"
         /** The ids of the placeholder runs prompts sent from here are shown under until the server answers (see [ConversationRepository]). */
         private const val LOCAL_RUN_PREFIX = "local-"

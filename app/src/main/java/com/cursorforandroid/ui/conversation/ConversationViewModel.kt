@@ -769,11 +769,12 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      * Takes a queued follow-up back into the composer; a draft already there is queued in its place, so nothing is lost.
      * Its text and chips are the composer's before this returns: a send the moment after acts on them, never on the
      * draft just queued (which went out a second time, and emptied the repository's copy of the edited text). Only the
-     * chips' previews wait on a decode off the main thread, filled in once it is done.
+     * chips' previews wait on a decode off the main thread, filled in once it is done. False when nothing was taken:
+     * the message is gone, or on its way (see [refusedOnItsWay]).
      */
-    fun editQueued(id: String) {
+    fun editQueued(id: String): Boolean {
         val displaced = !draft.value.isBlank() || attachments.value.isNotEmpty() || files.value.isNotEmpty()
-        graph.followUps.takeForEdit(agentId, id) ?: return
+        if (graph.followUps.takeForEdit(agentId, id) == null) return false.also { refusedOnItsWay(id) }
         val taken = graph.followUps.state(agentId).value.draft
         picker.update { it.adopting(taken) }
         draft.value = taken.text
@@ -786,6 +787,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         keepModesExclusive(taken.text)
         if (displaced) toast.value = "Your draft was queued in its place."
         if (images.isNotEmpty() || takenFiles.isNotEmpty()) viewModelScope.launch { fillPreviews(images, takenFiles) }
+        return true
     }
 
     /** The thumbnails of chips put in the composer without one, decoded off the main thread, onto the chips still there. */
@@ -799,20 +801,32 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         files.value = files.value.map { f -> decodedFiles.firstOrNull { it.id == f.id }?.let { f.withPreview(it.thumbnail, null) } ?: f }
     }
 
-    fun removeQueued(id: String) = graph.followUps.remove(agentId, id)
+    /** Takes a queued follow-up away; false when nothing was taken: the message is gone, or on its way (see [refusedOnItsWay]). */
+    fun removeQueued(id: String): Boolean = graph.followUps.remove(agentId, id).also { removed -> if (!removed) refusedOnItsWay(id) }
+
+    /**
+     * A card's glyph tapped while its message is on its way — a held message's retry out, its card still reading as
+     * waiting: the request cannot be called back, so the tap is refused and the snackbar says why, rather than the
+     * card taking it silently and the message reaching the agent all the same.
+     */
+    private fun refusedOnItsWay(id: String) {
+        if (graph.followUps.isOnItsWay(agentId, id)) toast.value = FollowUpRepository.ON_ITS_WAY
+    }
 
     /**
      * A waiting card's up arrow. With a turn under way it steers the message into that turn, never stopping it — in
      * Extended mode through the account ([FollowUpRepository.steerNow]), the outcome in the snackbar; with no account
      * to steer through the message keeps its place and the snackbar says it goes when the turn ends. With nothing
-     * running it goes next ([FollowUpRepository.sendNext]).
+     * running it goes next ([FollowUpRepository.sendNext]). False when the tap was refused, the message being on its way.
      */
-    fun steerQueued(id: String, turnUnderWay: Boolean) {
+    fun steerQueued(id: String, turnUnderWay: Boolean): Boolean {
+        if (graph.followUps.isOnItsWay(agentId, id)) return false.also { refusedOnItsWay(id) }
         when {
-            !turnUnderWay -> graph.followUps.sendNext(agentId, id)
+            !turnUnderWay -> if (!graph.followUps.sendNext(agentId, id)) return false.also { refusedOnItsWay(id) }
             canSteer() -> control { graph.followUps.steerNow(agentId, id) }
             else -> toast.value = FollowUpRepository.STEER_NEEDS_EXTENDED
         }
+        return true
     }
 
     /** Whether a queued message can be steered into the turn under way from here: the account's steering and queue, not the demo. */

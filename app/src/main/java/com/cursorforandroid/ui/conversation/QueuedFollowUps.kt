@@ -37,6 +37,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,7 +90,8 @@ import com.cursorforandroid.ui.components.onContextClick
  * as a list of what is about to be said, not as a stack of forms. While a turn is under way ([steers]) the up arrow
  * steers the message into that turn — never stopping it; with nothing running it sends the message next. A message
  * that could not be sent shows a warning where its tiles would be and the reason under the message, in red; the up
- * arrow then retries it. One on its way out shows a ring instead of the glyphs.
+ * arrow then retries it. One on its way out shows a ring instead of the glyphs; a held one whose retry is out keeps
+ * its glyphs, dimmed, until the server answers.
  *
  * With [flights], each row is an end of the send's flight (see `SendMotion`): a message sent while the agent is busy
  * lands in its row from the composer, and a row the run takes lifts off the card into its bubble.
@@ -216,10 +218,18 @@ private fun QueuedFollowUpRow(
                 SpinnerRing(size = 11.dp)
             }
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                GlyphButton(CursorIcons.Trash, "Remove queued follow-up", colors.iconTertiary, onRemove)
-                GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", colors.iconTertiary, onEdit)
-                GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers, retry = item.warning != null), colors.iconPrimary, onSteer)
+            // A held message's retry on the wire keeps the waiting face, but its glyphs dim for as long as the request
+            // is out: it cannot be called back, so a tap then is refused and says why (see ConversationViewModel).
+            val onItsWay = item.isSending || item.isSteered
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = if (onItsWay) Modifier.testTag(QueueGlyphs.ON_ITS_WAY_TAG).semantics { stateDescription = QueueGlyphs.ON_ITS_WAY } else Modifier,
+            ) {
+                val quiet = if (onItsWay) colors.iconQuaternary else colors.iconTertiary
+                GlyphButton(CursorIcons.Trash, "Remove queued follow-up", quiet, onRemove)
+                GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", quiet, onEdit)
+                GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers, retry = item.warning != null), if (onItsWay) colors.iconQuaternary else colors.iconPrimary, onSteer)
             }
         }
     }
@@ -542,6 +552,9 @@ object QueueGlyphs {
     const val SEND = "Send now"
     /** The message could not be sent: the tap tries again. */
     const val RETRY = "Retry sending"
+    /** The glyphs' state while the message's request is out (a held message's retry): dimmed, and a tap is refused. */
+    const val ON_ITS_WAY = "Being sent"
+    const val ON_ITS_WAY_TAG = "queued-glyphs-on-its-way"
 
     fun upArrow(steers: Boolean, retry: Boolean = false): String = when {
         steers -> STEER

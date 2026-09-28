@@ -1,6 +1,13 @@
 package com.cursorforandroid.ui.conversation
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -150,6 +157,34 @@ class QueuedFollowUpsTest {
         } finally {
             AppClock.nowMillis = System::currentTimeMillis
         }
+    }
+
+    /**
+     * A held message's retry on the wire keeps the waiting face, but its glyphs say they cannot act: dimmed, and marked
+     * as being sent for a screen reader. A tap still reaches the screen, which refuses it and says why.
+     */
+    @Test
+    fun `a held row whose retry is out dims its glyphs and says it is being sent`() {
+        val removed = mutableListOf<String>()
+        var item by mutableStateOf(QueuedFollowUp(id = "q1", text = "Follow up text", queuedAtMillis = 0L, heldSinceMillis = 0L, busyRefusals = 1))
+        compose.setContent {
+            CursorTheme(mode = ThemeMode.Dark) {
+                QueuedFollowUps(queue = listOf(item), thumbnails = emptyMap(), onEdit = {}, onSteer = {}, onRemove = { removed += it.id })
+            }
+        }
+        compose.onAllNodesWithTag(QueueGlyphs.ON_ITS_WAY_TAG).assertCountEquals(0)
+
+        item = item.copy(isSending = true)
+        compose.waitForIdle()
+        compose.onNodeWithTag(QueueGlyphs.ON_ITS_WAY_TAG).assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, QueueGlyphs.ON_ITS_WAY))
+        compose.onAllNodesWithContentDescription("Sending").assertCountEquals(0)
+        compose.onNodeWithContentDescription("Remove queued follow-up").performClick()
+        assertThat(removed).containsExactly("q1")
+
+        // Refused again: the glyphs are live once more.
+        item = item.copy(isSending = false, busyRefusals = 2)
+        compose.waitForIdle()
+        compose.onAllNodesWithTag(QueueGlyphs.ON_ITS_WAY_TAG).assertCountEquals(0)
     }
 
     private fun Rect.intersects(other: Rect): Boolean =
