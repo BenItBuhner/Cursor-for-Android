@@ -382,7 +382,7 @@ class AppGraph(
     /** A chat's controls on the account: answering its question, its queue, steering and holding its run. */
     /** The account records' blobs, shared by the transcript's record reader and the goal strip's state read (see BlobCache). */
     private val lazyBlobCache = lazy { BlobCache(BlobCache.MEMORY_BLOBS_WITH_DISK, BlobCache.MEMORY_BYTES_WITH_DISK, disk = caches.blobs) }
-    private val lazySteeringApi = lazy { SteeringApi(lazyAccountRpc.value, lazySessionTokens.value, blobs = lazyBlobCache.value) }
+    private val lazySteeringApi = lazy { SteeringApi(lazyAccountRpc.value, lazySessionTokens.value, blobs = lazyBlobCache.value, stateRpc = lazyRecordRpc.value) }
     /**
      * The account's transcription of a dictated clip, with the desktop's sixty-second limit on the call rather than
      * the account client's forty-five: a five-minute clip goes up whole and is transcribed before the answer starts.
@@ -409,10 +409,13 @@ class AppGraph(
      * which read as the record refusing and left the chat to the documented endpoints. The throttle is shared, so
      * the pause a refusal asks for holds here too.
      */
-    private val lazyHeadlessTranscript = lazy {
+    private val lazyRecordRpc = lazy {
         // Same dispatcher as the account client's, whose per-host limit already lets the blob lane through.
         val client = lazyAccountClient.value.newBuilder().callTimeout(RECORD_CALL_TIMEOUT_MINUTES, java.util.concurrent.TimeUnit.MINUTES).build()
-        HeadlessConversationApi(ConnectJsonClient(client, CursorLoginEndpoints.API_URL, throttle = lazyAccountRpc.value.throttle), lazySessionTokens.value, blobs = lazyBlobCache.value)
+        ConnectJsonClient(client, CursorLoginEndpoints.API_URL, throttle = lazyAccountRpc.value.throttle)
+    }
+    private val lazyHeadlessTranscript = lazy {
+        HeadlessConversationApi(lazyRecordRpc.value, lazySessionTokens.value, blobs = lazyBlobCache.value)
     }
 
     /**

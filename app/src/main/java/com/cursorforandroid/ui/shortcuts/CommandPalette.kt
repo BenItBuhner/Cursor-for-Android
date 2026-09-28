@@ -402,16 +402,21 @@ private fun ColumnScope.ShortcutsPane(onClose: () -> Unit) {
     }
     HairlineDivider()
     Column(Modifier.weight(1f, fill = false).fadingVerticalScroll(surface = colors.elevated).padding(vertical = 6.dp).testTag(PaletteTags.SHORTCUTS)) {
-        ShortcutsCopy.groups.forEach { group ->
+        ShortcutsCopy.groups(LocalShortcutBindings.current).forEach { group ->
             Text(group.title, style = type.small, color = colors.textTertiary, modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 4.dp))
             group.lines.forEach { line -> ShortcutLineRow(line, Modifier.padding(horizontal = 18.dp, vertical = 5.dp)) }
         }
     }
     HairlineDivider()
-    Text(ShortcutsCopy.HARDWARE_ONLY, style = type.small, color = colors.textQuaternary, modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp))
+    Text(
+        "${ShortcutsCopy.HARDWARE_ONLY} ${ShortcutsCopy.CHANGE_IN_SETTINGS}",
+        style = type.small,
+        color = colors.textQuaternary,
+        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+    )
 }
 
-/** One shortcut: what it does, with its detail under it, and the chords that do it at the end. */
+/** One shortcut: what it does, with its detail under it, and the chords that do it at the end ("Not set" for none). */
 @Composable
 fun ShortcutLineRow(line: ShortcutsCopy.Line, modifier: Modifier = Modifier) {
     val colors = CursorTheme.colors
@@ -423,6 +428,7 @@ fun ShortcutLineRow(line: ShortcutsCopy.Line, modifier: Modifier = Modifier) {
         }
         Spacer(Modifier.width(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (line.chords.isEmpty()) Text(ShortcutsCopy.NOT_SET, style = type.small, color = colors.textQuaternary)
             line.chords.forEachIndexed { index, chord ->
                 if (index > 0) Text("or", style = type.small, color = colors.textQuaternary)
                 Chord(chord)

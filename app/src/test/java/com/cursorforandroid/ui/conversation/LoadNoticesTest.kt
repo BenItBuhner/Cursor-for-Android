@@ -21,7 +21,7 @@ class LoadNoticesTest {
         val both = ConversationState("bc-1", items = items, isLoading = false, transcriptError = "Cursor took too long to respond.", recordFallback = fallback)
         assertThat(LoadNotices.of(both).map { it.kind }).containsExactly(LoadNotice.Kind.LoadError, LoadNotice.Kind.RecordFallback).inOrder()
         assertThat(LoadNotices.of(both)[0].title).isEqualTo("Couldn't refresh the transcript: Cursor took too long to respond.")
-        assertThat(LoadNotices.of(both)[0].detail).isNull()
+        assertThat(LoadNotices.of(both)[0].detail).isEqualTo(TRANSCRIPT_REFRESH_DETAIL)
         assertThat(LoadNotices.of(both)[0].tone).isEqualTo(NoticeTone.Error)
         assertThat(LoadNotices.of(both)[1].title).isEqualTo("$RECORD_FALLBACK_TITLE: ${fallback.reason}")
         assertThat(LoadNotices.of(both)[1].detail).isEqualTo(RECORD_FALLBACK_DETAIL)
@@ -29,6 +29,7 @@ class LoadNoticesTest {
         // The load's own error outranks the transcript's, and stands the record's refusal down.
         val failed = both.copy(error = "Couldn't reach Cursor.")
         assertThat(LoadNotices.of(failed).map { it.title }).containsExactly("Couldn't reach Cursor.")
+        assertThat(LoadNotices.of(failed).single().detail).isNull()
         // A failure with nothing loaded is the screen, not a notice over it; the record's refusal is a notice regardless.
         assertThat(LoadNotices.of(both.copy(items = emptyList()))).hasSize(1)
         assertThat(LoadNotices.of(both.copy(items = emptyList()))[0].kind).isEqualTo(LoadNotice.Kind.RecordFallback)
