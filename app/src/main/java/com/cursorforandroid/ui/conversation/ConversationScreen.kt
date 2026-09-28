@@ -770,18 +770,15 @@ fun ConversationScreen(
                             count = queue.size,
                             thumbnails = thumbnails,
                             onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
-                            // Sent now while a turn is under way, a message cancels that turn for it.
+                            // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
                             onSteer = { item ->
-                                if (isActive) {
-                                    stopConfirmation.ask(RunInterruption.SendNow, agentId) { viewModel.steerQueued(item.id) }
-                                } else {
-                                    haptics.perform(Haptic.Confirm)
-                                    viewModel.steerQueued(item.id)
-                                }
+                                haptics.perform(Haptic.Confirm)
+                                viewModel.steerQueued(item.id, turnUnderWay = isActive)
                             },
                             onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
                             flights = queueFlights,
                             face = face,
+                            steers = isActive,
                         )
                     } else {
                         val at = index - queue.size
@@ -790,20 +787,15 @@ fun ConversationScreen(
                             position = at + 1,
                             count = accountRows.size,
                             inFlightIds = controls.inFlightQueueIds,
-                            // `SubmitPendingFollowupNow` sends the message in place of the turn under way.
-                            onSendNow = { item ->
-                                if (isActive) {
-                                    stopConfirmation.ask(RunInterruption.SendNow, agentId) { viewModel.queueSendNow(item.id) }
-                                } else {
-                                    haptics.perform(Haptic.Confirm)
-                                    viewModel.queueSendNow(item.id)
-                                }
+                            // The up arrow promotes the message into the turn under way as a steer; with none running, it is sent now.
+                            onSteer = { item ->
+                                haptics.perform(Haptic.Confirm)
+                                viewModel.queueSteer(item.id, turnUnderWay = isActive)
                             },
                             onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
                             onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
                             onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
-                            // A queued message can be delivered into the turn under way as a steer while there is one to steer.
-                            onSteerNow = if (capabilities.steering && isActive) ({ haptics.perform(Haptic.Confirm); viewModel.queueSteerNow(it.id) }) else null,
+                            steers = isActive,
                             onMove = { item, up -> viewModel.queueMove(item.id, up) },
                             flights = queueFlights,
                             face = face,

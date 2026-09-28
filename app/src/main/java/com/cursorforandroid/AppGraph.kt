@@ -152,6 +152,7 @@ import com.cursorforandroid.domain.SendDiagnostics
 import com.cursorforandroid.domain.SlashCatalog
 import com.cursorforandroid.domain.SlashCommand
 import com.cursorforandroid.domain.SteerOutcome
+import com.cursorforandroid.domain.QueuedFollowUp
 import com.cursorforandroid.domain.ToolPayload
 import com.cursorforandroid.domain.TranscriptDiagnostics
 import com.cursorforandroid.domain.TranscriptPresenters
@@ -843,22 +844,36 @@ class AppGraph(
             // (Extended mode), which sends it when the agent is free — where the composer said it would go — with its
             // files, uploaded as `accountSend` does.
             accountQueue = { agentId, item ->
-                val followup = AccountFollowup(
-                    text = item.previewText,
-                    images = item.images.map { it.image },
-                    files = if (item.files.isEmpty()) emptyList() else promptUploads.ensure(item.files.map { it.file }),
-                    mode = AgentMode.ofPlanMode(item.planMode),
-                    modelId = item.modelId,
-                    modelParams = item.modelParams,
-                )
+                val followup = accountFollowupOf(item)
                 FollowUpRepository.AccountHandoff(steering.sendFollowup(agentId, followup).getOrThrow(), followup.followupId)
             },
             accountQueueAvailable = { capabilities().accountQueue && !session.isDemo },
+            // A waiting card's up arrow mid-turn: the message filed with the account's queue and promoted into the turn
+            // under way, as an account row's steer is — the queue read once, by the promote, so the card never shows it twice.
+            accountSteering = object : FollowUpRepository.AccountSteering {
+                override suspend fun handOff(agentId: String, item: QueuedFollowUp): FollowUpRepository.AccountHandoff {
+                    val followup = accountFollowupOf(item)
+                    return FollowUpRepository.AccountHandoff(steering.sendFollowup(agentId, followup, refresh = false).getOrThrow(), followup.followupId)
+                }
+
+                override suspend fun promote(agentId: String, followupId: String): SteerOutcome =
+                    steering.promotePending(agentId, followupId).onFailure { steering.refreshQueue(agentId) }.getOrThrow()
+            },
             store = followUpStore,
             persist = { !session.isDemo },
         )
     }
     val followUps: FollowUpRepository get() = lazyFollowUps.value
+
+    /** A message of this device's queue as the account's follow-up carries it, its files uploaded as `accountSend` does. */
+    private suspend fun accountFollowupOf(item: QueuedFollowUp): AccountFollowup = AccountFollowup(
+        text = item.previewText,
+        images = item.images.map { it.image },
+        files = if (item.files.isEmpty()) emptyList() else promptUploads.ensure(item.files.map { it.file }),
+        mode = AgentMode.ofPlanMode(item.planMode),
+        modelId = item.modelId,
+        modelParams = item.modelParams,
+    )
 
     /** The presented rows of the chats a reader flips between, kept across their screens (see [TranscriptPresenters]). */
     val presenters = TranscriptPresenters()

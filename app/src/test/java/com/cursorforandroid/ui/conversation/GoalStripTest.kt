@@ -131,7 +131,7 @@ class GoalStripTest {
                     AccountQueueRows(
                         queue = listOf(PendingFollowup("fu-1", "Then add a test for the light theme", 1_000L, AgentSource.GLASS)),
                         inFlightIds = emptySet(),
-                        onSendNow = {},
+                        onSteer = {},
                         onRemove = {},
                         onUpdate = { _, _ -> },
                         onEditing = { _, _ -> },

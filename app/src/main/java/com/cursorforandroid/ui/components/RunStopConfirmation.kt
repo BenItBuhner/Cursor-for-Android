@@ -25,20 +25,19 @@ import kotlinx.coroutines.launch
 /**
  * A tap that would end or hold a running agent's turn, in the words its confirmation asks with. [Stop] is the
  * documented cancel (the composer's Stop, the chat's menu, the panel's controls, a Project primary's menu); [Pause]
- * is Extended mode's hold (the panel, a primary's menu); [SendNow] is a queued message sent while a turn is under
- * way, which cancels that turn for it (this device's queue and the account's alike).
+ * is Extended mode's hold (the panel, a primary's menu). A queued message's up arrow is neither: it steers into the
+ * turn under way, which carries on.
  */
 enum class RunInterruption(val title: String, val detail: String, val confirm: String) {
     Stop("Stop the agent?", "The run ends where it is. Send a follow-up to carry on.", "Stop"),
     Pause("Pause the agent?", "It holds where it is until you resume it.", "Pause"),
-    SendNow("Interrupt the agent?", "The turn under way stops, and this message is sent in its place.", "Send now"),
 }
 
 /** The words the confirmation and its Settings switch show, shared with the tests. */
 object RunStopCopy {
     const val KEEP_RUNNING = "Keep running"
     const val SETTING_TITLE = "Confirm before stopping"
-    const val SETTING_DETAIL = "Ask before Stop, Pause or Send now interrupts a run."
+    const val SETTING_DETAIL = "Ask before Stop or Pause interrupts a run."
 }
 
 object RunStopTags {
@@ -49,7 +48,7 @@ object RunStopTags {
 
 /**
  * Settings › Confirm before stopping, where the taps are. [ask] runs the action at once with the setting off, and
- * otherwise holds it for [RunStopDialog]: run on the dialog's Stop (or Pause, or Send now), dropped on Keep running, a
+ * otherwise holds it for [RunStopDialog]: run on the dialog's Stop (or Pause), dropped on Keep running, a
  * tap outside or the back gesture. The composer's Stop rides the keyboard's edge, where a palm finds it, and a run
  * stopped by accident costs a re-prompt — so the question is asked unless the user has said not to.
  *

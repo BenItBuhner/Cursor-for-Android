@@ -21,12 +21,14 @@ import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.domain.RunningScan
 import com.cursorforandroid.domain.SendDiagnostics
 import com.cursorforandroid.domain.SendGate
+import com.cursorforandroid.domain.SteerOutcome
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -54,8 +56,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * while a run is `CREATING` or `RUNNING`, and there is no server-side queue or steering for cloud runs (the SDK's
  * `steer` resolves `revert_to_followup` for them). So the queue lives here, like the desktop's: a follow-up sent
  * mid-turn is kept, shown above the composer, and goes out by itself the moment the turn ends, in order. Each queued
- * message carries the model pick and plan-mode flag that were in force when it was sent. "Steering" — sending a
- * queued message now — cancels the turn under way and sends it first.
+ * message carries the model pick and plan-mode flag that were in force when it was sent. Steering a queued message
+ * into the turn under way goes through the account (Extended mode, [steerNow]) and never stops the turn; with nothing
+ * running, [sendNext] puts a message first in line. ([sendNow] is the older send-in-place-of-the-turn, which stops it.)
  *
  * Whether the agent is free is read from its row in the agent list: [AgentRepository.followUp] marks it running,
  * the [LiveRunHub] marks it idle when the run it follows ends, a cancel marks it cancelled, and the list refresh
@@ -89,6 +92,8 @@ class FollowUpRepository(
     private val accountQueue: (suspend (agentId: String, item: QueuedFollowUp) -> AccountHandoff)? = null,
     /** Whether the account's queue may take a refused message right now (Extended mode on, not the demo). */
     private val accountQueueAvailable: suspend () -> Boolean = { false },
+    /** Steers a queued message into the turn under way through the account (Extended mode; see [steerNow]). Null: no steering here. */
+    private val accountSteering: AccountSteering? = null,
     private val store: FollowUpStore? = null,
     /** False (the demo) keeps everything in memory. */
     private val persist: () -> Boolean = { true },
@@ -106,6 +111,17 @@ class FollowUpRepository(
      * composer and the transcript's copy are one message (see `QueuePlacement`).
      */
     data class AccountHandoff(val runId: String?, val followupId: String)
+
+    /**
+     * The account's two steps for a steer from this device's queue: [handOff] files the message with the account's
+     * queue (`AddAsyncFollowupBackgroundComposer`) without reading the queue back, so the card shows it only once
+     * the transcript's placement does; [promote] delivers it into the turn under way (`InjectBackgroundComposerContext`
+     * with `promoteFollowupId`, `SteeringRepository.promotePending`), the call an account row's steer makes.
+     */
+    interface AccountSteering {
+        suspend fun handOff(agentId: String, item: QueuedFollowUp): AccountHandoff
+        suspend fun promote(agentId: String, followupId: String): SteerOutcome
+    }
 
     private inner class Entry(val agentId: String) {
         val state = MutableStateFlow(FollowUpComposerState(restored = store == null || !persist()))
@@ -371,7 +387,83 @@ class FollowUpRepository(
     }
 
     /**
-     * Steers: sends a queued follow-up now rather than in its turn. The message leaves the cards at once and shows in
+     * Sends a queued follow-up next, with no turn under way to wait for: it moves to the head of the queue, any failure
+     * or wait on it cleared, and the dispatcher sends it the moment the agent is free — never by stopping a turn. The
+     * way a waiting card's up arrow sends while nothing runs. False when [id] is gone or already on its way.
+     */
+    fun sendNext(agentId: String, id: String): Boolean {
+        val e = entry(agentId)
+        synchronized(e) {
+            val found = e.state.value.queue.firstOrNull { it.id == id && !it.isSending && !it.isSteered } ?: return false
+            val cleared = found.copy(error = null, needsConfirmation = false, sendStartedAtMillis = null, heldSinceMillis = null, busyRefusals = 0, serverReason = null, notBeforeMillis = null, holdReason = null, throttleRefusals = 0)
+            e.update { copy(queue = listOf(cleared) + queue.filterNot { it.id == id }) }
+            e.ensureDispatcher()
+        }
+        e.scheduleSave()
+        return true
+    }
+
+    /**
+     * Steers a queued follow-up into the turn under way without stopping it (Extended mode): the message is filed with
+     * the account's queue ([AccountSteering.handOff]) and promoted into the running turn ([AccountSteering.promote]),
+     * as an account row's steer is. The card gives way to the account's placement — the row "being delivered" until
+     * the transcript files the message among the running turn's rows (`ConversationRepository.expectDelivery`) —
+     * so the message is in one place at a time, and the queue's delivery flight carries it there.
+     *
+     * Answers the line to show: the steer's outcome; "Sent." when the agent turned out to be free and the account
+     * started a turn on it. A failure before the account holds the message puts it back on this card with the reason;
+     * one after — the promote refused — leaves it waiting on the account's queue, where the card shows it, and says so.
+     * Runs in the repository's scope, so the screen's lifetime does not cut it short.
+     */
+    suspend fun steerNow(agentId: String, id: String): Result<String> {
+        val steering = accountSteering ?: return Result.failure(IllegalStateException(STEER_NEEDS_EXTENDED))
+        val startedIn = generation.get()
+        val e = entry(agentId)
+        val item = synchronized(e) {
+            val found = e.state.value.queue.firstOrNull { it.id == id && !it.isSending && !it.isSteered } ?: return@synchronized null
+            val claimed = found.copy(error = null, needsConfirmation = false, isSending = true, sendStartedAtMillis = AppClock.now())
+            e.update { copy(queue = queue.map { if (it.id == id) claimed else it }) }
+            claimed
+        } ?: return Result.failure(IllegalStateException("That message is no longer queued."))
+        e.scheduleSave()
+        return work.async { steerInto(e, item, steering, startedIn) }.await()
+    }
+
+    private suspend fun steerInto(e: Entry, item: QueuedFollowUp, steering: AccountSteering, startedIn: Int): Result<String> {
+        val handed = runCatching { steering.handOff(e.agentId, item) }
+        if (generation.get() != startedIn) return Result.failure(IllegalStateException("Signed out."))
+        val (runId, followupId) = handed.getOrElse { t ->
+            if (t is CancellationException) throw t
+            e.attempt(item, VIA_STEER, "failed", t.userMessage())
+            e.update { copy(queue = queue.map { if (it.id == item.id) it.copy(isSending = false, sendStartedAtMillis = null, error = t.userMessage()) else it }) }
+            e.scheduleSave()
+            return Result.failure(t)
+        }
+        runId?.let { e.acceptedId(it) }
+        e.update { copy(queue = queue.filterNot { it.id == item.id }) }
+        spendPickOf(e, item)
+        e.scheduleSave()
+        if (runId != null && !conversations.waitsBehindTurn(e.agentId, runId)) {
+            // The turn had ended by the time the account took it: it starts the next one, as a send on a free agent does.
+            e.attempt(item, VIA_STEER, "accepted", runId)
+            return Result.success("Sent.")
+        }
+        conversations.expectDelivery(e.agentId, item.previewText, item.images.map { it.image }, item.files.map { it.file }, followupId = followupId, runId = runId)
+        return runCatching { steering.promote(e.agentId, followupId) }.fold(
+            onSuccess = { outcome ->
+                e.attempt(item, VIA_STEER, "steered", outcome.name)
+                Result.success(outcome.message)
+            },
+            onFailure = { t ->
+                if (t is CancellationException) throw t
+                e.attempt(item, VIA_STEER, "queued-on-account", t.userMessage())
+                Result.failure(IllegalStateException("Couldn't steer it (${t.userMessage()}); it waits on your account's queue.", t))
+            },
+        )
+    }
+
+    /**
+     * The stopping path, which no button takes any more: sends a queued follow-up now rather than in its turn. The message leaves the cards at once and shows in
      * the transcript as a pending prompt, faded, as if sent; when the agent is on a turn that turn is cancelled — the
      * API has no way to hand a message to a run in progress — and the request goes out the moment the agent is free,
      * ahead of everything else queued. The bubble comes up to full strength once the server has filed the run. Should
@@ -986,31 +1078,33 @@ class FollowUpRepository(
         )
     }
 
-    private companion object {
-        const val MAX_ENTRIES = 24
-        const val DRAFT_SAVE_DELAY_MS = 400L
-        const val IDLE_SETTLE_MS = 10_000L
+    companion object {
+        private const val MAX_ENTRIES = 24
+        private const val DRAFT_SAVE_DELAY_MS = 400L
+        private const val IDLE_SETTLE_MS = 10_000L
         /** The longest pause between two attempts the server keeps refusing as busy (see [awaitBusyTurn]). */
-        const val MAX_BUSY_PAUSE_MS = 60_000L
+        private const val MAX_BUSY_PAUSE_MS = 60_000L
         /** From this many refusals in a row the card carries the server's own reason under the wait. */
-        const val REFUSALS_BEFORE_REASON = 3
+        private const val REFUSALS_BEFORE_REASON = 3
         /** Attempts kept per chat for the diagnostics. */
-        const val MAX_ATTEMPTS_KEPT = 24
-        const val VIA_RUN = "runs"
-        const val VIA_ACCOUNT = "account"
-        const val VIA_STEER = "steer"
-        const val RETRY_BASE_MS = 1_000L
+        private const val MAX_ATTEMPTS_KEPT = 24
+        private const val VIA_RUN = "runs"
+        private const val VIA_ACCOUNT = "account"
+        private const val VIA_STEER = "steer"
+        private const val RETRY_BASE_MS = 1_000L
         /** A cancel that failed for a passing reason is asked this many more times (1 s, then 2 s later). */
-        const val MAX_CANCEL_RETRIES = 2
+        private const val MAX_CANCEL_RETRIES = 2
         /** A steered send that failed for a passing reason is tried this many more times (1 s, 2 s, then 4 s later). */
-        const val MAX_SEND_RETRIES = 3
+        private const val MAX_SEND_RETRIES = 3
         /** How many doublings the pause between refused attempts takes before [MAX_BUSY_PAUSE_MS] caps it. */
-        const val MAX_BUSY_BACKOFF_STEPS = 6
+        private const val MAX_BUSY_BACKOFF_STEPS = 6
         /** A refusal that names a wait (`429`, `503` with `Retry-After`) is waited out and tried again this many times before it is shown. */
-        const val THROTTLE_RETRIES = 1
-        const val AGENT_BUSY = "agent_busy"
-        const val RUN_NOT_CANCELLABLE = "run_not_cancellable"
+        private const val THROTTLE_RETRIES = 1
+        private const val AGENT_BUSY = "agent_busy"
+        /** What a waiting card's up arrow says mid-turn with no account to steer through (default mode, the demo). */
+        const val STEER_NEEDS_EXTENDED = "Steering into a running turn needs Extended mode; this message sends when the turn ends."
+        private const val RUN_NOT_CANCELLABLE = "run_not_cancellable"
         /** The ids of the placeholder runs prompts sent from here are shown under until the server answers (see [ConversationRepository]). */
-        const val LOCAL_RUN_PREFIX = "local-"
+        private const val LOCAL_RUN_PREFIX = "local-"
     }
 }

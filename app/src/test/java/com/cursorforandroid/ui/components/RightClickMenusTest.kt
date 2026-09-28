@@ -313,7 +313,7 @@ class RightClickMenusTest {
                     PendingFollowup("fu-2", "And a changelog line", 2_000L, AgentSource.API),
                 ),
                 inFlightIds = emptySet(),
-                onSendNow = { sent += it.id },
+                onSteer = { sent += it.id },
                 onRemove = {},
                 onUpdate = { _, _ -> },
                 onEditing = { _, _ -> },

@@ -276,7 +276,7 @@ class HapticsTest {
         assertThat(view.played.map { it.first }).containsExactly(HapticFeedbackConstants.CONFIRM)
 
         setting.value = false
-        confirmation.ask(RunInterruption.SendNow, "agent-1") { stopped++ }
+        confirmation.ask(RunInterruption.Pause, "agent-1") { stopped++ }
         assertThat(stopped).isEqualTo(2)
         assertThat(view.played.map { it.first }).containsExactly(HapticFeedbackConstants.CONFIRM, HapticFeedbackConstants.CONFIRM)
     }
