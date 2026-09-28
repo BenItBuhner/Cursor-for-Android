@@ -32,6 +32,7 @@ import com.cursorforandroid.util.AppClock
 import com.cursorforandroid.util.HeldDispatcher
 import com.cursorforandroid.util.MainDispatcherRule
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -45,6 +46,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The composer remembers what the last agent was launched with, opens the chat it launches before the server has
@@ -72,6 +74,10 @@ class NewAgentViewModelTest {
     @Volatile private var announcedModels: List<ModelListItemDto> = emptyList()
     @Volatile private var connectedRepos: List<String> = emptyList()
 
+    /** Every `GET /v1/models` the API received; while [modelsHeld] is set, each waits on it before answering. */
+    private val modelsAsked = AtomicInteger()
+    @Volatile private var modelsHeld: CompletableDeferred<Unit>? = null
+
     @Before
     fun setUp() {
         graph = process()
@@ -88,7 +94,11 @@ class NewAgentViewModelTest {
                 failNextCreate?.let { failNextCreate = null; throw it }
                 return demoApi.createAgent(body)
             }
-            override suspend fun models(): ListModelsResponseDto = demoApi.models().let { it.copy(items = it.items + announcedModels) }
+            override suspend fun models(): ListModelsResponseDto {
+                modelsAsked.incrementAndGet()
+                modelsHeld?.await()
+                return demoApi.models().let { it.copy(items = it.items + announcedModels) }
+            }
             override suspend fun repositories(): ListRepositoriesResponseDto =
                 demoApi.repositories().let { it.copy(items = it.items + connectedRepos.map(::RepositoryDto)) }
         }
@@ -157,6 +167,44 @@ class NewAgentViewModelTest {
         }
         assertThat(vm.state.value.selectedModel?.id).isEqualTo(selected)
         assertThat(vm.state.value.modelsUnavailable).isFalse()
+    }
+
+    @Test
+    fun `refresh taps while the model list is loading wait on that load, and the spinner stays until it answers`() = runBlocking {
+        val vm = loaded()
+        awaitUntil { !vm.state.value.isLoadingModels }
+        val clock = AppClock.nowMillis
+        try {
+            // Past the catalog's pause between asks, so each tap would be free to ask again.
+            var now = System.currentTimeMillis() + CatalogRefresher.STALE_AFTER_MS
+            AppClock.nowMillis = { now }
+            val held = CompletableDeferred<Unit>().also { modelsHeld = it }
+            val asked = modelsAsked.get()
+            announcedModels = listOf(ModelListItemDto(id = "claude-opus-6", displayName = "Claude Opus 6"))
+
+            val first = vm.refreshModels()
+            awaitUntil { modelsAsked.get() == asked + 1 }
+            now += CatalogRefresher.STALE_AFTER_MS
+            val again = List(3) { vm.refreshModels() }
+            assertThat(again).containsExactly(first, first, first)
+            assertThat(vm.state.value.isLoadingModels).isTrue()
+
+            held.complete(Unit)
+            first.join()
+            assertThat(vm.state.value.isLoadingModels).isFalse()
+            assertThat(vm.state.value.models.map { it.id }).contains("claude-opus-6")
+            delay(200)
+            assertThat(modelsAsked.get()).isEqualTo(asked + 1)
+            assertThat(vm.state.value.isLoadingModels).isFalse()
+
+            // Once it has answered, a tap asks again.
+            modelsHeld = null
+            vm.refreshModels().join()
+            assertThat(modelsAsked.get()).isEqualTo(asked + 2)
+        } finally {
+            modelsHeld = null
+            AppClock.nowMillis = clock
+        }
     }
 
     @Test
