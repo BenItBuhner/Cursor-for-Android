@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.api.CursorApi
 import com.cursorforandroid.data.api.CursorApiException
+import com.cursorforandroid.data.api.CursorJson
 import com.cursorforandroid.data.api.dto.CreateAgentRequestDto
 import com.cursorforandroid.data.api.dto.CreateAgentResponseDto
 import com.cursorforandroid.data.api.dto.ListModelsResponseDto
@@ -652,20 +653,14 @@ class NewAgentViewModelTest {
         assertThat(loaded().state.value.ref).isEmpty()
     }
 
-    /** The model picker no longer shows the auto-PR switch; a stored "on" still goes out with every launch and stays stored. */
+    /** Auto-create PR is gone from the app: a launch never asks for a pull request, leaving it to the API's default of off. */
     @Test
-    fun `a stored auto-PR setting still reaches the launch and is kept for the next one`() = runBlocking {
-        storeAutoCreatePr(true)
-        try {
-            val vm = loaded()
-            assertThat(vm.state.value.autoCreatePr).isTrue()
-            vm.launchAndWait()
-            awaitUntil { created.isNotEmpty() }
-            assertThat(created.single().autoCreatePR).isTrue()
-            assertThat(graph.prefs.composerDefaults.first().autoCreatePr).isTrue()
-        } finally {
-            storeAutoCreatePr(false)
-        }
+    fun `a launch never asks for a pull request`() = runBlocking {
+        loaded().launchAndWait()
+        awaitUntil { created.isNotEmpty() }
+        val body = CursorJson.encodeToString(CreateAgentRequestDto.serializer(), created.single())
+        assertThat(body).doesNotContain("autoCreatePR")
+        assertThat(body).doesNotContain("auto_create_pr")
     }
 
     @Test
@@ -688,17 +683,8 @@ class NewAgentViewModelTest {
     private suspend fun onDisk() = graph.drafts.list()
 
     /**
-     * The last launch's auto-PR setting, as it is stored. Nothing in the app sets it any more but a launch writing
-     * back what it went out with, so an install that had it on keeps it on.
-     */
-    private fun storeAutoCreatePr(value: Boolean) = runBlocking {
-        graph.prefs.setComposerDefaults(repoUrl = null, ref = null, modelId = null, params = emptyMap(), autoCreatePr = value)
-    }
-
-    /**
      * The composer as the phone leaves it: a repository and branch on a team pool, a model with its variant, plan
-     * mode, the stored PR switch, a line and an image. Written as the app leaves the screen; the PR switch is
-     * seeded by [storeAutoCreatePr] before the composer opens.
+     * mode, a line and an image. Written as the app leaves the screen.
      */
     private fun writeEverything(vm: NewAgentViewModel, bytes: ByteArray) {
         vm.selectDevice(DeviceTarget.pool("gpu"))
@@ -721,7 +707,6 @@ class NewAgentViewModelTest {
         assertThat(selectedModel?.id).isEqualTo("cursor-grok-4.6")
         assertThat(selectedVariant?.params?.associate { it.id to it.value }).containsExactly("effort", "medium", "fast", "false")
         assertThat(planMode).isTrue()
-        assertThat(autoCreatePr).isTrue()
     }
 
     /**
@@ -733,12 +718,9 @@ class NewAgentViewModelTest {
     @Test
     fun `a draft outlives the process that was typing it, device, model and chat id included`() = runBlocking {
         val bytes = byteArrayOf(1, 2, 3, 4, 5)
-        storeAutoCreatePr(true)
         val vm = loadedWithAgents(draftSaveDelayMs = 20)
         writeEverything(vm, bytes)
         awaitUntil { onDisk().singleOrNull()?.images?.size == 1 }
-        // The draft carries the switch on its own: the stored default going off meanwhile does not take it away.
-        storeAutoCreatePr(false)
         val saved = onDisk().single()
         assertThat(saved.id).isEqualTo(vm.draftId.value)
 
@@ -761,7 +743,6 @@ class NewAgentViewModelTest {
                 ref = "cursor/cli-exploration-9c1d",
                 modelId = "cursor-grok-4.6",
                 modelParams = state.selectedVariant!!.params,
-                autoCreatePr = true,
                 planMode = true,
                 env = DeviceTarget.pool("gpu"),
             ),
@@ -777,11 +758,9 @@ class NewAgentViewModelTest {
     @Test
     fun `an app started afresh opens a fresh composer, and the draft left in the last one opens from the sidebar whole`() = runBlocking {
         val bytes = byteArrayOf(7, 7, 7)
-        storeAutoCreatePr(true)
         val vm = loadedWithAgents(draftSaveDelayMs = 20)
         writeEverything(vm, bytes)
         awaitUntil { onDisk().singleOrNull()?.images?.size == 1 }
-        storeAutoCreatePr(false)
 
         val next = process()
         runBlocking { next.agents.refresh() }

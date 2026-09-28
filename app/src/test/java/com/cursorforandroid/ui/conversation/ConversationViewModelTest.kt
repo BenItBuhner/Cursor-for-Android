@@ -174,7 +174,7 @@ class ConversationViewModelTest {
     fun `a chat launched here opens on the variant it was launched with, the chip naming the model alone`() = runBlocking {
         val composer = graph.catalog.loadModels().getOrThrow().first { it.id == "composer-2.5" }
         val slow = composer.variants.first { !it.isDefault }
-        val request = LaunchRequest(prompt = "Do the thing", repoUrl = null, ref = null, modelId = composer.id, modelParams = slow.params, autoCreatePr = false, planMode = false)
+        val request = LaunchRequest(prompt = "Do the thing", repoUrl = null, ref = null, modelId = composer.id, modelParams = slow.params, planMode = false)
         val agent = graph.agents.launch(request, "Composer 2.5").getOrThrow().agent
 
         val picker = open(agent.id).picker { it.current != null }

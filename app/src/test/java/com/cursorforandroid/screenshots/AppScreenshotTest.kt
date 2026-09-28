@@ -414,7 +414,7 @@ class AppScreenshotTest {
     fun deviceDrivesRepository() {
         val graph = launchApp()
         // The last launch on Cloud was against cursor-for-android: that is what the composer opens on.
-        runBlocking { graph.prefs.setComposerDefaults(repoUrl = "https://github.com/bennett/cursor-for-android", ref = "", modelId = null, params = emptyMap(), autoCreatePr = false) }
+        runBlocking { graph.prefs.setComposerDefaults(repoUrl = "https://github.com/bennett/cursor-for-android", ref = "", modelId = null, params = emptyMap()) }
         enterDemo(graph, repoChip = "cursor-for-android")
 
         compose.onNodeWithText("Cloud").performClick()

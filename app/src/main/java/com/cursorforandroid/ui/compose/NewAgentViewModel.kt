@@ -111,7 +111,6 @@ data class NewAgentUiState(
     val models: List<ModelOption> = emptyList(),
     val selectedModel: ModelOption? = null,
     val selectedVariant: ModelVariant? = null,
-    val autoCreatePr: Boolean = false,
     val planMode: Boolean = false,
     /**
      * Ask or Debug: the chat starts on the account in that mode (see [LaunchRequest.accountMode]). One slot with
@@ -318,7 +317,7 @@ class NewAgentViewModel(
             // A blank ref is the repository's default branch; nothing here knows what it is called (see [NewAgentUiState.ref]).
             // A machine restored from the last launch brings its repository with it once the device list says which.
             _state.update {
-                it.copy(autoCreatePr = loaded.autoCreatePr, ref = loaded.ref.orEmpty(), selectedDevice = loaded.env, repoFollowsDevice = !loaded.env.isCloud, isLoadingDevices = true).withPickerLists()
+                it.copy(ref = loaded.ref.orEmpty(), selectedDevice = loaded.env, repoFollowsDevice = !loaded.env.isCloud, isLoadingDevices = true).withPickerLists()
             }
             // The draft this composer had open when its process was ended — or one the sidebar asked for before this
             // composer existed — stands over the last launch's choices: the repository and model it was written
@@ -427,7 +426,6 @@ class NewAgentViewModel(
                 prompt = record.prompt,
                 attachments = attachments.map { (_, attachment) -> attachment },
                 files = files.map { (_, file) -> file },
-                autoCreatePr = record.autoCreatePr,
                 planMode = record.planMode,
                 accountMode = AgentMode.parse(record.mode)?.takeIf { it.needsAccountService },
                 // A draft 0.3.61 kept never said where it would run: it opens on the last launch's device, as it did.
@@ -513,7 +511,6 @@ class NewAgentViewModel(
             modelLabel = s.selectedModel?.displayName,
             // A model picked here comes back as the draft's; a default does not, and is derived afresh.
             modelChosen = modelPicked,
-            autoCreatePr = s.autoCreatePr,
             planMode = s.planMode,
             mode = s.accountMode?.name,
             nonce = launchNonce,
@@ -569,7 +566,6 @@ class NewAgentViewModel(
                     errorAsked = null,
                     planMode = false,
                     accountMode = null,
-                    autoCreatePr = saved.autoCreatePr,
                     selectedDevice = saved.env,
                     repoFollowsDevice = !saved.env.isCloud,
                 )
@@ -606,7 +602,6 @@ class NewAgentViewModel(
         repoFollowsDevice,
         selectedModel?.id,
         selectedVariant?.params?.map { it.id to it.value },
-        autoCreatePr,
         planMode,
         accountMode,
     )
@@ -904,7 +899,6 @@ class NewAgentViewModel(
         ref = null,
         modelId = null,
         modelParams = emptyMap(),
-        autoCreatePr = false,
         modelChosen = false,
         env = DeviceTarget.Cloud,
     )
@@ -1007,7 +1001,6 @@ class NewAgentViewModel(
                 modelParams = s.selectedVariant?.params
                     ?: remembered?.modelParams?.map { (id, value) -> ModelParam(id, value) }
                     ?: emptyList(),
-                autoCreatePr = s.autoCreatePr,
                 planMode = s.planMode && accountMode == null,
                 accountMode = accountMode,
                 mcpServers = graph.inlineMcpServers(),
@@ -1074,7 +1067,6 @@ class NewAgentViewModel(
                     ref = request.ref ?: "",
                     modelId = request.modelId,
                     params = params,
-                    autoCreatePr = request.autoCreatePr,
                     env = request.env,
                     nowMillis = now,
                 )
@@ -1084,7 +1076,6 @@ class NewAgentViewModel(
                     ref = request.ref ?: "",
                     modelId = request.modelId,
                     modelParams = params,
-                    autoCreatePr = request.autoCreatePr,
                     modelChosen = true,
                     env = request.env,
                     cloudRepoUrl = if (request.env.isCloud) request.repoUrl else defaults?.cloudRepoUrl,
