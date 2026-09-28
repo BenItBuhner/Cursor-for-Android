@@ -283,7 +283,7 @@ class PreferencesStoreTest {
     }
 
     @Test
-    fun `the pre-release, haptic and voice input switches and the panel's width in dp an earlier build stored are deleted, and nothing else is`() = runBlocking<Unit> {
+    fun `the pre-release, haptic, voice input and auto-create PR switches and the panel's width in dp an earlier build stored are deleted, and nothing else is`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val store = PreferenceDataStoreFactory.create(
             scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
@@ -294,6 +294,7 @@ class PreferencesStoreTest {
             p[booleanPreferencesKey("haptic_feedback")] = false
             p[booleanPreferencesKey("voice_input")] = true
             p[intPreferencesKey("panel_width_dp")] = 400
+            p[booleanPreferencesKey("auto_create_pr")] = true
             p[booleanPreferencesKey("auto_update")] = false
             p[stringPreferencesKey("theme_mode")] = ThemeMode.Light.name
             p[intPreferencesKey("rail_width_dp")] = 240
@@ -418,7 +419,6 @@ class PreferencesStoreTest {
             ref = "main",
             modelId = "auto-smart",
             params = emptyMap(),
-            autoCreatePr = true,
         )
         prefs.rememberModel("composer-2.5", mapOf("fast" to "false"))
         val defaults = prefs.composerDefaults.first()
@@ -427,7 +427,6 @@ class PreferencesStoreTest {
         assertThat(defaults.modelChosen).isTrue()
         assertThat(defaults.repoUrl).isEqualTo("https://github.com/acme/app")
         assertThat(defaults.ref).isEqualTo("main")
-        assertThat(defaults.autoCreatePr).isTrue()
     }
 
     /**
