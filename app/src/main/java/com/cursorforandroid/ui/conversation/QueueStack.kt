@@ -96,6 +96,11 @@ private class CardMotion {
     fun depthNow(): Float = depth?.value ?: 0f
 }
 
+/** The deck's height as it springs to where the cards will rest: the floor under the cards' own motion. */
+private class DeckMotion {
+    var height: Animatable<Float, AnimationVector1D>? = null
+}
+
 /**
  * The queued follow-ups over the composer as a deck of cards once there are more than a couple of them (Bennett's
  * 2026-09-27 frame: five full rows over the box, half the screen gone to what is waiting). Stacked, the next message
@@ -126,6 +131,8 @@ fun QueueStack(
     animate: () -> Boolean = ValueAnimator::areAnimatorsEnabled,
     /** How each change of place moves; the stack's spring but for a frame a test catches part of the way. */
     animationSpec: AnimationSpec<Float> = StackSpring,
+    /** How the deck's own height moves: settling without a dip, unless a test holds the cards part of the way. */
+    heightSpec: AnimationSpec<Float> = if (animationSpec === StackSpring) DeckSpring else animationSpec,
     card: @Composable (index: Int, face: QueueCardFace) -> Unit,
 ) {
     val count = keys.size
@@ -133,6 +140,7 @@ fun QueueStack(
     val collapsed = stacked && stackable
     val scope = rememberCoroutineScope()
     val motions = remember { HashMap<String, CardMotion>() }
+    val deckMotion = remember { DeckMotion() }
     val placed = remember { Placed() }
     val handleShare = remember { Animatable(if (stackable) 1f else 0f) }
     val turn = remember { Animatable(if (collapsed) 0f else 1f) }
@@ -201,8 +209,16 @@ fun QueueStack(
         val y = FloatArray(n) { k -> if (live) motionOf(k).y?.value ?: targetY[k] else targetY[k] }
         val depth = FloatArray(n) { k -> if (live) motionOf(k).depth?.value ?: targetDepth[k] else targetDepth[k] }
         var top = 0f
-        for (k in 0 until n) if (shown(depth[k]) > 0f) top = minOf(top, y[k])
-        val deck = ceil(-top).toInt()
+        var rest = 0f
+        for (k in 0 until n) {
+            if (shown(depth[k]) > 0f) top = minOf(top, y[k])
+            if (shown(targetDepth[k]) > 0f) rest = minOf(rest, targetY[k])
+        }
+        // A card that leaves takes its springs with it, so the cards alone would drop the deck's top in one frame, and
+        // the transcript over the dock with it. The deck springs to where the cards will rest instead, never lower
+        // than where they are drawn, and without the cards' dip below it.
+        val floor = deckMotion.height.springTo(-rest, live, scope, heightSpec).also { deckMotion.height = it }
+        val deck = maxOf(ceil(-top).toInt(), if (live) floor.value.roundToInt() else 0)
         val share = handleShare.value
         val lead = (handle.height * share).roundToInt()
         val height = deck + lead
@@ -331,6 +347,9 @@ private val HandleHeight = 24.dp
 
 /** Opening, closing and every change of place: a touch of overshoot, settled in about a third of a second. */
 internal val StackSpring = spring<Float>(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
+
+/** The deck's height: the cards' pace, critically damped, so what stands above the deck never dips or rebounds. */
+internal val DeckSpring = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.5f)
 
 const val QueueStackTag = "queue-stack"
 const val QueueStackHandleTag = "queue-stack-handle"
