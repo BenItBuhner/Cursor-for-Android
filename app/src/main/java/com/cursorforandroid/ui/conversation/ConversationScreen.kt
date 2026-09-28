@@ -431,6 +431,10 @@ fun ConversationScreen(
     // repositories as the transcript plus the documented reads only it needs. Opened by the header button or a drag
     // toward the start edge across the chat; it is per chat, like the view model behind it.
     val panelViewModel: PanelViewModel = viewModel(key = "panel-$agentId", factory = PanelViewModel.Factory(graph, agentId))
+    LifecycleStartEffect(agentId) {
+        panelViewModel.resume()
+        onStopOrDispose { panelViewModel.pause() }
+    }
     val panelState = rememberSidePanelState()
     val pinnedPanel = LocalPinnedPanel.current
     val panelTabs = rememberPanelTabStates()

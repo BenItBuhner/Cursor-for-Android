@@ -403,13 +403,24 @@ class PanelViewModel(private val graph: AppGraph, val agentId: String) : ViewMod
         val pullRequestCreation: RemoteLoad<String>,
     )
 
-    init {
-        // The account's queue is kept current while the panel lives, like while the chat's screen does.
+    private var steeringAttached = false
+
+    /** The panel's chat is on screen: the account's queue is kept current while it is, like for the chat's screen. */
+    fun resume() {
+        if (steeringAttached) return
+        steeringAttached = true
         graph.steering.attach(agentId)
     }
 
-    override fun onCleared() {
+    /** The panel's chat stopped (backgrounded, or covered by another screen): no more polling for it. */
+    fun pause() {
+        if (!steeringAttached) return
+        steeringAttached = false
         graph.steering.detach(agentId)
+    }
+
+    override fun onCleared() {
+        pause()
         super.onCleared()
     }
 
