@@ -1265,6 +1265,16 @@ class AgentRepository(
      * After [prime] (the account's list or page read alongside the public one) has landed or failed: it brings most
      * records at once, and when the list failed the records by id are not asked either (see [accountListUnread]).
      */
+    /**
+     * The account's list was read again (the pin round's read, or a fetch's): the rows it left bare while it was
+     * refused or unanswered are asked for their records by id again (see [accountListUnread]).
+     */
+    fun accountListAnswered() {
+        if (!accountListUnread) return
+        accountListUnread = false
+        followWithRecords(token())
+    }
+
     private fun followWithRecords(startedIn: Int, prime: Job? = null) {
         scope.launch {
             prime?.join()

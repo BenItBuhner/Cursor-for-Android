@@ -322,6 +322,7 @@ class PinRepository(
         if (generation.get() != startedIn) return null
         accountCursor = list.nextCursor
         agents.applyAccountSnapshots(list.composers, agentsToken)
+        agents.accountListAnswered()
         runCatching { onList(list, agentsToken) }.onFailure { if (it is CancellationException) throw it }
         return list
     }
