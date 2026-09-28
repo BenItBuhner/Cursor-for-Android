@@ -310,6 +310,7 @@ dependencies {
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.work.runtime)
     implementation(libs.sentry.android.core)
+    implementation(libs.androidx.window)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
@@ -322,6 +323,7 @@ dependencies {
     testImplementation(libs.androidx.test.ext.junit)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.androidx.window.testing)
     debugImplementation(libs.compose.ui.test.manifest)
 }
 
