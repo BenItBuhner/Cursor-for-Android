@@ -948,13 +948,13 @@ class NewAgentViewModel(
 
     fun refreshModels() = viewModelScope.launch { loadModels(force = true) }
 
-    fun refreshDevices() = viewModelScope.launch { loadDevices() }
+    fun refreshDevices() = viewModelScope.launch { loadDevices(force = true) }
 
-    private suspend fun loadDevices() {
+    private suspend fun loadDevices(force: Boolean = false) {
         _state.update { it.copy(isLoadingDevices = true) }
         liveDevices = graph.catalog.devices.value
         _state.update { it.withPickerLists() }
-        liveDevices = graph.catalog.loadDevices().getOrDefault(emptyList())
+        liveDevices = graph.catalog.loadDevices(force).getOrDefault(emptyList())
         _state.update { it.copy(isLoadingDevices = false).withPickerLists() }
     }
 
