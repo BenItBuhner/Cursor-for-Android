@@ -248,8 +248,9 @@ class ConversationStateReader(
      * path when the server refuses, or when the stream ends without a state.
      */
     suspend fun read(agentId: String): InitialState {
+        var joinedFailure = false
         while (true) {
-            val inFlight = blobs.states[agentId]
+            val inFlight = blobs.states[agentId]?.takeUnless { joinedFailure }
             if (inFlight != null) {
                 try {
                     return inFlight.answer.await()
@@ -257,10 +258,20 @@ class ConversationStateReader(
                     // The reader that owned it was cancelled (its screen left), not this one: read afresh.
                     currentCoroutineContext().ensureActive()
                     continue
+                } catch (t: Throwable) {
+                    // Another reader's failure of the server or the connection was spent on that reader's budget — the
+                    // goal strip's, on a client with a shorter call timeout than the record's — and is not this
+                    // reader's word: it reads once on its own. A refusal is the account's answer to either.
+                    if (!ServerRetry.isTransient(t)) throw t
+                    joinedFailure = true
+                    continue
                 }
             }
             val mine = Recent(CompletableDeferred())
-            if (blobs.states.putIfAbsent(agentId, mine) != null) continue
+            if (blobs.states.putIfAbsent(agentId, mine) != null) {
+                if (joinedFailure) return readNow(agentId)
+                continue
+            }
             try {
                 val state = readNow(agentId)
                 mine.answer.complete(state)

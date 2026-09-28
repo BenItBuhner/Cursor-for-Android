@@ -120,9 +120,15 @@ class SteeringApi(
     private val tokens: SessionTokenProvider,
     /** The record's blobs, shared with the transcript's reader so the state read tells the server what this device holds already. */
     blobs: BlobCache = BlobCache(),
+    /**
+     * The client the conversation state is read on: the record's (see `AppGraph`), whose call timeout a long chat's
+     * state needs — the transcript's reader joins this read when it is in flight, and the account client's forty-five
+     * seconds cut a coordinator's state of thousands of turns off under both of them.
+     */
+    stateRpc: ConnectJsonClient = rpc,
 ) : InteractionApi, FollowupQueueApi, RunControlApi, GoalStateApi {
 
-    private val states = ConversationStateReader(rpc, tokens, blobs)
+    private val states = ConversationStateReader(stateRpc, tokens, blobs)
 
     // ---- the goal ---------------------------------------------------------------------------------------------------
 
