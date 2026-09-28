@@ -85,6 +85,7 @@ import com.cursorforandroid.ui.agents.SnoozeChatDialog
 import com.cursorforandroid.ui.components.ChatHeader
 import com.cursorforandroid.domain.UserMessage
 import com.cursorforandroid.ui.components.ComposerAnchor
+import com.cursorforandroid.ui.components.rememberComposerExpansion
 import com.cursorforandroid.ui.components.ComposerBox
 import com.cursorforandroid.ui.components.LocalSendMotion
 import com.cursorforandroid.ui.components.QueueDeliveries
@@ -708,6 +709,7 @@ fun ConversationScreen(
         // Chat has its composer glide down from where that one stood.
         val sendMotion = LocalSendMotion.current
         val composerAnchor = remember(agentId) { ComposerAnchor() }
+        val composerExpansion = rememberComposerExpansion()
         val queueFlights = rememberQueueFlights(agentId)
         val arrival = rememberArrivalGlide(agentId)
         // Extended mode keeps the queue on the account, where the desktop and the web keep theirs; otherwise on this device.
@@ -753,121 +755,139 @@ fun ConversationScreen(
                 }
             }
             // The chat's goal, when it has one, stands over whatever is queued: the order the desktop stacks its
-            // trays in above the composer. Each strip keeps the same width and the same gap to the next.
-            goal?.let { current ->
-                GoalStrip(goal = current, modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp))
-            }
-            // What is waiting to go out sits right above the box it came from, oldest first, one line each — the
-            // device's and, in Extended mode, the account's in one stack, a deck once there are more than a couple.
-            val accountRows = if (accountQueue) controls.queue else emptyList()
-            if (queue.isNotEmpty() || accountRows.isNotEmpty()) {
-                QueueStack(
-                    keys = queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" },
-                    stacked = queueStackedHere,
-                    onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
-                    modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
-                ) { index, face ->
-                    if (index < queue.size) {
-                        QueuedFollowUpCard(
-                            item = queue[index],
-                            position = index + 1,
-                            count = queue.size,
-                            thumbnails = thumbnails,
-                            onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
-                            // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
-                            onSteer = { item ->
-                                haptics.perform(Haptic.Confirm)
-                                viewModel.steerQueued(item.id, turnUnderWay = isActive)
+            // trays in above the composer. Each strip keeps the same width and the same gap to the next. Opened, the
+            // goal and an expanded composer would each want the page: opening one lets the other back down.
+            var goalOpen by rememberSaveable(agentId, goal?.objective.hashCode()) { mutableStateOf(false) }
+            LaunchedEffect(composerExpansion.expanded) { if (composerExpansion.expanded) goalOpen = false }
+            GoalDock(
+                open = goalOpen && goal != null,
+                goal = goal?.let { current ->
+                    {
+                        GoalStrip(
+                            goal = current,
+                            expanded = goalOpen,
+                            onExpandedChange = { open ->
+                                goalOpen = open
+                                if (open) composerExpansion.collapse()
                             },
-                            onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
-                            flights = queueFlights,
-                            face = face,
-                            steers = isActive,
+                            modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
                         )
-                    } else {
-                        val at = index - queue.size
-                        AccountQueueCard(
-                            item = accountRows[at],
-                            position = at + 1,
-                            count = accountRows.size,
-                            inFlightIds = controls.inFlightQueueIds,
-                            // The up arrow promotes the message into the turn under way as a steer; with none running, it is sent now.
-                            onSteer = { item ->
-                                haptics.perform(Haptic.Confirm)
-                                viewModel.queueSteer(item.id, turnUnderWay = isActive)
-                            },
-                            onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
-                            onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
-                            onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
-                            steers = isActive,
-                            onMove = { item, up -> viewModel.queueMove(item.id, up) },
-                            flights = queueFlights,
-                            face = face,
-                        )
+                    }
+                },
+            ) {
+                // What is waiting to go out sits right above the box it came from, oldest first, one line each — the
+                // device's and, in Extended mode, the account's in one stack, a deck once there are more than a couple.
+                val accountRows = if (accountQueue) controls.queue else emptyList()
+                if (queue.isNotEmpty() || accountRows.isNotEmpty()) {
+                    QueueStack(
+                        keys = queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" },
+                        stacked = queueStackedHere,
+                        onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
+                        modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
+                    ) { index, face ->
+                        if (index < queue.size) {
+                            QueuedFollowUpCard(
+                                item = queue[index],
+                                position = index + 1,
+                                count = queue.size,
+                                thumbnails = thumbnails,
+                                onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
+                                // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
+                                onSteer = { item ->
+                                    haptics.perform(Haptic.Confirm)
+                                    viewModel.steerQueued(item.id, turnUnderWay = isActive)
+                                },
+                                onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
+                                flights = queueFlights,
+                                face = face,
+                                steers = isActive,
+                            )
+                        } else {
+                            val at = index - queue.size
+                            AccountQueueCard(
+                                item = accountRows[at],
+                                position = at + 1,
+                                count = accountRows.size,
+                                inFlightIds = controls.inFlightQueueIds,
+                                // The up arrow promotes the message into the turn under way as a steer; with none running, it is sent now.
+                                onSteer = { item ->
+                                    haptics.perform(Haptic.Confirm)
+                                    viewModel.queueSteer(item.id, turnUnderWay = isActive)
+                                },
+                                onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
+                                onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
+                                onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
+                                steers = isActive,
+                                onMove = { item, up -> viewModel.queueMove(item.id, up) },
+                                flights = queueFlights,
+                                face = face,
+                            )
+                        }
                     }
                 }
+                ComposerBox(
+                    value = draft,
+                    onValueChange = viewModel::setDraft,
+                    placeholder = when {
+                        archived -> "Unarchive to follow up"
+                        // A send now joins the queue rather than interrupting; the placeholder says so before the tap.
+                        willQueue && accountQueue -> "Follow up (queues on your account)…"
+                        willQueue -> "Follow up (sends when the turn ends)…"
+                        else -> "Follow up…"
+                    },
+                    onSend = {
+                        val takeoff = composerAnchor.takeoff()
+                        val before = items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id }
+                        when (val sent = viewModel.submit()) {
+                            is ConversationViewModel.Sent.Bubble -> sendMotion?.depart(takeoff, sent.text, before)
+                            // Into the queue card instead; the rows already standing are not where it lands.
+                            is ConversationViewModel.Sent.Queued -> sendMotion?.depart(
+                                takeoff,
+                                sent.text,
+                                excluded = queue.mapTo(HashSet()) { it.id } + controls.queue.map { it.id },
+                                landing = SendLanding.Queue,
+                            )
+                            null -> Unit
+                        }
+                    },
+                    anchor = composerAnchor,
+                    // Free the moment send is tapped: the message, its files' uploads and its send are the transcript's from then on.
+                    canSend = (draft.isNotBlank() || attachments.isNotEmpty() || files.isNotEmpty()) && !archived,
+                    isRunning = isActive,
+                    onStop = { stopConfirmation.ask(RunInterruption.Stop, agentId, viewModel::cancelRun) },
+                    plusMenu = plusMenu,
+                    commands = commands,
+                    attachments = attachments,
+                    onRemoveAttachment = viewModel::removeAttachment,
+                    onAddAttachments = viewModel::addAttachments,
+                    onAttachmentError = viewModel::showMessage,
+                    files = files,
+                    onRemoveFile = viewModel::removeFile,
+                    fileUploads = fileUploads,
+                    onRetryFile = viewModel::retryFile,
+                    sendHint = uploadHint,
+                    mediaAgentId = agentId,
+                    media = graph.media,
+                    // The chip names the model the chat runs on and, like on cursor.com/agents, switches it for the next
+                    // follow-up; an archived chat takes no follow-ups, so there is nothing to switch.
+                    modelLabel = picker.chipLabel,
+                    onModel = if (archived) null else ({ modelSheet = true }),
+                    // The mode for the next run is a pill beside "+", as on cursor.com/agents, not a suffix on the chip:
+                    // Plan in either mode; Ask and Debug where the account's follow-up can carry them (Extended mode).
+                    modePill = picker.modePill,
+                    onModePill = viewModel::setModePill,
+                    extendedModes = capabilities.agentModes && !isDemo,
+                    // The `/` popover's models switch the next follow-up's model, as the chip's picker does.
+                    models = picker.models,
+                    currentModel = picker.selected,
+                    onPickModel = if (archived) null else ({ viewModel.selectModel(it.model, it.variant) }),
+                    focusRequests = composerFocusRequests,
+                    // An archived chat takes no follow-ups, so there is nothing to dictate into.
+                    voice = voice.takeUnless { archived },
+                    expansion = composerExpansion,
+                    modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).testTag("follow-up-composer"),
+                )
             }
-            ComposerBox(
-                value = draft,
-                onValueChange = viewModel::setDraft,
-                placeholder = when {
-                    archived -> "Unarchive to follow up"
-                    // A send now joins the queue rather than interrupting; the placeholder says so before the tap.
-                    willQueue && accountQueue -> "Follow up (queues on your account)…"
-                    willQueue -> "Follow up (sends when the turn ends)…"
-                    else -> "Follow up…"
-                },
-                onSend = {
-                    val takeoff = composerAnchor.takeoff()
-                    val before = items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id }
-                    when (val sent = viewModel.submit()) {
-                        is ConversationViewModel.Sent.Bubble -> sendMotion?.depart(takeoff, sent.text, before)
-                        // Into the queue card instead; the rows already standing are not where it lands.
-                        is ConversationViewModel.Sent.Queued -> sendMotion?.depart(
-                            takeoff,
-                            sent.text,
-                            excluded = queue.mapTo(HashSet()) { it.id } + controls.queue.map { it.id },
-                            landing = SendLanding.Queue,
-                        )
-                        null -> Unit
-                    }
-                },
-                anchor = composerAnchor,
-                // Free the moment send is tapped: the message, its files' uploads and its send are the transcript's from then on.
-                canSend = (draft.isNotBlank() || attachments.isNotEmpty() || files.isNotEmpty()) && !archived,
-                isRunning = isActive,
-                onStop = { stopConfirmation.ask(RunInterruption.Stop, agentId, viewModel::cancelRun) },
-                plusMenu = plusMenu,
-                commands = commands,
-                attachments = attachments,
-                onRemoveAttachment = viewModel::removeAttachment,
-                onAddAttachments = viewModel::addAttachments,
-                onAttachmentError = viewModel::showMessage,
-                files = files,
-                onRemoveFile = viewModel::removeFile,
-                fileUploads = fileUploads,
-                onRetryFile = viewModel::retryFile,
-                sendHint = uploadHint,
-                mediaAgentId = agentId,
-                media = graph.media,
-                // The chip names the model the chat runs on and, like on cursor.com/agents, switches it for the next
-                // follow-up; an archived chat takes no follow-ups, so there is nothing to switch.
-                modelLabel = picker.chipLabel,
-                onModel = if (archived) null else ({ modelSheet = true }),
-                // The mode for the next run is a pill beside "+", as on cursor.com/agents, not a suffix on the chip:
-                // Plan in either mode; Ask and Debug where the account's follow-up can carry them (Extended mode).
-                modePill = picker.modePill,
-                onModePill = viewModel::setModePill,
-                extendedModes = capabilities.agentModes && !isDemo,
-                // The `/` popover's models switch the next follow-up's model, as the chip's picker does.
-                models = picker.models,
-                currentModel = picker.selected,
-                onPickModel = if (archived) null else ({ viewModel.selectModel(it.model, it.variant) }),
-                focusRequests = composerFocusRequests,
-                // An archived chat takes no follow-ups, so there is nothing to dictate into.
-                voice = voice.takeUnless { archived },
-                modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).testTag("follow-up-composer"),
-            )
         }
     }
     }
