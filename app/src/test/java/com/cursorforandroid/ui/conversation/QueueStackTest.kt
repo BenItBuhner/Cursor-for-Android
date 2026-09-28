@@ -299,6 +299,48 @@ class QueueStackTest {
         handle("Show all 3 queued follow-ups").assertExists()
     }
 
+    /**
+     * The up arrow drawn on the front card [id]: the steer. The peeking cards behind it keep theirs, scaled down and
+     * hidden under it, so the front's is the one drawn at full size.
+     */
+    private fun steerOn(id: String): Rect {
+        val card = box(id)
+        val arrows = compose.onAllNodesWithContentDescription(QueueGlyphs.STEER, useUnmergedTree = true).fetchSemanticsNodes()
+            .map { it.boundsInWindow }.filter { card.contains(it.center) }
+        assertThat(arrows).isNotEmpty()
+        val front = arrows.maxBy { it.width }
+        assertThat(arrows.count { it.width > front.width - 1f }).isEqualTo(1)
+        return front
+    }
+
+    @Test
+    fun `the deck's front card has no target - its up arrow steers into the running turn and nothing is stopped`() {
+        scene.queue += queued("One", "Two", "Three")
+        scene.show(motion)
+        assertDeck("q-1", "q-2", "q-3")
+        compose.onAllNodesWithContentDescription("Steer now", useUnmergedTree = true).assertCountEquals(0)
+        compose.onAllNodesWithContentDescription(QueueGlyphs.SEND, useUnmergedTree = true).assertCountEquals(0)
+        tap(steerOn("q-1").center)
+        assertThat(scene.steered).containsExactly("q-1")
+        // A steer only asks: the deck stays stacked and the queue stands until the account files the message.
+        assertThat(scene.stacked).isTrue()
+        assertThat(scene.queue.map { it.id }).containsExactly("q-1", "q-2", "q-3").inOrder()
+    }
+
+    @Test
+    fun `on the account's deck too, the front card's up arrow is the steer and there is no target`() {
+        scene.onAccount = true
+        scene.account += PendingFollowup("a-1", "Match the header")
+        scene.account += PendingFollowup("a-2", "Then rerun the flaky suite")
+        scene.account += PendingFollowup("a-3", "Then write it up")
+        scene.show(motion)
+        assertDeck("a-1", "a-2", "a-3")
+        compose.onAllNodesWithContentDescription("Steer now", useUnmergedTree = true).assertCountEquals(0)
+        tap(steerOn("a-1").center)
+        assertThat(scene.steered).containsExactly("a-1")
+        assertThat(scene.stacked).isTrue()
+    }
+
     @Test
     fun `with animations off the deck opens and stacks at once`() {
         scene.stackAnimates = false
@@ -384,5 +426,41 @@ class QueueStackTest {
         assertThat(motion.flights).isEmpty()
         assertThat(scene.messages.map { it.id }).containsExactly("u-1", "u-2", "u-3").inOrder()
         assertList("q-3", "q-4")
+    }
+
+    private val steerDir = System.getenv("STEER_DEMO_DIR")?.let(::File)
+
+    private fun filmSteer(millis: Long) {
+        var left = millis
+        while (left > 0) {
+            steerDir?.let { scene.drawTo(File(it, "steer_%04d.png".format(demoFrame++))) }
+            compose.mainClock.advanceTimeBy(16)
+            compose.waitForIdle()
+            left -= 16
+        }
+    }
+
+    /**
+     * The steer demo: three messages queued on the account while the agent works, stacked; the front card's up arrow
+     * tapped, and the account filing it into the running turn — the card lifting off into the transcript and the next
+     * coming forward — while the composer still offers Stop, the run going on.
+     */
+    @Test
+    fun steerDemo() {
+        scene.onAccount = true
+        scene.account += PendingFollowup("a-1", "Also check the release build, not just debug")
+        scene.account += PendingFollowup("a-2", "Then rerun the flaky suite")
+        scene.account += PendingFollowup("a-3", "Then write up what changed")
+        scene.show(motion)
+        filmSteer(900)
+        tap(steerOn("a-1").center)
+        assertThat(scene.steered).containsExactly("a-1")
+        filmSteer(400)
+        scene.deliver("a-1", bubble = "u-2")
+        filmSteer(SendMotion.FlightMillis + 1_400L)
+        assertThat(motion.flights).isEmpty()
+        assertThat(scene.messages.map { it.id }).containsExactly("u-1", "u-2").inOrder()
+        compose.onNodeWithContentDescription("Stop", useUnmergedTree = true).assertExists()
+        assertList("a-2", "a-3")
     }
 }

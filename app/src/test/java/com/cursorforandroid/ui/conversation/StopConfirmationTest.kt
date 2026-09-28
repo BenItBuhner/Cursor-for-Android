@@ -28,6 +28,7 @@ import com.cursorforandroid.data.api.RunStreamEvent
 import com.cursorforandroid.data.api.dto.V0ConversationMessageDto
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.data.repo.CursorBackend
+import com.cursorforandroid.data.repo.FollowUpRepository
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.ui.components.RunInterruption
 import com.cursorforandroid.ui.components.RunStopCopy
@@ -227,30 +228,24 @@ class StopConfirmationTest {
     }
 
     @Test
-    fun `Send now on a queued message cancels the turn under way, so it asks first too`() {
+    fun `a queued message's up arrow steers rather than interrupts - it never asks to stop the turn, and never cancels it`() {
         openChat()
 
         // Written while the agent works, the follow-up waits on this device for the turn to end.
         compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("Also cover the logout redirect")
         compose.onNodeWithContentDescription("Send").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodes(hasContentDescription("Send now")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodes(hasContentDescription(QueueGlyphs.STEER)).fetchSemanticsNodes().isNotEmpty() }
+        // No other glyph offers a steer: the up arrow is the one.
+        assertThat(compose.onAllNodes(hasContentDescription("Steer now")).fetchSemanticsNodes()).isEmpty()
 
-        compose.onNodeWithContentDescription("Send now").performClick()
-        compose.waitUntil(10_000) { dialogShown() }
-        compose.onNodeWithText(RunInterruption.SendNow.title).assertIsDisplayed()
-        compose.onNode(hasTestTag(RunStopTags.CONFIRM) and hasText(RunInterruption.SendNow.confirm)).assertIsDisplayed()
-        compose.onNodeWithTag(RunStopTags.KEEP_RUNNING).performClick()
-        awaitDialogGone()
-        // The message keeps its place in the queue and the turn carries on.
-        compose.onNodeWithContentDescription("Send now").assertIsDisplayed()
+        compose.onNodeWithContentDescription(QueueGlyphs.STEER).performClick()
+        compose.waitForIdle()
+        // Nothing to confirm: the turn is not the tap's to stop. The demo has no account to steer through, so the
+        // snackbar says the message goes when the turn ends, and it keeps its place.
+        assertThat(dialogShown()).isFalse()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText(FollowUpRepository.STEER_NEEDS_EXTENDED)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription(QueueGlyphs.STEER).assertIsDisplayed()
         assertThat(api.runRequests).isEmpty()
         assertStillRunning()
-
-        compose.onNodeWithContentDescription("Send now").performClick()
-        compose.waitUntil(10_000) { dialogShown() }
-        compose.onNodeWithTag(RunStopTags.CONFIRM).performClick()
-        compose.waitUntil(10_000) { runId in api.cancelled }
-        compose.waitUntil(10_000) { api.runRequests.any { it.prompt.text == "Also cover the logout redirect" } }
-        awaitDialogGone()
     }
 }

@@ -411,11 +411,11 @@ class PopupMenusScreenshotTest {
                         AccountQueueRows(
                             queue = queue,
                             inFlightIds = emptySet(),
-                            onSendNow = {},
+                            onSteer = {},
                             onRemove = {},
                             onUpdate = { _, _ -> },
                             onEditing = { _, _ -> },
-                            onSteerNow = {},
+                            steers = true,
                             onMove = { _, _ -> },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                         )

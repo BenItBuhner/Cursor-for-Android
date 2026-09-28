@@ -354,7 +354,7 @@ class ImeHardwareEnterTest {
                 AccountQueueRows(
                     queue = listOf(PendingFollowup("fu-1", "Then add a test", 1_000L, AgentSource.GLASS)),
                     inFlightIds = emptySet(),
-                    onSendNow = {},
+                    onSteer = {},
                     onRemove = {},
                     onUpdate = { _, text -> updated += text },
                     onEditing = { _, _ -> },

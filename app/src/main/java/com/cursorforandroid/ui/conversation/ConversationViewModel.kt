@@ -10,6 +10,7 @@ import com.cursorforandroid.data.repo.AgentRepository
 import com.cursorforandroid.data.repo.AttachmentUploads
 import com.cursorforandroid.data.repo.CatchUp
 import com.cursorforandroid.data.repo.ConversationState
+import com.cursorforandroid.data.repo.FollowUpRepository
 import com.cursorforandroid.data.repo.SlashCommandRepository
 import com.cursorforandroid.data.repo.SlashScope
 import com.cursorforandroid.data.repo.TraceStatus
@@ -779,10 +780,21 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     fun removeQueued(id: String) = graph.followUps.remove(agentId, id)
 
     /**
-     * Sends a queued follow-up now: it shows in the transcript as a pending prompt at once, the turn under way is
-     * stopped, and the message goes out ahead of the others. A failure brings it back among the cards with the reason.
+     * A waiting card's up arrow. With a turn under way it steers the message into that turn, never stopping it — in
+     * Extended mode through the account ([FollowUpRepository.steerNow]), the outcome in the snackbar; with no account
+     * to steer through the message keeps its place and the snackbar says it goes when the turn ends. With nothing
+     * running it goes next ([FollowUpRepository.sendNext]).
      */
-    fun steerQueued(id: String) { graph.followUps.sendNow(agentId, id) }
+    fun steerQueued(id: String, turnUnderWay: Boolean) {
+        when {
+            !turnUnderWay -> graph.followUps.sendNext(agentId, id)
+            canSteer() -> control { graph.followUps.steerNow(agentId, id) }
+            else -> toast.value = FollowUpRepository.STEER_NEEDS_EXTENDED
+        }
+    }
+
+    /** Whether a queued message can be steered into the turn under way from here: the account's steering and queue, not the demo. */
+    fun canSteer(): Boolean = capabilities.value.let { it.steering && it.accountQueue } && !graph.session.isDemo
 
     fun retryQueued(id: String) = graph.followUps.retry(agentId, id)
 
@@ -812,8 +824,14 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
 
     fun wake() = control { graph.steering.wake(agentId).map { signalled -> if (signalled) "Waking the agent's machine." else "The machine was already awake." } }
 
-    /** The account's queue: send now (in place of the turn under way), take away, move, reword, or deliver as a steer. */
-    fun queueSendNow(id: String) = control { graph.steering.submitPendingNow(agentId, id).map { null } }
+    /**
+     * The account's queue: steer, take away, move, reword. An account row's up arrow steers the message into the turn
+     * under way (`InjectBackgroundComposerContext` with it promoted), never stopping it; with nothing running it is
+     * sent now (`SubmitPendingFollowupNow`), there being no turn for it to take the place of.
+     */
+    fun queueSteer(id: String, turnUnderWay: Boolean) = control {
+        if (turnUnderWay) graph.steering.promotePending(agentId, id).map { it.message } else graph.steering.submitPendingNow(agentId, id).map { null }
+    }
 
     fun queueDelete(id: String) = control { graph.steering.deletePending(agentId, id).map { null } }
 
@@ -824,8 +842,6 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     }
 
     fun queueMarkEditing(id: String, editing: Boolean) = control { graph.steering.markEditing(agentId, id, editing).map { null } }
-
-    fun queueSteerNow(id: String) = control { graph.steering.promotePending(agentId, id).map { it.message } }
 
     fun refreshQueue() = viewModelScope.launch { graph.steering.refreshQueue(agentId) }
 

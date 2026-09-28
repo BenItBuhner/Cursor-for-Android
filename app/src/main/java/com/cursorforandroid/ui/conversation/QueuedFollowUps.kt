@@ -85,10 +85,11 @@ import com.cursorforandroid.ui.components.onContextClick
  * is one line in the composer's own surface ([dockedCard]: stood in from the box's sides so its corners are concentric
  * with the box's, however many are stacked) — the message verbatim, trailing off where the line ends, its
  * `/commands` painted as the composer painted them ([commandTints]), with the images it carries as small tiles
- * before it — and three small glyphs on the right: remove, edit, send now. Nothing else: a queue should read as a
- * list of what is about to be said, not as a stack of forms. A message that could not be sent shows a warning where
- * its tiles would be and the reason under the message, in red; send-now then retries it. One on its way out shows a
- * ring instead of the glyphs.
+ * before it — and three small glyphs on the right: remove, edit, and the up arrow. Nothing else: a queue should read
+ * as a list of what is about to be said, not as a stack of forms. While a turn is under way ([steers]) the up arrow
+ * steers the message into that turn — never stopping it; with nothing running it sends the message next. A message
+ * that could not be sent shows a warning where its tiles would be and the reason under the message, in red; the up
+ * arrow then retries it. One on its way out shows a ring instead of the glyphs.
  *
  * With [flights], each row is an end of the send's flight (see `SendMotion`): a message sent while the agent is busy
  * lands in its row from the composer, and a row the run takes lifts off the card into its bubble.
@@ -102,11 +103,13 @@ fun QueuedFollowUps(
     onRemove: (QueuedFollowUp) -> Unit,
     modifier: Modifier = Modifier,
     flights: QueueFlights? = null,
+    /** A turn is under way: the up arrow steers into it (and says so) rather than sending next. */
+    steers: Boolean = false,
 ) {
     Column(modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEachIndexed { index, item ->
             key(item.id) {
-                QueuedFollowUpCard(item, index + 1, queue.size, thumbnails, onEdit, onSteer, onRemove, flights)
+                QueuedFollowUpCard(item, index + 1, queue.size, thumbnails, onEdit, onSteer, onRemove, flights, steers = steers)
             }
         }
     }
@@ -124,6 +127,7 @@ internal fun QueuedFollowUpCard(
     onRemove: (QueuedFollowUp) -> Unit,
     flights: QueueFlights?,
     face: QueueCardFace = QueueCardFace.Plain,
+    steers: Boolean = false,
 ) {
     QueuedFollowUpRow(
         item = item,
@@ -136,6 +140,7 @@ internal fun QueuedFollowUpCard(
         motion = LocalSendMotion.current,
         anchor = flights?.anchor(item.id),
         face = face,
+        steers = steers,
     )
 }
 
@@ -155,6 +160,7 @@ private fun QueuedFollowUpRow(
     motion: SendMotion?,
     anchor: ComposerAnchor?,
     face: QueueCardFace,
+    steers: Boolean,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
@@ -213,7 +219,7 @@ private fun QueuedFollowUpRow(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 GlyphButton(CursorIcons.Trash, "Remove queued follow-up", colors.iconTertiary, onRemove)
                 GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", colors.iconTertiary, onEdit)
-                GlyphButton(CursorIcons.ArrowUp, if (item.warning != null) "Retry sending" else "Send now", colors.iconPrimary, onSteer)
+                GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers, retry = item.warning != null), colors.iconPrimary, onSteer)
             }
         }
     }
@@ -256,9 +262,9 @@ private fun HeldNote(item: QueuedFollowUp) {
 
 /**
  * The account's queue for the chat (Extended mode), in the same rows as the device's: what the desktop and the web
- * show above their composers, in the order the server will send it. Each row's glyphs are remove, edit and send
- * now — and, while a turn is under way and steering is on, steer now, which delivers the message into the running
- * turn instead of after it (`InjectBackgroundComposerContext` with the queued message promoted). Edit opens the row
+ * show above their composers, in the order the server will send it. Each row's glyphs are remove, edit and the up
+ * arrow, which — while a turn is under way ([steers]) — steers the message into the running turn instead of after
+ * it, never stopping it (`InjectBackgroundComposerContext` with the queued message promoted). Edit opens the row
  * into a line of its own with save and cancel, the account told meanwhile that the message is being reworded
  * (`MarkFollowupEditing`). With more than one message queued, a row's menu moves it up or down the order
  * (`ReorderPendingFollowup`). A row the account has in flight from here shows a ring instead.
@@ -267,13 +273,13 @@ private fun HeldNote(item: QueuedFollowUp) {
 fun AccountQueueRows(
     queue: List<PendingFollowup>,
     inFlightIds: Set<String>,
-    onSendNow: (PendingFollowup) -> Unit,
+    onSteer: (PendingFollowup) -> Unit,
     onRemove: (PendingFollowup) -> Unit,
     onUpdate: (PendingFollowup, String) -> Unit,
     onEditing: (PendingFollowup, Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    /** Delivers a queued message into the turn under way as a steer; null while nothing is running, or the surface is off. */
-    onSteerNow: ((PendingFollowup) -> Unit)? = null,
+    /** A turn is under way: the up arrow steers into it (and says so). */
+    steers: Boolean = false,
     /** Moves a queued message one place earlier (`up`) or later; null when the order cannot be changed from here. */
     onMove: ((PendingFollowup, up: Boolean) -> Unit)? = null,
     /** The rows as ends of the send's flight, as on [QueuedFollowUps]. */
@@ -282,7 +288,7 @@ fun AccountQueueRows(
     Column(modifier.animateContentSize().testTag("account-queue"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEachIndexed { index, item ->
             key(item.id) {
-                AccountQueueCard(item, index + 1, queue.size, inFlightIds, onSendNow, onRemove, onUpdate, onEditing, onSteerNow, onMove, flights)
+                AccountQueueCard(item, index + 1, queue.size, inFlightIds, onSteer, onRemove, onUpdate, onEditing, steers, onMove, flights)
             }
         }
     }
@@ -295,11 +301,11 @@ internal fun AccountQueueCard(
     position: Int,
     count: Int,
     inFlightIds: Set<String>,
-    onSendNow: (PendingFollowup) -> Unit,
+    onSteer: (PendingFollowup) -> Unit,
     onRemove: (PendingFollowup) -> Unit,
     onUpdate: (PendingFollowup, String) -> Unit,
     onEditing: (PendingFollowup, Boolean) -> Unit,
-    onSteerNow: ((PendingFollowup) -> Unit)?,
+    steers: Boolean,
     onMove: ((PendingFollowup, up: Boolean) -> Unit)?,
     flights: QueueFlights?,
     face: QueueCardFace = QueueCardFace.Plain,
@@ -311,8 +317,8 @@ internal fun AccountQueueCard(
         position = position,
         count = count,
         inFlight = item.id in inFlightIds,
-        onSendNow = { onSendNow(item) },
-        onSteerNow = onSteerNow?.let { steer -> { steer(item) } },
+        onSteer = { onSteer(item) },
+        steers = steers,
         onMove = onMove?.takeIf { count > 1 }?.let { move -> { up -> move(item, up) } },
         onRemove = { onRemove(item) },
         onUpdate = { text -> onUpdate(item, text) },
@@ -329,8 +335,8 @@ private fun AccountQueueRow(
     position: Int,
     count: Int,
     inFlight: Boolean,
-    onSendNow: () -> Unit,
-    onSteerNow: (() -> Unit)?,
+    onSteer: () -> Unit,
+    steers: Boolean,
     onMove: ((Boolean) -> Unit)?,
     onRemove: () -> Unit,
     onUpdate: (String) -> Unit,
@@ -417,10 +423,9 @@ private fun AccountQueueRow(
                             }
                         }
                     }
-                    if (onSteerNow != null) GlyphButton(CursorIcons.Target, "Steer now", colors.iconTertiary, onSteerNow)
                     GlyphButton(CursorIcons.Trash, "Remove queued follow-up", colors.iconTertiary, onRemove)
                     GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", colors.iconTertiary) { text = TextFieldValue(item.text, TextRange(item.text.length)); editing = true; onEditing(true) }
-                    GlyphButton(CursorIcons.ArrowUp, "Send now", colors.iconPrimary, onSendNow)
+                    GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers), colors.iconPrimary, onSteer)
                 }
             }
         }
@@ -527,6 +532,22 @@ private fun AttachedFileNames(names: List<String>, modifier: Modifier = Modifier
         overflow = TextOverflow.Ellipsis,
         modifier = modifier.testTag("queued-attachments"),
     )
+}
+
+/** What a queued row's up arrow is called — its content description — for what a tap on it does now. */
+object QueueGlyphs {
+    /** A turn is under way: the message goes into it, and the turn carries on. */
+    const val STEER = "Steer: send now into this turn"
+    /** Nothing is running: the message goes next. */
+    const val SEND = "Send now"
+    /** The message could not be sent: the tap tries again. */
+    const val RETRY = "Retry sending"
+
+    fun upArrow(steers: Boolean, retry: Boolean = false): String = when {
+        steers -> STEER
+        retry -> RETRY
+        else -> SEND
+    }
 }
 
 /** A bare glyph the size of the composer's chevrons, on a ripple disc no bigger than the row is tall. */

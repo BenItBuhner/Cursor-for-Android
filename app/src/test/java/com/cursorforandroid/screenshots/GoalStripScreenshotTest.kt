@@ -125,11 +125,11 @@ class GoalStripScreenshotTest {
                         AccountQueueRows(
                             queue = listOf(PendingFollowup("fu-1", "Then add a test for the light theme", 1_000L, AgentSource.GLASS)),
                             inFlightIds = emptySet(),
-                            onSendNow = {},
+                            onSteer = {},
                             onRemove = {},
                             onUpdate = { _, _ -> },
                             onEditing = { _, _ -> },
-                            onSteerNow = {},
+                            steers = true,
                             modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                         )
                         ComposerBox(

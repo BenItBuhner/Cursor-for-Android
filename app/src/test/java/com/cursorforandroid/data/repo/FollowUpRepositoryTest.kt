@@ -25,6 +25,7 @@ import com.cursorforandroid.domain.QueuedFollowUp
 import com.cursorforandroid.data.api.ComposerSnapshot
 import com.cursorforandroid.domain.AgentLifecycle
 import com.cursorforandroid.domain.RunStatus
+import com.cursorforandroid.domain.SteerOutcome
 import com.cursorforandroid.domain.UserMessage
 import com.cursorforandroid.util.AppClock
 import com.cursorforandroid.util.HeldSettings
@@ -423,6 +424,124 @@ class FollowUpRepositoryTest {
         assertThat(handed).hasSize(1)
         val diagnostics = followUps.sendDiagnostics("bc-1")!!
         assertThat(diagnostics.attempts.map { it.outcome }).containsExactly("busy", "queued-on-account").inOrder()
+    }
+
+    /** The account's side of a steer, as a fake: what was handed over and promoted, and whether either refuses. */
+    private class FakeSteering(var failHandOff: Boolean = false, var failPromote: Boolean = false) : FollowUpRepository.AccountSteering {
+        val handed = mutableListOf<String>()
+        val promoted = mutableListOf<String>()
+        override suspend fun handOff(agentId: String, item: QueuedFollowUp): FollowUpRepository.AccountHandoff {
+            if (failHandOff) error("account unreachable")
+            handed += item.previewText
+            return FollowUpRepository.AccountHandoff(null, "fu-${handed.size}")
+        }
+
+        override suspend fun promote(agentId: String, followupId: String): SteerOutcome {
+            if (failPromote) error("rejected")
+            promoted += followupId
+            return SteerOutcome.QUEUED
+        }
+    }
+
+    private fun steeringRepository(steering: FollowUpRepository.AccountSteering?) = FollowUpRepository(
+        conversations, agents, hub,
+        mcpServers = { emptyList() },
+        accountQueueAvailable = { steering != null },
+        accountSteering = steering,
+        scope = scope,
+        draftSaveDelayMs = 10,
+        idleSettleMs = 20_000,
+        retryBaseMs = 20,
+    )
+
+    @Test
+    fun `steering a queued message mid-turn hands it to the account and promotes it into the turn, cancelling nothing`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val steering = FakeSteering()
+        val followUps = steeringRepository(steering)
+        followUps.enqueue("bc-1", "First in line")
+        val item = followUps.enqueue("bc-1", "Also check the release build")
+
+        val result = followUps.steerNow("bc-1", item.id)
+
+        assertThat(result.isSuccess).isTrue()
+        assertThat(steering.handed).containsExactly("Also check the release build")
+        assertThat(steering.promoted).containsExactly("fu-1")
+        assertThat(followUps.state("bc-1").value.queue.map { it.text }).containsExactly("First in line")
+        delay(200)
+        assertThat(api.cancelled).isEmpty()
+        assertThat(api.runRequests).isEmpty()
+        assertThat(agents.agent("bc-1")?.isRunning).isTrue()
+        assertThat(followUps.sendDiagnostics("bc-1")!!.attempts.map { it.outcome }).contains("steered")
+    }
+
+    @Test
+    fun `a steer the account will not promote leaves the message on the account's queue, and still cancels nothing`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val steering = FakeSteering(failPromote = true)
+        val followUps = steeringRepository(steering)
+        val item = followUps.enqueue("bc-1", "Steer me")
+
+        val result = followUps.steerNow("bc-1", item.id)
+
+        assertThat(result.exceptionOrNull()?.message).contains("waits on your account's queue")
+        assertThat(steering.handed).containsExactly("Steer me")
+        assertThat(followUps.state("bc-1").value.queue).isEmpty()
+        assertThat(api.cancelled).isEmpty()
+        assertThat(api.runRequests).isEmpty()
+    }
+
+    @Test
+    fun `a steer the account never takes puts the message back on the device's queue with the reason`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val followUps = steeringRepository(FakeSteering(failHandOff = true))
+        val item = followUps.enqueue("bc-1", "Steer me")
+
+        assertThat(followUps.steerNow("bc-1", item.id).isFailure).isTrue()
+
+        val back = followUps.state("bc-1").value.queue.single()
+        assertThat(back.id).isEqualTo(item.id)
+        assertThat(back.isSending).isFalse()
+        assertThat(back.error).isNotNull()
+        assertThat(api.cancelled).isEmpty()
+    }
+
+    @Test
+    fun `without the account there is no steer - the message waits for the turn's end and nothing is stopped`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val followUps = steeringRepository(null)
+        val item = followUps.enqueue("bc-1", "Steer me")
+
+        assertThat(followUps.steerNow("bc-1", item.id).exceptionOrNull()?.message).isEqualTo(FollowUpRepository.STEER_NEEDS_EXTENDED)
+        delay(200)
+
+        assertThat(followUps.state("bc-1").value.queue.map { it.id }).containsExactly(item.id)
+        assertThat(api.cancelled).isEmpty()
+        assertThat(api.runRequests).isEmpty()
+    }
+
+    @Test
+    fun `send next puts a queued message first in line and never stops the turn`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val followUps = repository()
+        followUps.enqueue("bc-1", "One")
+        val two = followUps.enqueue("bc-1", "Two")
+
+        assertThat(followUps.sendNext("bc-1", two.id)).isTrue()
+        assertThat(followUps.sendNext("bc-1", "gone")).isFalse()
+        delay(200)
+
+        assertThat(followUps.state("bc-1").value.queue.map { it.text }).containsExactly("Two", "One").inOrder()
+        assertThat(api.cancelled).isEmpty()
+        assertThat(api.runRequests).isEmpty()
+        awaitUntil { streamer.connections.contains("run-1") }
+        finish("run-1")
+        awaitUntil { sent().firstOrNull() == "Two" }
     }
 
     @Test

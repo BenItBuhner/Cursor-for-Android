@@ -75,7 +75,7 @@ class DockedCardsTest {
                     AccountQueueRows(
                         queue = listOf(PendingFollowup("fu-1", "And a changelog line under Unreleased", 1_000L, AgentSource.GLASS)),
                         inFlightIds = emptySet(),
-                        onSendNow = {},
+                        onSteer = {},
                         onRemove = {},
                         onUpdate = { _, _ -> },
                         onEditing = { _, _ -> },

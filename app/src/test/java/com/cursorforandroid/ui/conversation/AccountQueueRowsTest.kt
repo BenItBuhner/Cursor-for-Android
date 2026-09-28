@@ -32,9 +32,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * The account's queue above the composer (Extended mode): one row per queued follow-up with send now, steer now
- * while a turn can be steered, remove, edit, and the reorder menu once there is an order to change — the queue where
- * Cursor's own clients keep it, not a panel section.
+ * The account's queue above the composer (Extended mode): one row per queued follow-up with remove, edit, the up
+ * arrow — which steers into the turn under way while there is one, and sends now while there is not — and the
+ * reorder menu once there is an order to change; no other glyph steers. The queue where Cursor's own clients keep
+ * it, not a panel section.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -50,7 +51,7 @@ class AccountQueueRowsTest {
     )
 
     private val acted = mutableListOf<String>()
-    private var steerable by mutableStateOf(true)
+    private var steers by mutableStateOf(true)
     private var inFlight by mutableStateOf(emptySet<String>())
     private var rows by mutableStateOf(queue)
 
@@ -60,11 +61,11 @@ class AccountQueueRowsTest {
                 AccountQueueRows(
                     queue = rows,
                     inFlightIds = inFlight,
-                    onSendNow = { acted += "now:${it.id}" },
+                    onSteer = { acted += "arrow:${it.id}" },
                     onRemove = { acted += "remove:${it.id}" },
                     onUpdate = { item, text -> acted += "update:${item.id}:$text" },
                     onEditing = { item, editing -> acted += "editing:${item.id}:$editing" },
-                    onSteerNow = if (steerable) ({ acted += "steer:${it.id}" }) else null,
+                    steers = steers,
                     onMove = if (reorder) ({ item, up -> acted += "move:${item.id}:${if (up) "up" else "down"}" }) else null,
                 )
             }
@@ -77,30 +78,35 @@ class AccountQueueRowsTest {
         compose.onNodeWithTag("account-queue-edit").fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
 
     @Test
-    fun `each row carries send now, steer now, remove and edit, and none of them overlap`() {
+    fun `each row carries remove, edit and the up arrow that steers, and none of them overlap`() {
         show()
         assertThat(compose.onAllNodesWithTag("account-queue-row").fetchSemanticsNodes()).hasSize(2)
         assertThat(shown("Then add a test for the light theme")).isTrue()
         assertThat(shown("Being edited on another device")).isTrue()
-        compose.onAllNodesWithContentDescription("Send now")[0].performClick()
-        compose.onAllNodesWithContentDescription("Steer now")[1].performClick()
+        compose.onAllNodesWithContentDescription(QueueGlyphs.STEER)[0].performClick()
+        compose.onAllNodesWithContentDescription(QueueGlyphs.STEER)[1].performClick()
         compose.onAllNodesWithContentDescription("Remove queued follow-up")[1].performClick()
-        assertThat(acted).containsExactly("now:fu-1", "steer:fu-2", "remove:fu-2").inOrder()
+        assertThat(acted).containsExactly("arrow:fu-1", "arrow:fu-2", "remove:fu-2").inOrder()
 
-        val glyphs = listOf("Reorder queued follow-up", "Steer now", "Remove queued follow-up", "Edit queued follow-up", "Send now")
+        val glyphs = listOf("Reorder queued follow-up", "Remove queued follow-up", "Edit queued follow-up", QueueGlyphs.STEER)
             .map { compose.onAllNodesWithContentDescription(it)[0].fetchSemanticsNode().boundsInRoot }
         for (i in glyphs.indices) for (j in i + 1 until glyphs.size) assertThat(glyphs[i].intersects(glyphs[j])).isFalse()
     }
 
     @Test
-    fun `steer now is only there while the turn can be steered`() {
+    fun `the target glyph is gone - the up arrow is the steer while a turn runs, and send now while none does`() {
         show()
-        assertThat(compose.onAllNodesWithContentDescription("Steer now").fetchSemanticsNodes()).hasSize(2)
-        steerable = false
-        compose.waitForIdle()
+        // Four glyphs a row, as before the steer moved onto the arrow less one: reorder, remove, edit, the arrow.
         assertThat(compose.onAllNodesWithContentDescription("Steer now").fetchSemanticsNodes()).isEmpty()
-        // Send now stays: it interrupts the turn rather than steering it.
-        assertThat(compose.onAllNodesWithContentDescription("Send now").fetchSemanticsNodes()).hasSize(2)
+        assertThat(compose.onAllNodesWithContentDescription(QueueGlyphs.STEER).fetchSemanticsNodes()).hasSize(2)
+        assertThat(compose.onAllNodesWithContentDescription(QueueGlyphs.SEND).fetchSemanticsNodes()).isEmpty()
+        steers = false
+        compose.waitForIdle()
+        assertThat(compose.onAllNodesWithContentDescription(QueueGlyphs.STEER).fetchSemanticsNodes()).isEmpty()
+        assertThat(compose.onAllNodesWithContentDescription(QueueGlyphs.SEND).fetchSemanticsNodes()).hasSize(2)
+        assertThat(compose.onAllNodesWithContentDescription("Steer now").fetchSemanticsNodes()).isEmpty()
+        compose.onAllNodesWithContentDescription(QueueGlyphs.SEND)[0].performClick()
+        assertThat(acted).containsExactly("arrow:fu-1")
     }
 
     @Test
@@ -166,7 +172,7 @@ class AccountQueueRowsTest {
         inFlight = setOf("fu-1")
         show(reorder = false)
         assertThat(compose.onAllNodesWithContentDescription("Sending").fetchSemanticsNodes()).hasSize(1)
-        assertThat(compose.onAllNodesWithContentDescription("Send now").fetchSemanticsNodes()).hasSize(1)
+        assertThat(compose.onAllNodesWithContentDescription(QueueGlyphs.STEER).fetchSemanticsNodes()).hasSize(1)
         assertThat(compose.onAllNodesWithContentDescription("Reorder queued follow-up").fetchSemanticsNodes()).isEmpty()
     }
 

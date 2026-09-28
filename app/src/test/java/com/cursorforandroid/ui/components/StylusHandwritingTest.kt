@@ -107,7 +107,7 @@ class StylusHandwritingTest {
                             AccountQueueRows(
                                 queue = listOf(PendingFollowup("fu-1", "Then add a test for the light theme")),
                                 inFlightIds = emptySet(),
-                                onSendNow = {},
+                                onSteer = {},
                                 onRemove = {},
                                 onUpdate = { _, _ -> },
                                 onEditing = { _, _ -> },

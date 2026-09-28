@@ -81,6 +81,8 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
     val waiting = mutableStateListOf<PendingFollowup>()
     /** The [waiting] rows whose request is still out. */
     val sending = mutableStateListOf<String>()
+    /** The queued rows whose up arrow was tapped: a steer into the running turn, which the run goes on through. */
+    val steered = mutableListOf<String>()
     private val thumbnails = mutableStateMapOf<String, ImageBitmap>()
     var scrolledAway = false
     /** The reader's choice for a long queue, as the device keeps it (`PreferencesStore.queueStacked`): stacked unless opened. */
@@ -141,10 +143,10 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
                                     animationSpec = stackSpec ?: StackSpring,
                                 ) { index, face ->
                                     if (index < device.size) {
-                                        QueuedFollowUpCard(device[index], index + 1, device.size, thumbnails.toMap(), {}, {}, { removed -> flights.dismiss(removed.id); queue.remove(removed) }, flights, face)
+                                        QueuedFollowUpCard(device[index], index + 1, device.size, thumbnails.toMap(), {}, { steered += it.id }, { removed -> flights.dismiss(removed.id); queue.remove(removed) }, flights, face, steers = true)
                                     } else {
                                         val at = index - device.size
-                                        AccountQueueCard(onCard[at], at + 1, onCard.size, card.inFlightQueueIds, {}, {}, { _, _ -> }, { _, _ -> }, null, null, flights, face)
+                                        AccountQueueCard(onCard[at], at + 1, onCard.size, card.inFlightQueueIds, { steered += it.id }, {}, { _, _ -> }, { _, _ -> }, true, null, flights, face)
                                     }
                                 }
                             }
