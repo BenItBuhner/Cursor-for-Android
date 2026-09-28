@@ -5,12 +5,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cursorforandroid.MainActivity
 import com.cursorforandroid.appGraph
 import com.cursorforandroid.data.api.CursorEndpoints
 import com.cursorforandroid.ui.compose.NewAgentViewModel
+import com.cursorforandroid.ui.shortcuts.LocalShortcutBindings
+import com.cursorforandroid.ui.shortcuts.ShortcutBindings
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import androidx.core.net.toUri
@@ -41,15 +44,18 @@ class QuickComposerActivity : ComponentActivity() {
             val themeMode by graph.prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.System)
             val oledBlack by graph.prefs.oledBlack.collectAsStateWithLifecycle(initialValue = false)
             // The window stays translucent: the launcher shows through the scrim around the sheet.
+            val shortcutBindings by graph.prefs.shortcutBindings.collectAsStateWithLifecycle(initialValue = ShortcutBindings.Defaults)
             CursorTheme(mode = themeMode, oledBlack = oledBlack, paintWindow = false) {
-                QuickComposerHost(
-                    graph = graph,
-                    onComposer = { composer = it },
-                    onDismiss = ::dismiss,
-                    onCancel = ::cancel,
-                    onOpened = ::openChat,
-                    onOpenApp = ::openApp,
-                )
+                CompositionLocalProvider(LocalShortcutBindings provides shortcutBindings) {
+                    QuickComposerHost(
+                        graph = graph,
+                        onComposer = { composer = it },
+                        onDismiss = ::dismiss,
+                        onCancel = ::cancel,
+                        onOpened = ::openChat,
+                        onOpenApp = ::openApp,
+                    )
+                }
             }
         }
     }

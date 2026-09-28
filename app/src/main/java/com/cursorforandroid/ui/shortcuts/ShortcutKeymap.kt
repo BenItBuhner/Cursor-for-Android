@@ -5,7 +5,7 @@ import android.view.KeyEvent
 
 /** What a chord on a hardware keyboard asks the app for (see [ShortcutKeymap]). */
 sealed interface ShortcutAction {
-    /** Ctrl+F or Ctrl+K: the search palette over chats, Projects and the transcripts kept on this device. */
+    /** Ctrl+F or Ctrl+K (out of the box; see [ShortcutBindings]): the search palette over chats, Projects and the transcripts kept on this device. */
     data object Search : ShortcutAction
 
     /** Ctrl+Tab: the quick switcher, one step further back through the recent chats each press. */
@@ -43,36 +43,40 @@ sealed interface ShortcutAction {
 }
 
 /**
- * The app's chords. Ctrl alone is the modifier, as on desktop Cursor under Windows and Linux; with Alt or Meta held too
- * the chord is not the app's, and neither is any Ctrl chord a text field answers (A, C, V, X, Z, Y, the arrows,
- * Backspace, Home, End), none of which is listed here.
+ * The app's chords. Ctrl+Tab, Ctrl+Shift+Tab and Ctrl+1 … Ctrl+0 are fixed; every other shortcut is on the keys
+ * [bindings][ShortcutBindings] puts it on — Ctrl chords out of the box, as on desktop Cursor under Windows and Linux,
+ * and Ctrl or Alt chords once moved. A Meta chord is never the app's, and neither is any Ctrl chord a text field
+ * answers (A, C, V, X, Z, Y, the arrows, Backspace, Home, End), which [ShortcutRules] keeps any shortcut off.
  */
 object ShortcutKeymap {
-    fun action(keyCode: Int, ctrl: Boolean, shift: Boolean, alt: Boolean = false, meta: Boolean = false): ShortcutAction? {
-        if (!ctrl || alt || meta) return null
-        digit(keyCode)?.let { return if (shift) null else ShortcutAction.OpenRailItem(if (it == 0) 9 else it - 1) }
-        return when (keyCode) {
-            KeyEvent.KEYCODE_F, KeyEvent.KEYCODE_K -> ShortcutAction.Search.takeUnless { shift }
-            KeyEvent.KEYCODE_TAB -> if (shift) ShortcutAction.SwitchPrevious else ShortcutAction.SwitchNext
-            KeyEvent.KEYCODE_B -> if (shift) ShortcutAction.TogglePanel else ShortcutAction.ToggleSidebar
-            KeyEvent.KEYCODE_N -> if (shift) ShortcutAction.NewProject else ShortcutAction.NewChat
-            KeyEvent.KEYCODE_COMMA -> ShortcutAction.OpenSettings.takeUnless { shift }
-            // Ctrl+Shift+? is Ctrl+Shift+/ on the layouts that put ? over /.
-            KeyEvent.KEYCODE_SLASH -> ShortcutAction.ShowShortcuts
-            KeyEvent.KEYCODE_R -> if (shift) ShortcutAction.ReloadTranscript else ShortcutAction.CatchUp
-            else -> null
+    fun action(
+        keyCode: Int,
+        ctrl: Boolean,
+        shift: Boolean,
+        alt: Boolean = false,
+        meta: Boolean = false,
+        bindings: ShortcutBindings = ShortcutBindings.Defaults,
+    ): ShortcutAction? {
+        if (meta || (!ctrl && !alt)) return null
+        if (ctrl && !alt) {
+            digit(keyCode)?.let { if (!shift) return ShortcutAction.OpenRailItem(if (it == 0) 9 else it - 1) }
+            if (keyCode == KeyEvent.KEYCODE_TAB) return if (shift) ShortcutAction.SwitchPrevious else ShortcutAction.SwitchNext
         }
+        return bindings.owner(KeyChord(keyCode, ctrl, shift, alt))?.action
     }
 
     /** Held down, the switcher keeps stepping as the key repeats; every other chord acts once however long it is held. */
     fun repeats(action: ShortcutAction): Boolean = action == ShortcutAction.SwitchNext || action == ShortcutAction.SwitchPrevious
 
     /**
-     * The chords of the app's that an open popover answers itself (`Modifier.popoverKeys`: Ctrl+N down and Ctrl+K up,
-     * as in the desktop's menus), left to it while it is open along with Esc. Ctrl+Tab stays the app's: the popover
-     * picks on Tab, but a held Ctrl is the switcher's.
+     * The chords an open popover answers itself (`Modifier.popoverKeys`: Ctrl+N or Ctrl+J down and Ctrl+P or Ctrl+K up,
+     * as in the desktop's menus), left to it while it is open along with Esc, whichever shortcut they are on. Ctrl+Tab
+     * stays the app's: the popover picks on Tab, but a held Ctrl is the switcher's.
      */
-    fun yieldsToPopover(keyCode: Int): Boolean = keyCode == KeyEvent.KEYCODE_N || keyCode == KeyEvent.KEYCODE_K
+    fun yieldsToPopover(keyCode: Int, ctrl: Boolean = true, meta: Boolean = false): Boolean =
+        ctrl && !meta && keyCode in POPOVER_KEYS
+
+    private val POPOVER_KEYS = setOf(KeyEvent.KEYCODE_N, KeyEvent.KEYCODE_J, KeyEvent.KEYCODE_P, KeyEvent.KEYCODE_K)
 
     private fun digit(keyCode: Int): Int? = when (keyCode) {
         in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> keyCode - KeyEvent.KEYCODE_0

@@ -53,6 +53,9 @@ interface ShortcutHandler {
 class KeyboardShortcuts(private val scope: CoroutineScope, private val holdMillis: Long = NUMBERS_AFTER_MILLIS) {
     var handler: ShortcutHandler? = null
 
+    /** The keys each shortcut is on, as saved in Settings › Keyboard shortcuts; handed in by the shell. */
+    var bindings: ShortcutBindings by mutableStateOf(ShortcutBindings.Defaults)
+
     /** Ctrl has been held on its own long enough for the sidebar's rows to show their numbers. */
     var showNumbers by mutableStateOf(false)
         private set
@@ -62,8 +65,25 @@ class KeyboardShortcuts(private val scope: CoroutineScope, private val holdMilli
     private val taken = HashSet<Int>()
     private var popovers = 0
 
+    /** Where every hardware key goes while Settings waits for a shortcut's new keys (see [capture]). */
+    private var capturer: ((KeyEvent) -> Boolean)? = null
+
     /** The key [onKeyEventPreIme] read and let go on to the IME, for the activity not to read it a second time. */
     private var declined: KeyStamp? = null
+
+    /**
+     * Every key from a hardware keyboard goes to [onKey] and nothing else, Esc and the app's own chords included, until
+     * the returned release is called: Settings is waiting for the keys a shortcut is to move to, and a chord pressed
+     * for that must not also do what it does today. A Ctrl held as it starts is let go of, so no switcher or numbers
+     * wait on it.
+     */
+    fun capture(onKey: (KeyEvent) -> Boolean): () -> Unit {
+        if (ctrlHeld || showNumbers) release(commit = false)
+        capturer = onKey
+        return { if (capturer === onKey) capturer = null }
+    }
+
+    private fun captured(event: KeyEvent): Boolean? = capturer?.takeIf { event.isFromHardwareKeyboard }?.invoke(event)
 
     /**
      * A popover in the focused field opened that answers Esc, Ctrl+N and Ctrl+K itself (the composer's `/` popover,
@@ -87,6 +107,7 @@ class KeyboardShortcuts(private val scope: CoroutineScope, private val holdMilli
      */
     fun onKeyEventPreIme(event: KeyEvent): Boolean {
         declined = null
+        captured(event)?.let { return it }
         if (event.keyCode == KeyEvent.KEYCODE_ESCAPE) return false
         return read(event).also { taken -> if (!taken) declined = KeyStamp.of(event) }
     }
@@ -94,7 +115,8 @@ class KeyboardShortcuts(private val scope: CoroutineScope, private val holdMilli
     fun onKeyEvent(event: KeyEvent): Boolean {
         val seen = declined == KeyStamp.of(event)
         declined = null
-        return if (seen) false else read(event)
+        if (seen) return false
+        return captured(event) ?: read(event)
     }
 
     private fun read(event: KeyEvent): Boolean {
@@ -126,12 +148,12 @@ class KeyboardShortcuts(private val scope: CoroutineScope, private val holdMilli
         if (event.isCtrlPressed && !isModifier(code) && !showNumbers) holdJob?.cancel()
 
         val escape = code == KeyEvent.KEYCODE_ESCAPE && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed
-        if (popovers > 0 && (escape || ShortcutKeymap.yieldsToPopover(code))) return false
+        if (popovers > 0 && (escape || ShortcutKeymap.yieldsToPopover(code, event.isCtrlPressed, event.isMetaPressed))) return false
         if (escape) {
             if (event.repeatCount > 0) return code in taken
             return take(code, handler?.onEscape() == true)
         }
-        val action = ShortcutKeymap.action(code, event.isCtrlPressed, event.isShiftPressed, event.isAltPressed, event.isMetaPressed) ?: return false
+        val action = ShortcutKeymap.action(code, event.isCtrlPressed, event.isShiftPressed, event.isAltPressed, event.isMetaPressed, bindings) ?: return false
         if (event.repeatCount > 0 && !ShortcutKeymap.repeats(action)) return code in taken
         return take(code, handler?.onShortcut(action) == true)
     }

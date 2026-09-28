@@ -74,14 +74,17 @@ import com.cursorforandroid.ui.settings.WhatsNewScreen
 import com.cursorforandroid.ui.share.ShareDestinationScreen
 import com.cursorforandroid.ui.shortcuts.LocalChatShortcuts
 import com.cursorforandroid.ui.shortcuts.LocalKeyboardShortcuts
+import com.cursorforandroid.ui.shortcuts.LocalShortcutBindings
 import com.cursorforandroid.ui.shortcuts.LocalTranscriptFocus
 import com.cursorforandroid.ui.shortcuts.PaletteMode
 import com.cursorforandroid.ui.shortcuts.ShortcutAction
+import com.cursorforandroid.ui.shortcuts.ShortcutBindings
 import com.cursorforandroid.ui.shortcuts.ShortcutHandler
 import com.cursorforandroid.ui.shortcuts.shortcutsBeforeIme
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /** The hosting activity through any number of wrappers (a themed context, a display context); null outside one. */
@@ -162,6 +165,13 @@ internal fun AppShell(
     // The activity's hardware-keyboard reader (see MainActivity.dispatchKeyEvent and the shell's pre-IME node below);
     // null where the shell is composed without one, which leaves every key to the views.
     val keyboard = LocalKeyboardShortcuts.current
+    // Settings › Keyboard shortcuts: the keys the reader answers, the composer's own chord and the cheat sheet read.
+    // On the main dispatcher for the reason Settings' switches are (see SettingsScreen).
+    val shortcutBindings by graph.prefs.shortcutBindings.collectAsStateWithLifecycle(
+        initialValue = ShortcutBindings.Defaults,
+        context = Dispatchers.Main.immediate,
+    )
+    SideEffect { keyboard?.bindings = shortcutBindings }
     val shortcuts = remember { ShellShortcuts() }
     LaunchedEffect(selectedAgentId) { selectedAgentId?.let(shortcuts::visit) }
     val mediaViewer = rememberMediaViewerState()
@@ -529,7 +539,11 @@ internal fun AppShell(
                     )
                     // A page of its own under Settings (or the sidebar's card); back is the stack's in either layout.
                     Screen.WhatsNew -> WhatsNewScreen(graph = graph, onBack = { stack.pop() })
-                    Screen.KeyboardShortcuts -> KeyboardShortcutsScreen(onBack = { stack.pop() })
+                    Screen.KeyboardShortcuts -> KeyboardShortcutsScreen(
+                        bindings = LocalShortcutBindings.current,
+                        onChange = { bindings -> scope.launch { graph.prefs.setShortcutBindings(bindings) } },
+                        onBack = { stack.pop() },
+                    )
                     is Screen.Agent -> ConversationScreen(
                         graph = graph,
                         agentId = screen.id,
@@ -676,7 +690,11 @@ internal fun AppShell(
     // Every layer of the shell under one node that reads the keys before the IME does: with a field focused anywhere
     // in it — the composer, the palette's, the sidebar's search — the keyboard app is handed the key after the shell.
     Box(Modifier.fillMaxSize().shortcutsBeforeIme(keyboard)) {
-        CompositionLocalProvider(LocalChatShortcuts provides shortcuts.chats, LocalTranscriptFocus provides shortcuts.transcriptFocus) {
+        CompositionLocalProvider(
+            LocalChatShortcuts provides shortcuts.chats,
+            LocalTranscriptFocus provides shortcuts.transcriptFocus,
+            LocalShortcutBindings provides shortcutBindings,
+        ) {
             // The media viewer is a layer over the whole shell — sidebar, chat and panel alike, in either layout — so
             // a figure opens over all of it, and the open viewer rides out the swap between the layouts like the pane.
             MediaViewerHost(state = mediaViewer, loader = graph.media, saves = graph.mediaSaves) {
@@ -714,7 +732,9 @@ internal fun AppShell(
                 }
             }
         }
-        PaletteHost(shortcuts, listState, graph.transcriptSearch) { entry, hit -> byKey { openFromKeyboard(entry.agentId, hit) } }
+        CompositionLocalProvider(LocalShortcutBindings provides shortcutBindings) {
+            PaletteHost(shortcuts, listState, graph.transcriptSearch) { entry, hit -> byKey { openFromKeyboard(entry.agentId, hit) } }
+        }
 
         if (customizeOpen) {
             CustomizeSheet(viewModel = agentsViewModel, onDismiss = { customizeOpen = false })

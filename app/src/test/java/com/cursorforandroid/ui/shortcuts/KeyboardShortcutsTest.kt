@@ -52,10 +52,11 @@ class KeyboardShortcutsTest {
     /** Each key its own moment, as the platform stamps them. */
     private var eventTime = 0L
 
-    private fun key(action: Int, code: Int, ctrl: Boolean = false, shift: Boolean = false, repeat: Int = 0, soft: Boolean = false, right: Boolean = false): KeyEvent {
+    private fun key(action: Int, code: Int, ctrl: Boolean = false, shift: Boolean = false, repeat: Int = 0, soft: Boolean = false, right: Boolean = false, alt: Boolean = false): KeyEvent {
         var meta = 0
         if (ctrl) meta = meta or KeyEvent.META_CTRL_ON or (if (right) KeyEvent.META_CTRL_RIGHT_ON else KeyEvent.META_CTRL_LEFT_ON)
         if (shift) meta = meta or KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
+        if (alt) meta = meta or KeyEvent.META_ALT_ON or KeyEvent.META_ALT_LEFT_ON
         val deviceId = if (soft) KeyCharacterMap.VIRTUAL_KEYBOARD else 7
         val flags = if (soft) KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE else 0
         val at = ++eventTime
@@ -354,6 +355,60 @@ class KeyboardShortcutsTest {
         throughIme(key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_CTRL_LEFT))
         assertThat(keys.showNumbers).isFalse()
         assertThat(handler.releases).containsExactly(true)
+    }
+
+    @Test
+    fun `a shortcut moved in Settings answers on its new keys, and its old keys do nothing`() {
+        keys.bindings = ShortcutBindings.Defaults.assign(Shortcut.ToggleSidebar, KeyChord.ctrl(KeyEvent.KEYCODE_J))
+        assertThat(chord(KeyEvent.KEYCODE_B)).isEqualTo(false to false)
+        assertThat(chord(KeyEvent.KEYCODE_J)).isEqualTo(true to true)
+        assertThat(handler.actions).containsExactly(ShortcutAction.ToggleSidebar)
+    }
+
+    @Test
+    fun `a shortcut moved onto an Alt chord answers on it, before the IME too`() {
+        keys.bindings = ShortcutBindings.Defaults.assign(Shortcut.CatchUp, KeyChord(KeyEvent.KEYCODE_U, alt = true))
+        assertThat(throughIme(key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_U, alt = true))).isTrue()
+        assertThat(throughIme(key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_U, alt = true))).isTrue()
+        assertThat(throughIme(key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_R, ctrl = true))).isFalse()
+        assertThat(handler.actions).containsExactly(ShortcutAction.CatchUp)
+    }
+
+    @Test
+    fun `swapped shortcuts each answer on the other's keys`() {
+        keys.bindings = ShortcutBindings.Defaults.assign(Shortcut.CatchUp, KeyChord.ctrl(KeyEvent.KEYCODE_B), ConflictResolution.Swap)
+        chord(KeyEvent.KEYCODE_B)
+        chord(KeyEvent.KEYCODE_R)
+        assertThat(handler.actions).containsExactly(ShortcutAction.CatchUp, ShortcutAction.ToggleSidebar).inOrder()
+    }
+
+    @Test
+    fun `while Settings waits for new keys every hardware key goes to it and nothing fires`() {
+        val seen = mutableListOf<Int>()
+        ctrlDown()
+        val release = keys.capture { seen += it.keyCode; true }
+        assertThat(chord(KeyEvent.KEYCODE_B)).isEqualTo(true to true)
+        assertThat(throughIme(key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_N, ctrl = true))).isTrue()
+        assertThat(escape()).isEqualTo(true to true)
+        assertThat(handler.actions).isEmpty()
+        assertThat(handler.escapes).isEqualTo(0)
+        assertThat(seen).containsAtLeast(KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_N, KeyEvent.KEYCODE_ESCAPE)
+        elapse(KeyboardShortcuts.NUMBERS_AFTER_MILLIS)
+        assertThat(keys.showNumbers).isFalse()
+
+        release()
+        seen.clear()
+        assertThat(chord(KeyEvent.KEYCODE_B)).isEqualTo(true to true)
+        assertThat(handler.actions).containsExactly(ShortcutAction.ToggleSidebar)
+        assertThat(seen).isEmpty()
+    }
+
+    @Test
+    fun `the on-screen keyboard's keys pass a capture by`() {
+        var seen = 0
+        keys.capture { seen++; true }
+        assertThat(chord(KeyEvent.KEYCODE_F, soft = true)).isEqualTo(false to false)
+        assertThat(seen).isEqualTo(0)
     }
 
     @Test
