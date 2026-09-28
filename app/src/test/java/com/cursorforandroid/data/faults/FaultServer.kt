@@ -215,6 +215,8 @@ class FaultServer(
     val composerReads = CopyOnWriteArrayList<String>()
     /** The account's list, by id; served newest first (see [Composer.activityMs]). */
     val composers: MutableMap<String, Composer> = ConcurrentHashMap()
+    /** Chats the account's state calls a Project's root whatever their prompts' mode: a coordinator whose newest turns are all injected reports. */
+    val rootProjects: MutableSet<String> = ConcurrentHashMap.newKeySet()
     /** `ListWorkersForManager`: each coordinator's workers, as (workerId, spawnKind). */
     val workers: MutableMap<String, List<Pair<String, String>>> = ConcurrentHashMap()
     /**
@@ -818,8 +820,8 @@ class FaultServer(
             """{"durationMs":"${run?.durationMs ?: 0}","timestampMs":"$ended"}"""
         }
         val ids = record.turnIds.joinToString(",") { "\"$it\"" }
-        // A Project's root when its prompts were sent in Project mode, as the account marks it.
-        val root = records[agentId].orEmpty().any { step -> (step["humanMessage"] as? JsonObject)?.get("agentMode")?.jsonPrimitive?.contentOrNull == "AGENT_MODE_PROJECT" }
+        // A Project's root when its prompts were sent in Project mode, as the account marks it, or when the test says so.
+        val root = agentId in rootProjects || records[agentId].orEmpty().any { step -> (step["humanMessage"] as? JsonObject)?.get("agentMode")?.jsonPrimitive?.contentOrNull == "AGENT_MODE_PROJECT" }
         """{"turns":[$ids],"turnTimings":[$timings]${if (root) ",\"isRootProjectConversation\":true" else ""}}"""
     }
 
