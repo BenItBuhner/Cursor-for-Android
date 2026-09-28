@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composition
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ExperimentalComposeRuntimeApi
 import androidx.compose.runtime.RecomposeScope
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.tooling.CompositionData
@@ -146,7 +147,7 @@ class ChatKeystrokeScopeTest {
             val root = currentComposer.composition
             remember(root) { root.observe(rec) }
             val d = currentComposer.compositionData
-            remember { data = d }
+            SideEffect { data = d }
             CursorTheme(mode = ThemeMode.Dark) {
                 CompositionLocalProvider(LocalRippleConfiguration provides null) {
                     SendMotionHost { ConversationScreen(graph, agentId, onBack = {}) }
