@@ -107,6 +107,20 @@ class ClosedPanelCostTest {
 
     private fun frames(count: Int) = repeat(count) { frame() }
 
+    /** Frames until the screen has recomposed nothing for 30 in a row, the work off the main thread given time to land. */
+    private fun settle(recompositions: Recompositions) {
+        var still = 0
+        var total = 0
+        while (still < 30 && total < 600) {
+            val scopes = recompositions.scopes
+            Thread.sleep(10)
+            frame()
+            if (recompositions.scopes == scopes) still++ else still = 0
+            total++
+        }
+        assertThat(still).isAtLeast(30)
+    }
+
     private fun emit(vararg events: RunStreamEvent) = runBlocking { events.forEach { streamer.emit(live, it) } }
 
     @Test
@@ -161,7 +175,8 @@ class ClosedPanelCostTest {
         compose.waitUntil(10_000) { graph.conversations.state(agentId).value.items.toString().contains("File139.kt") }
         assertThat(panel.state.value).isSameInstanceAs(folded)
 
-        // What only the panel reads changes; the chat's screen does not recompose for it.
+        // What only the panel reads changes; the chat's screen, once the calls have settled, does not recompose for it.
+        settle(recompositions)
         val before = recompositions.scopes
         compose.runOnIdle {
             panel.setSectionExpanded(PanelSectionId.Changes, true)
