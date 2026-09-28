@@ -22,6 +22,7 @@ import com.cursorforandroid.domain.SlashCatalog
 import com.cursorforandroid.domain.SlashCommand
 import com.cursorforandroid.domain.SlashCommand.Kind
 import com.cursorforandroid.domain.SlashCommand.Origin
+import com.cursorforandroid.ui.components.ModePills
 import com.cursorforandroid.ui.components.PendingAttachment
 import com.cursorforandroid.util.AppClock
 import com.google.common.truth.Truth.assertThat
@@ -293,7 +294,7 @@ class ConversationViewModelTest {
         val vm = open(RUNNING)
         val gemini = vm.picker().models.first { it.id == "gemini-3.8-flash" }
         vm.selectModel(gemini, null)
-        vm.setPlanMode(true)
+        vm.setModePill(ModePills.Pill.Plan)
 
         vm.sendAndWait("Try it")
 
@@ -467,10 +468,10 @@ class ConversationViewModelTest {
     fun `plan mode is not asked for until toggled, and never rides on the model chip`() {
         val vm = open(IDLE)
         assertThat(vm.picker().planMode).isNull()
-        vm.setPlanMode(true)
+        vm.setModePill(ModePills.Pill.Plan)
         // The composer wears plan mode as its own pill; the chip stays the model's name alone.
         assertThat(vm.picker { it.planMode == true }.chipLabel).isEqualTo("Auto")
-        vm.setPlanMode(false)
+        vm.setModePill(null)
         assertThat(vm.picker { it.planMode == false }.chipLabel).isEqualTo("Auto")
     }
 
@@ -482,7 +483,7 @@ class ConversationViewModelTest {
         assertThat(vm.picker().planMode).isNull()
 
         // Asking for a plan takes the command out of the draft.
-        vm.setPlanMode(true)
+        vm.setModePill(ModePills.Pill.Plan)
         assertThat(vm.picker { it.planMode == true }.planMode).isTrue()
         assertThat(vm.draftText.value).isEqualTo("fan the suites out")
 

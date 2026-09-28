@@ -909,17 +909,10 @@ class NewAgentViewModel(
         env = DeviceTarget.Cloud,
     )
 
-    fun setAutoCreatePr(value: Boolean) = _state.update { it.copy(autoCreatePr = value) }
-
-    /** Plan mode and `/multitask` are one slot: asking for a plan takes the command out of the prompt, and Ask or Debug off. */
-    fun setPlanMode(value: Boolean) = _state.update {
-        if (value) it.copy(planMode = true, accountMode = null, prompt = SlashCommands.remove(it.prompt, SlashCommands.MULTITASK)) else it.copy(planMode = false)
-    }
-
     /**
-     * The composer's mode pill, picked (by `/plan`, `/ask`, `/debug` or Shift+Tab) or taken off (null): the one slot
-     * set to it. Ask and Debug only while Extended mode's modes are on; Multitask is the prompt's own token, which the
-     * composer writes itself, so it only takes the others off here.
+     * The composer's mode pill, picked (by `/plan`, `/ask`, `/debug`, Shift+Tab or the "+" menu's Plan) or taken off
+     * (null): the one slot set to it. Ask and Debug only while Extended mode's modes are on; Multitask is the prompt's
+     * own token, which the composer writes itself, so it only takes the others off here.
      */
     fun setModePill(pill: ModePills.Pill?) = _state.update { s ->
         val account = pill?.agentMode?.takeIf { it.needsAccountService && s.extendedModes }

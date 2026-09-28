@@ -575,7 +575,7 @@ class NewAgentViewModelTest {
     fun `plan mode and multitask are one slot, whichever way round they are set`() {
         val vm = loaded()
         vm.setPrompt("/multitask fan the suites out")
-        vm.setPlanMode(true)
+        vm.setModePill(ModePills.Pill.Plan)
         // Asking for a plan takes the command out of the prompt.
         assertThat(vm.state.value.planMode).isTrue()
         assertThat(vm.state.value.prompt).isEqualTo("fan the suites out")
@@ -587,7 +587,7 @@ class NewAgentViewModelTest {
 
         // Shared-in text carrying the command does the same; text without it leaves a plan alone.
         vm.setPrompt("")
-        vm.setPlanMode(true)
+        vm.setModePill(ModePills.Pill.Plan)
         vm.applyShare("plain text", emptyList())
         assertThat(vm.state.value.planMode).isTrue()
         vm.applyShare("/multitask more", emptyList())
@@ -652,6 +652,22 @@ class NewAgentViewModelTest {
         assertThat(loaded().state.value.ref).isEmpty()
     }
 
+    /** The model picker no longer shows the auto-PR switch; a stored "on" still goes out with every launch and stays stored. */
+    @Test
+    fun `a stored auto-PR setting still reaches the launch and is kept for the next one`() = runBlocking {
+        storeAutoCreatePr(true)
+        try {
+            val vm = loaded()
+            assertThat(vm.state.value.autoCreatePr).isTrue()
+            vm.launchAndWait()
+            awaitUntil { created.isNotEmpty() }
+            assertThat(created.single().autoCreatePR).isTrue()
+            assertThat(graph.prefs.composerDefaults.first().autoCreatePr).isTrue()
+        } finally {
+            storeAutoCreatePr(false)
+        }
+    }
+
     @Test
     fun `a never-launched composer starts from the repository's default branch, not from main`() {
         val vm = loaded()
@@ -672,8 +688,17 @@ class NewAgentViewModelTest {
     private suspend fun onDisk() = graph.drafts.list()
 
     /**
+     * The last launch's auto-PR setting, as it is stored. Nothing in the app sets it any more but a launch writing
+     * back what it went out with, so an install that had it on keeps it on.
+     */
+    private fun storeAutoCreatePr(value: Boolean) = runBlocking {
+        graph.prefs.setComposerDefaults(repoUrl = null, ref = null, modelId = null, params = emptyMap(), autoCreatePr = value)
+    }
+
+    /**
      * The composer as the phone leaves it: a repository and branch on a team pool, a model with its variant, plan
-     * mode, the PR switch, a line and an image. Written as the app leaves the screen.
+     * mode, the stored PR switch, a line and an image. Written as the app leaves the screen; the PR switch is
+     * seeded by [storeAutoCreatePr] before the composer opens.
      */
     private fun writeEverything(vm: NewAgentViewModel, bytes: ByteArray) {
         vm.selectDevice(DeviceTarget.pool("gpu"))
@@ -681,8 +706,7 @@ class NewAgentViewModelTest {
         vm.setRef("cursor/cli-exploration-9c1d")
         val grok = vm.state.value.models.first { it.id == "cursor-grok-4.6" }
         vm.selectModel(grok, grok.variantWithParams(mapOf("effort" to "medium", "fast" to "false")))
-        vm.setPlanMode(true)
-        vm.setAutoCreatePr(true)
+        vm.setModePill(ModePills.Pill.Plan)
         vm.setPrompt("Half a thought")
         vm.addAttachments(listOf(PendingAttachment("picked-1", PromptImage(bytes, "image/png"), null)))
     }
@@ -709,9 +733,12 @@ class NewAgentViewModelTest {
     @Test
     fun `a draft outlives the process that was typing it, device, model and chat id included`() = runBlocking {
         val bytes = byteArrayOf(1, 2, 3, 4, 5)
+        storeAutoCreatePr(true)
         val vm = loadedWithAgents(draftSaveDelayMs = 20)
         writeEverything(vm, bytes)
         awaitUntil { onDisk().singleOrNull()?.images?.size == 1 }
+        // The draft carries the switch on its own: the stored default going off meanwhile does not take it away.
+        storeAutoCreatePr(false)
         val saved = onDisk().single()
         assertThat(saved.id).isEqualTo(vm.draftId.value)
 
@@ -750,9 +777,11 @@ class NewAgentViewModelTest {
     @Test
     fun `an app started afresh opens a fresh composer, and the draft left in the last one opens from the sidebar whole`() = runBlocking {
         val bytes = byteArrayOf(7, 7, 7)
+        storeAutoCreatePr(true)
         val vm = loadedWithAgents(draftSaveDelayMs = 20)
         writeEverything(vm, bytes)
         awaitUntil { onDisk().singleOrNull()?.images?.size == 1 }
+        storeAutoCreatePr(false)
 
         val next = process()
         runBlocking { next.agents.refresh() }

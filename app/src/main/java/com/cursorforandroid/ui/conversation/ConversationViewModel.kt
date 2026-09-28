@@ -480,9 +480,6 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         }
     }
 
-    /** The model sheet's plan toggle: on is plan mode, off asks for agent mode explicitly. */
-    fun setPlanMode(value: Boolean) = setMode(if (value) AgentMode.PLAN else AgentMode.AGENT)
-
     /** The composer's pill: Plan, Ask or Debug on; the cross (null) puts the next run back to agent mode explicitly. */
     fun setModePill(pill: ModePills.Pill?) = setMode(pill?.agentMode ?: AgentMode.AGENT)
 
