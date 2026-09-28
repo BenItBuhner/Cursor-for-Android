@@ -15,6 +15,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.domain.CredentialInfo
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.NewChatHome
+import com.cursorforandroid.domain.NewChatHomeChoice
 import com.cursorforandroid.domain.SignInMethod
 import com.cursorforandroid.ui.panel.PaneWidthClass
 import com.cursorforandroid.ui.theme.ThemeMode
@@ -363,6 +364,33 @@ class PreferencesStoreTest {
         assertThat(restarted.panelOpen(PaneWidthClass.Expanded).first()).isTrue()
         restarted.setPanelOpen(PaneWidthClass.Expanded, false)
         assertThat(restarted.panelOpen(PaneWidthClass.Expanded).first()).isFalse()
+    }
+
+    @Test
+    fun `the new chat page's choice reads as none until one is tapped, and a choice stays across sign-outs`() = runBlocking<Unit> {
+        val prefs = PreferencesStore(ApplicationProvider.getApplicationContext())
+        assertThat(prefs.newChatHomeChoice.first()).isEqualTo(NewChatHomeChoice(null))
+        prefs.setNewChatHome(NewChatHome.RECENT)
+        assertThat(prefs.newChatHomeChoice.first()).isEqualTo(NewChatHomeChoice(NewChatHome.RECENT))
+        prefs.clearSession()
+        assertThat(prefs.newChatHomeChoice.first()).isEqualTo(NewChatHomeChoice(NewChatHome.RECENT))
+        prefs.setNewChatHome(NewChatHome.COMPOSER)
+        assertThat(prefs.newChatHomeChoice.first()).isEqualTo(NewChatHomeChoice(NewChatHome.COMPOSER))
+    }
+
+    @Test
+    fun `the new chat page picks Projects for an account with any, Recent without, and waits while it cannot tell`() {
+        assertThat(NewChatHome.automatic(projectsAvailable = true, hasProjects = true, settled = false)).isEqualTo(NewChatHome.PROJECTS)
+        assertThat(NewChatHome.automatic(projectsAvailable = true, hasProjects = true, settled = true)).isEqualTo(NewChatHome.PROJECTS)
+        assertThat(NewChatHome.automatic(projectsAvailable = true, hasProjects = false, settled = true)).isEqualTo(NewChatHome.RECENT)
+        // No Projects on disk may yet be a Project made elsewhere: no pick until the list is current.
+        assertThat(NewChatHome.automatic(projectsAvailable = true, hasProjects = false, settled = false)).isNull()
+        // Extended mode off: no Projects to have at all, so Recent at once.
+        assertThat(NewChatHome.automatic(projectsAvailable = false, hasProjects = false, settled = false)).isEqualTo(NewChatHome.RECENT)
+        assertThat(NewChatHome.automatic(projectsAvailable = null, hasProjects = true, settled = true)).isNull()
+        assertThat(NewChatHome.chosen(null)).isNull()
+        assertThat(NewChatHome.chosen("pinned")).isNull()
+        assertThat(NewChatHome.chosen("projects")).isEqualTo(NewChatHome.PROJECTS)
     }
 
     @Test

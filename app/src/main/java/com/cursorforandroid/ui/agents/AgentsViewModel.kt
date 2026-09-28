@@ -103,6 +103,12 @@ data class AgentListUiState(
     /** The one row past the last chat: what the list is doing at its end, or nothing (see [SidebarTail]). */
     val tail: SidebarTail = SidebarTail.None,
     val hasLoaded: Boolean = false,
+    /**
+     * The list is this session's word and not only the disk's: a fetch has put its rows up, or has ended (see
+     * [com.cursorforandroid.data.repo.AgentListState.fetchEnded]). Until then an account with no Projects on disk may
+     * yet have some.
+     */
+    val isCurrent: Boolean = false,
     /** The server lists agents older than the ones loaded; the sidebar's end asks for them (see [AgentsViewModel.loadMore]). */
     val hasMore: Boolean = false,
     val isLoadingMore: Boolean = false,
@@ -241,6 +247,7 @@ class AgentsViewModel(
             isRefreshing = list.isRefreshing,
             tail = sidebarTail(list, work),
             hasLoaded = list.hasLoaded,
+            isCurrent = list.hasLoaded && (!list.isFromCache || list.fetchEnded),
             hasMore = list.hasMore,
             isLoadingMore = list.isLoadingMore,
             // A refused row action is the newer news, and the one the user is waiting on.

@@ -88,6 +88,10 @@ object NewChatHomePickerTags {
  *
  * Without Projects to pin — Extended mode off, outside the demo — Projects can still be chosen, and the row under the
  * miniatures says what the page shows until the mode is on.
+ *
+ * Until one is tapped nothing is written, and the page picks for itself ([NewChatHome.automatic]): Projects for an
+ * account that has any, Recent agents for one that has none — the one ringed here. A tap is the reader's own choice,
+ * and the page keeps to it whatever the account's Projects do.
  */
 @Composable
 internal fun NewChatHomeCard(
@@ -99,7 +103,9 @@ internal fun NewChatHomeCard(
 ) {
     val scope = rememberCoroutineScope()
     // On the main dispatcher for the reason the Extended mode switch is (see SettingsScreen).
-    val chosen by graph.prefs.newChatHome.collectAsStateWithLifecycle(initialValue = null, context = Dispatchers.Main.immediate)
+    val choice by graph.prefs.newChatHomeChoice.collectAsStateWithLifecycle(initialValue = null, context = Dispatchers.Main.immediate)
+    // Nothing chosen yet: the layout the page picks for itself is the one ringed, as the account stands now.
+    val chosen = choice?.let { it.chosen ?: NewChatHome.automatic(projectsAvailable, hasProjects = list.projectRows.isNotEmpty(), settled = true) }
     val chips = rememberComposerChips(graph)
     SettingsCard {
         Row(

@@ -94,6 +94,7 @@ object NewChatHomeCopy {
 object NewChatHomeTags {
     const val COMPOSER = "new_chat_composer"
     const val PROJECT_SHORTCUT = "new_chat_project_shortcut"
+    const val RECENT_CHAT = "new_chat_recent_chat"
     const val WORKING = "new_chat_project_working"
     const val WORKING_COUNT = "new_chat_project_working_count"
     const val PROJECTS_NOTE = "new_chat_projects_note"
@@ -174,7 +175,7 @@ internal fun HomeBlockView(block: HomeBlock, nowMillis: Long, actions: HomeBlock
             block.row,
             onClick = { actions.onOpenAgent(block.row) },
             actions = actions.rowActions,
-            modifier = column,
+            modifier = column.testTag(NewChatHomeTags.RECENT_CHAT),
             nowMillis = nowMillis,
         )
         is HomeBlock.Empty -> Text(
