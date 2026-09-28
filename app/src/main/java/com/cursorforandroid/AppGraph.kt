@@ -341,11 +341,11 @@ class AppGraph(
     private val scaleFleet = if (BuildConfig.DEBUG) DemoPerfSeeds.scaleFleet(app.cacheDir) else null
     private val scaleDataset = scaleFleet?.let(DemoPerfSeeds::scaleDataset)
     private val demoParts = lazy {
-        val realistic = BuildConfig.DEBUG && DemoPace.enabled(app.cacheDir)
+        val realistic = if (BuildConfig.DEBUG) DemoPace.fromMarker(app.cacheDir) else null
         DemoBackendFactory.create(
             perfSeeds = perfSeeds,
             scaleFleet = scaleFleet,
-            pace = if (realistic) DemoPace.Realistic else DemoPace.Brisk,
+            pace = realistic ?: DemoPace.Brisk,
         )
     }
 
