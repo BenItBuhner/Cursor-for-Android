@@ -22,6 +22,9 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.cursorforandroid.MainActivity
 import com.github.takahirom.roborazzi.fetchRobolectricWindowRoots
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -347,15 +350,26 @@ class Director(
         return at.x + node.size.width / 2f to at.y + node.size.height / 2f
     }
 
+    /**
+     * [block]'s pointer input, handed to the app as a device hands it: what its handlers wake on the main thread runs
+     * once they have returned, not under them. The test rule resumes its effects in place, so a queued send's handler
+     * would already count its own new row among those standing, and its text would never land in it.
+     */
+    private fun <T> delivered(block: () -> T): T {
+        var result: Result<T>? = null
+        CoroutineScope(Dispatchers.Unconfined).launch { result = runCatching(block) }
+        return checkNotNull(result) { "The input was not delivered" }.getOrThrow()
+    }
+
     /** A finger down on [target], held [holdFrames] frames (long enough for the press to show) and lifted. */
     fun tap(target: SemanticsNodeInteraction, holdFrames: Int = 6, label: String? = null) {
         val (x, y) = center(target.fetchSemanticsNode())
         label?.let(::mark)
         finger = Finger(x, y, down = true)
         releaseFrames = 0
-        target.performTouchInput { down(center) }
+        delivered { target.performTouchInput { down(center) } }
         frames(holdFrames)
-        target.performTouchInput { up() }
+        delivered { target.performTouchInput { up() } }
         finger = Finger(x, y, down = false)
         releaseFrames = RELEASE_FRAMES
     }
@@ -376,9 +390,9 @@ class Director(
         label?.let(::mark)
         finger = Finger(x, y, down = true)
         releaseFrames = 0
-        roots[top].performTouchInput { down(local) }
+        delivered { roots[top].performTouchInput { down(local) } }
         frames(holdFrames)
-        roots[top].performTouchInput { up() }
+        delivered { roots[top].performTouchInput { up() } }
         finger = Finger(x, y, down = false)
         releaseFrames = RELEASE_FRAMES
     }
