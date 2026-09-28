@@ -34,6 +34,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -147,7 +149,10 @@ fun HomeScreen(
     val viewModel: NewAgentViewModel = viewModel(factory = NewAgentViewModel.Factory(graph, resume = openDraft))
     val draftId by viewModel.draftId.collectAsStateWithLifecycle()
     LaunchedEffect(draftId) { openDraft = draftId }
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    // Every keystroke is a new state, so this body reads it only through derivedStateOf: the composer item reads the
+    // prompt in its own scope, and the list's items are not rebuilt under it.
+    val stateHolder = viewModel.state.collectAsStateWithLifecycle()
+    val state by stateHolder
     val commands by viewModel.commands.collectAsStateWithLifecycle()
     val colors = CursorTheme.colors
     var repoSheet by rememberSaveable { mutableStateOf(false) }
@@ -172,16 +177,17 @@ fun HomeScreen(
     }
     // The "+" menu's two pickers: the gallery — images alone in the default mode, images and videos as real files in
     // Extended mode — and, in Extended mode, the document picker for files of any type.
-    val counts = AttachmentCounts.of(state.attachments, state.files)
+    val counts by remember { derivedStateOf { AttachmentCounts.of(state.attachments, state.files) } }
+    val canAttachFiles by remember { derivedStateOf { state.canAttachFiles } }
     val pickMedia = rememberMediaPicker(
-        extended = state.canAttachFiles,
+        extended = canAttachFiles,
         counts = counts,
         onPickedImages = viewModel::addAttachments,
         onPickedFiles = viewModel::addFiles,
         onError = viewModel::reportError,
     )
     val pickFiles = rememberFilePicker(counts = counts, onPickedFiles = viewModel::addFiles, onError = viewModel::reportError)
-    val plusMenu = rememberComposerMenuActions(graph, onPickMedia = pickMedia, onPickFiles = if (state.canAttachFiles) pickFiles else null)
+    val plusMenu = rememberComposerMenuActions(graph, onPickMedia = pickMedia, onPickFiles = if (canAttachFiles) pickFiles else null)
     val voice = rememberComposerVoice(graph)
     val share by graph.share.offer.collectAsStateWithLifecycle()
     LaunchedEffect(share?.generation, share?.target) {
@@ -213,7 +219,7 @@ fun HomeScreen(
                 onComposerFocused()
             }
         }
-        LaunchRefusedHaptic(state)
+        LaunchRefusedHaptic(stateHolder)
         // Expanded, the composer runs from under its selectors to just above the pane's foot — the keyboard's edge while
         // it is up — with the lead above it given up as it grows and the page held still at the top.
         val expansion = rememberComposerExpansion()
@@ -453,6 +459,12 @@ private fun PreviewCard(row: AgentRow) {
             }
         }
     }
+}
+
+/** [LaunchRefusedHaptic] in a scope of its own, so the state it reads on every keystroke recomposes it alone. */
+@Composable
+private fun LaunchRefusedHaptic(state: State<NewAgentUiState>) {
+    LaunchRefusedHaptic(state.value)
 }
 
 /**
