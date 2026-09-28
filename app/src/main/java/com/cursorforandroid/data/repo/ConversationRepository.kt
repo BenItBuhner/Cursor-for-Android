@@ -23,6 +23,7 @@ import com.cursorforandroid.data.api.isTransportFailure
 import com.cursorforandroid.data.api.isLostReply
 import com.cursorforandroid.data.api.toCursorError
 import com.cursorforandroid.data.api.userMessage
+import com.cursorforandroid.data.auth.SessionUnavailableException
 import com.cursorforandroid.data.local.AttachmentStore
 import com.cursorforandroid.data.local.CachedAwaiting
 import com.cursorforandroid.data.local.CachedConversation
@@ -304,6 +305,12 @@ class ConversationRepository(
     private val composerStatus: (suspend (String) -> ComposerSnapshot?)? = null,
     /** How often [composerStatus] is asked while the chat is at rest (see [WATCH_POLL_MS]). */
     private val watchPollMs: Long = WATCH_POLL_MS,
+    /**
+     * The pauses before a background refresh of the record that failed on the server or the connection is asked
+     * again, quietly, the copy on screen standing; the failure is said only once all of them have failed too (see
+     * [quietRefreshFailure]). Past the last, the chat is asked again at that pace until it answers.
+     */
+    private val quietRetryDelaysMs: List<Long> = QUIET_RETRY_DELAYS_MS,
 ) {
     /**
      * A prompt sent from this device — the one that launched the chat, or a follow-up: its message and its run, a
@@ -611,6 +618,13 @@ class ConversationRepository(
          * the account answers it, rather than leaving the failure up until the reader taps Retry (see [watch]).
          */
         var unreached = false
+        /**
+         * Background refreshes of the record that failed on the server or the connection in a row, the copy on screen
+         * standing and nothing said yet (see [quietRefreshFailure]); zero once one answers.
+         */
+        var quietFailures = 0
+        /** The quiet re-read waiting its pause (see [quietRefreshFailure]). */
+        var quietJob: Job? = null
         /**
          * When the account's word last confirmed the Beta engine's window current (the app clock): a live stream held
          * with nothing new to say, or a sync that found the chat at rest. A reopen or a return to the foreground
@@ -2585,7 +2599,7 @@ class ConversationRepository(
         // once. A refusal or a removal keeps its pause — asking again changes nothing it said.
         synchronized(e) { if (e.state.value.recordFallback?.serverError == true) e.recordRefusedUntil = 0L }
         // The reader asked: everything is read again, the transcript included, whatever the run list says of it.
-        e.loadJob = e.scope.launch { load(e, agentId, force = true) }
+        e.loadJob = e.scope.launch { load(e, agentId, force = true, asked = true) }
     }
 
     /** Returns once the chat's load in flight, if any — the one [reload] or [reloadTranscript] just started — is over. */
@@ -2605,7 +2619,7 @@ class ConversationRepository(
         e.loadJob = e.scope.launch {
             cache?.remove(agentId)
             traceCache?.remove(agentId)
-            load(e, agentId, force = true)
+            load(e, agentId, force = true, asked = true)
         }
     }
 
@@ -2647,7 +2661,7 @@ class ConversationRepository(
                         // No delta to read from what is in hand: the chat is read as a load reads it.
                         null -> {
                             runs.cancel()
-                            loadAsJob(e) { load(e, agentId) }
+                            loadAsJob(e) { load(e, agentId, asked = true) }
                         }
                         else -> {
                             refreshNewestRuns(e, handed = runs.await())
@@ -2660,7 +2674,7 @@ class ConversationRepository(
                 val page = backend.api.listRuns(agentId, limit = FIRST_RUN_PAGE)
                 val held = synchronized(e) { if (!retryRecord && e.fetched && e.messages.isNotEmpty() && e.recordWindow == null) e.runs.associateBy { it.id } to e.local.isEmpty() else null }
                 if (held != null && runsUnchanged(page, held.first, noLocal = held.second)) refreshNewestRuns(e, handed = page)
-                else loadAsJob(e) { load(e, agentId, force = true, handed = page) }
+                else loadAsJob(e) { load(e, agentId, force = true, handed = page, asked = true) }
             }
             // The run under way, as the account now has it: followed when it is not, and the chat kept running while
             // the account says so with no run to stream yet (see [keepFollowing]).
@@ -2999,8 +3013,10 @@ class ConversationRepository(
      * Reads the chat: the account's record (Extended mode), else the documented transcript and runs. [force] reads
      * the documented transcript again even when the run list says nothing changed — the reader's own Reload.
      * [handed]: the run list's first page, read already by the caller (see [catchUp]), for the documented path.
+     * [asked]: the reader asked for this read (a reload, the notice's Retry, a pull), so a failure is said at once;
+     * a read the app made by itself says one only once it has kept failing (see [quietRefreshFailure]).
      */
-    private suspend fun load(e: Entry, agentId: String, force: Boolean = false, handed: ListRunsResponseDto? = null) {
+    private suspend fun load(e: Entry, agentId: String, force: Boolean = false, handed: ListRunsResponseDto? = null, asked: Boolean = false) {
         val backend = session.current
         val tokens = cacheTokens()
         val api = backend.api
@@ -3028,14 +3044,14 @@ class ConversationRepository(
         var handedRuns: Result<ListRunsResponseDto>? = handed?.let { Result.success(it) }
         if (recordApi != null) {
             val served = try {
-                loadFromRecord(e, agentId, recordApi, backend, tokens).also { handedRuns = it.runPage }.served
+                loadFromRecord(e, agentId, recordApi, backend, tokens, asked).also { handedRuns = it.runPage }.served
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 synchronized(e) {
                     e.recordError = t.userMessage()
                     e.recordCause = t.causeText()
                 }
-                synchronized(e) { e.recordWindow != null }.also { standing -> if (standing) e.publish(mutate = { unreached = t.isUnreached() }, transform = { copy(isLoading = false, transcriptError = t.userMessage()) }) }
+                synchronized(e) { e.recordWindow != null }.also { standing -> if (standing) e.recordRefreshFailed(t, t.userMessage(), asked) }
             }
             if (served) return
         }
@@ -3255,7 +3271,7 @@ class ConversationRepository(
         @Volatile var after: Pair<BlobCache.Snapshot, Long>? = null
     }
 
-    private suspend fun loadFromRecord(e: Entry, agentId: String, api: ConversationRecordApi, backend: CursorBackend, tokens: CacheTokens): RecordLoad = coroutineScope {
+    private suspend fun loadFromRecord(e: Entry, agentId: String, api: ConversationRecordApi, backend: CursorBackend, tokens: CacheTokens, asked: Boolean = false): RecordLoad = coroutineScope {
         val cursorApi = backend.api
         val (known, wantTurns) = synchronized(e) { e.recordWindow to e.window }
         // The record refused a moment ago and nothing of it is on screen: the documented path, at once, until the
@@ -3339,7 +3355,7 @@ class ConversationRepository(
                 recordFallBack(e, failure, message, readStartedAt, drifted)
                 return@coroutineScope RecordLoad(served = false, runPage = runPage.await())
             }
-            e.publish(mutate = { unreached = failure.isUnreached() }, transform = { copy(isLoading = false, transcriptError = message) })
+            e.recordRefreshFailed(failure, message, asked)
         } else {
             val sink = images?.forAgent(agentId)
             val now = AppClock.now()
@@ -3365,6 +3381,9 @@ class ConversationRepository(
                     recordRefusedUntil = 0L
                     serverErrorRereads = 0
                     unreached = false
+                    quietFailures = 0
+                    quietJob?.cancel()
+                    quietJob = null
                     transcriptError = null
                     transcriptUnavailable = false
                     fetched = true
@@ -3525,7 +3544,7 @@ class ConversationRepository(
                         // The documented path, now, for what the record could not give.
                         load(e, agentId, force = true)
                     } else {
-                        e.publish(transform = { copy(transcriptError = message) })
+                        e.recordRefreshFailed(failure, message, asked = false)
                     }
                 } finally {
                     // The pieces it could not get read as missing from here, with the Retry that asks again (see recordTraceStatus).
@@ -4377,6 +4396,43 @@ class ConversationRepository(
     }
 
     /**
+     * A read of the record failed with a copy of it on screen: said under the transcript, in [message], when the
+     * reader asked for the read or when the app's own reads have kept failing; kept off the screen otherwise, the
+     * read asked again after a pause (see [quietRefreshFailure]). A long coordinator chat's refresh meets the odd
+     * timeout on a healthy connection, and "Cursor took too long to respond" over a chat that is running fine read
+     * as the agent failing.
+     */
+    private fun Entry.recordRefreshFailed(failure: Throwable?, message: String, asked: Boolean) {
+        if (!asked && quietRefreshFailure(failure)) {
+            publish(transform = { copy(isLoading = false) })
+            return
+        }
+        publish(mutate = { unreached = failure.isUnreached() }, transform = { copy(isLoading = false, transcriptError = message) })
+    }
+
+    /**
+     * Counts a background refresh the server was slow to answer — a timeout or a transient server error; not a
+     * refusal, a host that could not be looked up or reached, or the phone being offline, which say something the
+     * reader should see — and schedules the next quiet read after [quietRetryDelaysMs]'s pause, the last pause for
+     * every one after. True while the failure is still to be kept quiet: every pause but the last spent. A read that
+     * answers resets the count (see [loadFromRecord]).
+     */
+    private fun Entry.quietRefreshFailure(failure: Throwable?): Boolean {
+        if (!failure.isSlowAnswer() || DeviceNetwork.isOnline() == false || quietRetryDelaysMs.isEmpty()) return false
+        val entry = this
+        return synchronized(this) {
+            val failures = ++quietFailures
+            val pause = quietRetryDelaysMs[(failures - 1).coerceAtMost(quietRetryDelaysMs.size - 1)]
+            quietJob?.cancel()
+            quietJob = scope.launch {
+                delay(pause)
+                if (synchronized(entry) { entry.attached > 0 && !entry.paused }) revalidateNow(entry, force = true)
+            }
+            failures <= quietRetryDelaysMs.size
+        }
+    }
+
+    /**
      * Drops the local prompts the server now reports in full — the run listed and, going by position, its message in
      * the transcript. Only ever applied to the server's answer: the disk copy is these prompts' own flattened form and
      * proves nothing about what the server knows.
@@ -4574,6 +4630,15 @@ class ConversationRepository(
 
     /** A failure on the way to Cursor rather than an answer from it (see [Entry.unreached]). */
     private fun Throwable?.isUnreached(): Boolean = this?.isTransportFailure() == true
+
+    /** Cursor was reached but did not answer in time, or answered with a transient server error (see [quietRefreshFailure]). */
+    private fun Throwable?.isSlowAnswer(): Boolean = when (this) {
+        null -> false
+        is java.io.InterruptedIOException -> true
+        is ConnectRpcException -> ServerRetry.isTransient(this)
+        is SessionUnavailableException -> cause.isSlowAnswer()
+        else -> false
+    }
 
     private fun Throwable?.causeText(): String? = this?.let { "${it.javaClass.simpleName}: ${it.message ?: "-"}" }
 
@@ -6184,6 +6249,12 @@ class ConversationRepository(
         /** The pauses between looks for the next run and reads of the record's growth while the account runs on (see [keepFollowing]). */
         const val KEEP_FOLLOWING_BASE_MS = 2_000L
         const val KEEP_FOLLOWING_MAX_MS = 15_000L
+        /**
+         * The pauses before a background refresh of the record that failed on the server or the connection is read
+         * again quietly (see [quietRefreshFailure]): about a minute of failures, the reads' own time besides, before
+         * the reader is told; then every half minute until the record answers.
+         */
+        val QUIET_RETRY_DELAYS_MS = listOf(2_000L, 5_000L, 15_000L, 30_000L)
         /** How many looks, [KEEP_FOLLOWING_BASE_MS] apart, find the account idle after a run ended before the records' word is taken (see [keepFollowing]). */
         const val KEEP_FOLLOWING_IDLE_LOOKS = 4
         /** How seldom a load that left the chat running with no run under way has it reconciled with the server (see [reconcileAfterLoad]). */

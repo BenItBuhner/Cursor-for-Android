@@ -106,6 +106,10 @@ class FaultRig(
     blobDiskBytes: Long = BlobDiskStore.MAX_BYTES,
     /** Long texts are kept on disk while their chats are open, as in the app (see `TextSpill`); false keeps them on the heap. */
     spillTexts: Boolean = true,
+    /** The pauses before a background refresh the server was slow to answer is read again, unseen (production: 2, 5, 15, 30 s). */
+    quietRetryDelaysMs: List<Long> = listOf(2_000L, 5_000L, 15_000L, 30_000L),
+    /** How long a run stream that said the run ended may go on without its `result` before the run is finished on its word (production: 15 s). */
+    terminalGraceMs: Long = 15_000L,
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var now: Long = 1_800_000_000_000L
@@ -187,7 +191,7 @@ class FaultRig(
     /** The list's work in flight, shared by the list and the account layer (see `PendingWork`): what the sidebar's one loading row stands for. */
     val pending = PendingWork()
     val agents = AgentRepository(session, prefs, attachments, AgentListCache(disk.child("agents")), scope, persistDelayMs = 10, capabilities = { capabilities }, recordOf = { id -> if (this.capabilities.accountSession) accountAgents.record(id) else null }, pending = pending)
-    val hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 500, releaseGraceMs = 200, reconnectBaseMs = 200, reconnectMaxMs = 800, parking = disk.child("liveruns"), scope = scope)
+    val hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 500, releaseGraceMs = 200, reconnectBaseMs = 200, reconnectMaxMs = 800, parking = disk.child("liveruns"), terminalGraceMs = terminalGraceMs, scope = scope)
     val conversationCache = ConversationCache(disk.child("conversations"))
     val traces = TraceCache(JsonDiskCache(File(root, "traces").apply { mkdirs() }, nowProvider = { now }, dispatcher = Dispatchers.Unconfined))
     /**
@@ -243,7 +247,7 @@ class FaultRig(
     val record: ConversationRecordApi? = if (extended) HeadlessConversationApi(accountRpc, sessionTokens, blobs = blobs, waits = recordWaits) else null
     /** What the private surfaces may do; a test that switches the engine mid-run sets this, and the next load reads it (as the app's `ExtendedMode` would). */
     @Volatile var capabilities: Capabilities = Capabilities.of(extended, engine)
-    val conversations = ConversationRepository(session, agents, prefs, hub, attachments, conversationCache, traces, isForeground = { true }, prefetchLimit = prefetchLimit, prefetchSpacingMs = 10L, scope = scope, record = record, capabilities = { capabilities }, retryPassDelaysMs = recordWaits.passes, composerStatus = { id -> accountAgents.status(id) })
+    val conversations = ConversationRepository(session, agents, prefs, hub, attachments, conversationCache, traces, isForeground = { true }, prefetchLimit = prefetchLimit, prefetchSpacingMs = 10L, scope = scope, record = record, capabilities = { capabilities }, retryPassDelaysMs = recordWaits.passes, quietRetryDelaysMs = quietRetryDelaysMs, composerStatus = { id -> accountAgents.status(id) })
     /** The account's controls on a chat — its queue above all — over the same host, wired as the app wires them (see AppGraph). */
     val steeringApi = SteeringApi(accountRpc, sessionTokens, blobs = blobs)
     val steering = SteeringRepository(
