@@ -15,6 +15,7 @@ import com.cursorforandroid.data.repo.SessionManager
 import com.cursorforandroid.data.repo.SlashCommandRepository
 import com.cursorforandroid.data.repo.SlashScope
 import com.cursorforandroid.domain.AccountModel
+import com.cursorforandroid.domain.AgentMode
 import com.cursorforandroid.domain.ModelChoice
 import com.cursorforandroid.domain.ModelParam
 import com.cursorforandroid.domain.PromptImage
@@ -326,6 +327,28 @@ class ConversationViewModelTest {
         runBlocking { withTimeout(5_000) { vm.draftText.first { it == "First thought" } } }
         assertThat(graph.followUps.state(RUNNING).value.queue.map { it.text }).containsExactly("Second thought")
         assertThat(runBlocking { withTimeout(5_000) { vm.toastMessage.first { it != null } } }).isEqualTo("Your draft was queued in its place.")
+    }
+
+    @Test
+    fun `a queued follow-up taken back to edit puts its model and Plan mode back on the picker`() {
+        val vm = open(RUNNING)
+        val gemini = vm.picker().models.first { it.id == "gemini-3.8-flash" }
+        vm.selectModel(gemini, null)
+        vm.setPlanMode(true)
+        vm.sendAndWait("On Gemini, planning")
+        val queued = runBlocking { withTimeout(5_000) { vm.queue.first { it.isNotEmpty() } } }.single()
+        vm.selectModel(null, null)
+        vm.setPlanMode(false)
+        vm.setDraft("On the chat's model")
+
+        vm.editQueued(queued.id)
+
+        val picker = vm.picker { it.override != null && it.mode == AgentMode.PLAN }
+        assertThat(picker.override).isEqualTo(ModelChoice(gemini, gemini.defaultVariant))
+        val displaced = graph.followUps.state(RUNNING).value.queue.single()
+        assertThat(displaced.text).isEqualTo("On the chat's model")
+        assertThat(displaced.modelId).isNull()
+        assertThat(displaced.planMode).isFalse()
     }
 
     /**

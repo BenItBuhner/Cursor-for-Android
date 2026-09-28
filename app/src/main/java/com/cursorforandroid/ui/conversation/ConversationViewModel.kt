@@ -776,6 +776,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         val displaced = !draft.value.isBlank() || attachments.value.isNotEmpty() || files.value.isNotEmpty()
         graph.followUps.takeForEdit(agentId, id) ?: return
         val taken = graph.followUps.state(agentId).value.draft
+        picker.update { it.adopting(taken) }
         draft.value = taken.text
         val images = taken.images.map { PendingAttachment(it.id, it.image, thumbnails.value[it.id]) }
         val takenFiles = taken.files.map { PendingFile(it.id, it.file) }
