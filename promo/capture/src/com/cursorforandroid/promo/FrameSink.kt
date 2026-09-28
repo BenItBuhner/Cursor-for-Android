@@ -45,7 +45,7 @@ class FrameSink(private val dir: File, private val preview: Int) : AutoCloseable
         val meta = File(dir, "$name.jsonl").bufferedWriter()
         val queue = ArrayBlockingQueue<ByteArray>(2)
         if (preview > 0) {
-            File(dir, name).mkdirs()
+            File(dir, name).apply { deleteRecursively(); mkdirs() }
             segment = Segment(name, width, height, null, meta, queue, null)
             return
         }

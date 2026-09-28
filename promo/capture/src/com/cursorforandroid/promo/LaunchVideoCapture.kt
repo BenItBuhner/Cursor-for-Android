@@ -187,6 +187,78 @@ class LaunchVideoCapture {
     }
 
     /**
+     * Take A, the video's spine, on one window from start to end. On the Fold's cover screen: the model sheet, the task
+     * typed and sent, its tools and subagents opened to watch, a follow-up queued behind the turn and the details
+     * opened. Then the unfold, the details pinned beside the chat, and the window growing to the tablet's, where the
+     * edits land in the panel, the tests run, the answer streams and the queued follow-up opens the PR.
+     */
+    @Test
+    fun hero() {
+        val d = launch(Screen.FoldCover, "hero")
+        try {
+            d.segment("phone", 0.75f)
+            d.hold(1.2)
+            d.tap(d.node(hasText("Composer 2.5") and hasClickAction()), label = "model")
+            d.hold(2.2)
+            d.tapAt(540f, 440f, label = "dismiss")
+            d.hold(0.8)
+            val field = d.node(hasSetTextAction())
+            d.tap(field, label = "composer")
+            d.hold(0.35)
+            d.type(field, HERO_PROMPT)
+            d.hold(0.6)
+            d.tap(d.node(hasTestTag("composer-main")), label = "send")
+            d.until("the chat", 10.0) { d.exists(hasTestTag("chat-header")) }
+            // The home list's and the panel's "Working" are the chat's, not the stretch of tools this opens.
+            val tools = hasText("Working") and hasAnyAncestor(hasTestTag("stretch"))
+            d.until("the tools", 12.0) { d.exists(tools) }
+            d.hold(0.45)
+            d.tap(d.node(tools), label = "tools")
+            val agents = hasText("2 agents") and hasAnyAncestor(hasTestTag("stretch"))
+            d.until("the subagents", 15.0) { d.exists(agents) }
+            d.hold(0.7)
+            d.tap(d.node(agents), label = "subagents")
+            d.hold(1.6)
+            val followUp = d.node(hasSetTextAction() and hasAnyAncestor(hasTestTag("follow-up-composer")))
+            d.tap(followUp, label = "follow-up")
+            d.hold(0.35)
+            d.type(followUp, QUEUED_PROMPT)
+            d.hold(0.45)
+            d.tap(d.node(hasTestTag("composer-main")), label = "queue")
+            d.hold(1.4)
+            d.tap(d.node(hasContentDescription("Open panel")), label = "panel")
+            d.hold(1.3)
+            d.dump("hero-phone-end")
+
+            d.window(Screen.FoldInner)
+            d.segment("large", 0.5f, largest = Screen.Tablet)
+            d.mark("unfold")
+            d.hold(2.6)
+            d.dump("hero-inner")
+            d.mark("grow")
+            val steps = 42
+            for (i in 1..steps) {
+                val t = i / steps.toFloat()
+                d.window(Screen.FoldInner.toward(Screen.Tablet, t * t * (3 - 2 * t)))
+                d.frame()
+            }
+            d.mark("tablet")
+            d.hold(0.7)
+            // Opening the stretches pinned the transcript where they opened; the turn goes on below it.
+            d.tap(d.node(hasContentDescription("Scroll to latest")), label = "latest")
+            d.until("the answer", 40.0) { d.exists(said("Added a usage meter")) }
+            d.dump("hero-answer")
+            d.until("the pull request", 20.0) { d.exists(said("Opened")) }
+            d.hold(3.5)
+            d.dump("hero-end")
+            d.still("hero-end", 0.5f)
+        } catch (_: EnoughFrames) {
+            d.still("hero-last", 0.5f)
+        }
+        finish("hero")
+    }
+
+    /**
      * The compositor against Robolectric's own PixelCopy of the window, which renders it the same way at full size,
      * and its byte order through to a PNG: a red fill has to come back red.
      */
@@ -218,6 +290,9 @@ class LaunchVideoCapture {
         check(decoded == Color.RED) { "A red fill came back as #%08x".format(decoded) }
         finish("render-check")
     }
+
+    /** [text] said in the chat itself, not in the panel or the sidebar beside it. */
+    private fun said(text: String) = hasText(text, substring = true) and hasAnyAncestor(hasTestTag("transcript"))
 
     private companion object {
         const val HOME_PLACEHOLDER = "Ask Cursor to build, fix bugs, explore"

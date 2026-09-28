@@ -7,6 +7,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -343,6 +344,29 @@ class Director(
         target.performTouchInput { down(center) }
         frames(holdFrames)
         target.performTouchInput { up() }
+        finger = Finger(x, y, down = false)
+        releaseFrames = RELEASE_FRAMES
+    }
+
+    /**
+     * A finger down at ([x], [y]) on the screen, into the topmost window's content there (a sheet's scrim, say, which
+     * has no node of its own to aim at), held [holdFrames] frames and lifted.
+     */
+    fun tapAt(x: Float, y: Float, holdFrames: Int = 6, label: String? = null) {
+        val roots = compose.onAllNodes(isRoot(), useUnmergedTree = true)
+        val nodes = roots.fetchSemanticsNodes()
+        val top = nodes.indices.last { i ->
+            val at = nodes[i].positionOnScreen
+            x >= at.x && y >= at.y && x < at.x + nodes[i].size.width && y < at.y + nodes[i].size.height
+        }
+        val origin = nodes[top].positionOnScreen
+        val local = Offset(x - origin.x, y - origin.y)
+        label?.let(::mark)
+        finger = Finger(x, y, down = true)
+        releaseFrames = 0
+        roots[top].performTouchInput { down(local) }
+        frames(holdFrames)
+        roots[top].performTouchInput { up() }
         finger = Finger(x, y, down = false)
         releaseFrames = RELEASE_FRAMES
     }
