@@ -359,8 +359,8 @@ enum class SendLanding {
  * How a flight's target is drawn at rest, for the copy to arrive at it: its surface (null: a bubble's, from the theme)
  * and the fade it is drawn at, its text as laid out (null: measured to the box, in the bubble's style) and the colour
  * of that text (null: the theme's), which is drawn at [fade] too. A target whose fade moves — a queued card behind the
- * front of a stacked queue, its face fading as it springs — says so with [fading], read at each frame. Each part says
- * what it knows; [merge] keeps both.
+ * front of a stacked queue, its face fading as it springs, or a bubble coming up from its sending fade as its message
+ * is filed mid-flight — says so with [fading], read at each frame. Each part says what it knows; [merge] keeps both.
  */
 @Immutable
 class SendTargetLook(

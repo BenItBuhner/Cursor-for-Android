@@ -3,8 +3,13 @@ package com.cursorforandroid.ui.conversation
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -33,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -87,6 +93,7 @@ import com.cursorforandroid.ui.components.CursorMenuItem
 import com.cursorforandroid.ui.components.HairlineDivider
 import com.cursorforandroid.ui.components.LocalMarkdownMedia
 import com.cursorforandroid.ui.components.LocalSendMotion
+import com.cursorforandroid.ui.components.SendTargetLook
 import com.cursorforandroid.ui.components.SendTargetPart
 import com.cursorforandroid.ui.components.sendAttachmentTarget
 import com.cursorforandroid.ui.components.sendTarget
@@ -131,16 +138,24 @@ private fun HumanMessage(item: UserMessage, modifier: Modifier) {
     val hasText = item.text.isNotBlank()
     val commandTints = commandTints()
     // A prompt the server has not acknowledged yet is drawn faded — through its colours, the way the rest of the app
-    // fades things — and comes up to full strength once its run is filed.
-    val alpha by animateFloatAsState(if (item.isPending) PendingMessageAlpha else 1f, tween(240), label = "pending")
+    // fades things — and comes up to full strength once its run is filed. The screen keeps that fade (SentFades), so
+    // it carries on over the server's copy of the bubble when that takes this one's place.
+    val sentFades = LocalSentFades.current
+    val alpha = when {
+        item.isPending -> PendingMessageAlpha
+        sentFades != null -> sentFades.alpha(item)
+        else -> 1f
+    }.let { target -> if (sentFades == null) animateFloatAsState(target, tween(SentFades.SentFadeMillis), label = "pending").value else target }
     val sendMotion = LocalSendMotion.current
-    val restingFade = if (item.isPending) PendingMessageAlpha else 1f
+    // A copy still landing on the bubble arrives at its fade as it is on that frame, the filing mid-flight included.
+    val alphaNow = rememberUpdatedState(alpha)
+    val look = remember { SendTargetLook(fixedFade = PendingMessageAlpha, fading = { alphaNow.value }) }
     Box(modifier.fillMaxWidth().padding(start = 32.dp), contentAlignment = Alignment.CenterEnd) {
         MessageActions(
             text = item.text,
             enabled = hasText,
             modifier = Modifier.widthIn(min = 150.dp, max = 640.dp)
-                .sendTarget(sendMotion, item.id, item.text, SendTargetPart.Surface, restingFade)
+                .sendTarget(sendMotion, item.id, item.text, SendTargetPart.Surface, look = look)
                 .cursorSurface(colors.fillFaint.faded(alpha), colors.stroke.faded(alpha), CursorTheme.shapes.xl),
         ) {
             Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -155,16 +170,30 @@ private fun HumanMessage(item: UserMessage, modifier: Modifier) {
                 if (hasText || item.attachments.isEmpty()) {
                     MarkdownText(
                         item.text,
-                        modifier = Modifier.sendTarget(sendMotion, item.id, item.text, SendTargetPart.Text, restingFade),
+                        modifier = Modifier.sendTarget(sendMotion, item.id, item.text, SendTargetPart.Text, look = look),
                         style = CursorTheme.typography.message,
                         color = colors.textPrimary.faded(alpha),
                         commandTints = commandTints.faded(alpha),
                     )
                 }
                 // Sent from here and not yet filed: where the send stands, on the bubble — never back in the composer.
+                // It comes and goes with the bubble's own fade, the bubble easing to its new height, rather than popping.
                 val controls = LocalTranscriptControls.current
-                val outgoing = if (item.isPending) controls.outgoing[item.id] else null
-                if (outgoing != null) OutgoingStatusRow(outgoing, onRetry = controls.onRetryOutgoing?.let { retry -> { retry(item.id) } }, onEdit = controls.onEditOutgoing?.let { edit -> { edit(item.id) } })
+                val outgoing = if (item.isPending) controls.outgoing[item.id]?.takeUnless { it == OutgoingStatus.Sending } else null
+                // The last status said, drawn while it leaves.
+                val said = remember { arrayOfNulls<OutgoingStatus>(1) }
+                if (outgoing != null) said[0] = outgoing
+                AnimatedVisibility(
+                    visible = outgoing != null,
+                    enter = fadeIn(tween(SentFades.SentFadeMillis)) + expandVertically(tween(SentFades.SentFadeMillis), expandFrom = Alignment.Top),
+                    exit = fadeOut(tween(StatusFadeOutMillis)) + shrinkVertically(tween(SentFades.SentFadeMillis), shrinkTowards = Alignment.Top),
+                    label = "outgoing-status",
+                ) {
+                    val status = said[0] ?: return@AnimatedVisibility
+                    Box(Modifier.animateContentSize(tween(SentFades.SentFadeMillis))) {
+                        OutgoingStatusRow(status, onRetry = controls.onRetryOutgoing?.let { retry -> { retry(item.id) } }, onEdit = controls.onEditOutgoing?.let { edit -> { edit(item.id) } })
+                    }
+                }
             }
         }
     }
@@ -205,6 +234,8 @@ private fun OutgoingStatusRow(status: OutgoingStatus, onRetry: (() -> Unit)?, on
         }
     }
 }
+
+private const val StatusFadeOutMillis = 150
 
 /** [color] at [alpha] of its own opacity: 1 leaves it as it is. */
 internal fun Color.faded(alpha: Float): Color = if (alpha >= 1f) this else copy(alpha = this.alpha * alpha)
@@ -753,6 +784,3 @@ internal fun RunFooterView(item: RunFooter, modifier: Modifier = Modifier, inter
         note != null -> SummaryLine("Worked", note, modifier)
     }
 }
-
-/** Opacity of a prompt sent from here that the server has not acknowledged yet. */
-private const val PendingMessageAlpha = 0.5f

@@ -100,11 +100,18 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
     val accountRows: List<PendingFollowup>
         get() = ConversationControls(queue = account.toList()).placed(QueuePlacement(waiting = waiting.toList(), sendingIds = sending.toSet())).queue
 
+    /** The screen's fades of sent bubbles, when [show] was asked for them. */
+    var sentFades: SentFades? = null
+        private set
+
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    fun Content(motion: SendMotion) {
+    fun Content(motion: SendMotion, withSentFades: Boolean = false) {
+        val fades = if (withSentFades) rememberSentFades("queue-scene", animatorsEnabled = { true }) else null
+        fades?.look(messages.toList())
+        sentFades = fades
         CursorTheme(mode = ThemeMode.Dark) {
-            CompositionLocalProvider(LocalRippleConfiguration provides null, LocalTranscriptControls provides TranscriptControls()) {
+            CompositionLocalProvider(LocalRippleConfiguration provides null, LocalTranscriptControls provides TranscriptControls(), LocalSentFades provides fades) {
                 Box(Modifier.testTag(Frame).fillMaxWidth().height(640.dp).background(CursorTheme.colors.canvas)) {
                     SendMotionHost(motion) {
                         Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -166,10 +173,28 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
         }
     }
 
-    fun show(motion: SendMotion) {
+    fun show(motion: SendMotion, withSentFades: Boolean = false) {
         compose.mainClock.autoAdvance = false
-        compose.setContent { Content(motion) }
+        compose.setContent { Content(motion, withSentFades) }
         frames(64)
+    }
+
+    /**
+     * The run taking device-queue row [id], as the device's queue sends it: the row leaves the card and the message is
+     * shown at once as the sending bubble [bubble], which the send's request later files ([replace]).
+     */
+    fun deliverSending(id: String, bubble: String) {
+        val text = queue.first { it.id == id }.previewText
+        compose.runOnUiThread {
+            queue.removeAll { it.id == id }
+            messages += UserMessage(bubble, text, isPending = true)
+        }
+        frame()
+    }
+
+    /** The bubble [id] replaced, in one frame, by [with]: its filing, or the server's copy taking its place. */
+    fun replace(id: String, with: UserMessage) {
+        compose.runOnUiThread { messages[messages.indexOfFirst { it.id == id }] = with }
     }
 
     /**
