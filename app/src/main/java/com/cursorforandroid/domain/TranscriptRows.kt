@@ -618,10 +618,11 @@ object TranscriptRows {
         if (entries.none { it is TranscriptRow.Entry.Event }) return entries.toList()
         val deduped = ArrayList<TranscriptRow.Entry>(entries.size)
         for (entry in entries) {
-            val previous = deduped.lastOrNull { it !is TranscriptRow.Entry.Footer }
+            val at = deduped.indexOfLast { it !is TranscriptRow.Entry.Footer }
+            val previous = deduped.getOrNull(at)
             if (entry is TranscriptRow.Entry.Event && previous is TranscriptRow.Entry.Event && sameNotice(previous.row.notification, entry.row.notification)) {
                 val merged = merged(previous.row.notification, entry.row.notification)
-                deduped[deduped.indexOf(previous)] = TranscriptRow.Entry.Event(TranscriptRow.Event(merged, previous.row.count + entry.row.count))
+                deduped[at] = TranscriptRow.Entry.Event(TranscriptRow.Event(merged, previous.row.count + entry.row.count))
             } else {
                 deduped += entry
             }
