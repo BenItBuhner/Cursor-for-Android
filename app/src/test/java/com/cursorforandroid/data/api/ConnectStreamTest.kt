@@ -2,6 +2,7 @@ package com.cursorforandroid.data.api
 
 import com.cursorforandroid.data.auth.SessionTokenProvider
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.jsonObject
@@ -123,5 +124,32 @@ class ConnectStreamTest {
         assertThat(body["filterHeavyStepData"]!!.jsonPrimitive.content).isEqualTo("true")
         assertThat(body["maxBlobsAfterPrefetch"]!!.jsonPrimitive.content).isEqualTo("30")
         assertThat(body["preFetchedBlobIds"].toString()).isEqualTo("""["aGVsZA=="]""")
+    }
+
+    /**
+     * The goal strip's state read, on the account client's call timeout, and the transcript's, on the record's longer
+     * one, share one read in flight. A long coordinator chat's state outlasted the shorter timeout, and the transcript
+     * took that failure as its own: "Cursor took too long to respond" on a read of its own that had not timed out.
+     */
+    @Test
+    fun `a reader that joined another's read reads on its own budget when that read times out`() = runBlocking<Unit> {
+        session()
+        val state = """{"turns":["dHVybi0w"]}"""
+        server.enqueue(ConnectStreamFixtures.prewarmResponse(state, blobs = emptyList()).setHeadersDelay(2, TimeUnit.SECONDS))
+        server.enqueue(ConnectStreamFixtures.prewarmResponse(state, blobs = emptyList()))
+        val blobs = BlobCache()
+        val short = ConnectJsonClient(OkHttpClient.Builder().callTimeout(500, TimeUnit.MILLISECONDS).build(), server.url("/").toString())
+        val goal = ConversationStateReader(short, tokens, blobs, retryDelaysMs = emptyList())
+        val transcript = ConversationStateReader(rpc, tokens, blobs, retryDelaysMs = emptyList())
+
+        val goalRead = async { runCatching { goal.read("bc-1") } }
+        server.takeRequest(5, TimeUnit.SECONDS) // the session
+        server.takeRequest(5, TimeUnit.SECONDS) // the goal strip's read, held past its call timeout
+        val transcriptRead = async { transcript.read("bc-1") }
+
+        assertThat(goalRead.await().exceptionOrNull()).isInstanceOf(java.io.InterruptedIOException::class.java)
+        val initial = transcriptRead.await()
+        assertThat((initial.conversationState!!["turns"] as kotlinx.serialization.json.JsonArray).single().jsonPrimitive.content).isEqualTo("dHVybi0w")
+        assertThat(server.requestCount).isEqualTo(3)
     }
 }
