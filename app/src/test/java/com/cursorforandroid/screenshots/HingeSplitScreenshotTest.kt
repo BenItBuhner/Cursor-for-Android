@@ -65,7 +65,8 @@ import java.util.TimeZone
  *
  * - `815`: the panel shut, the rail out: the rail fills the pane before the crease, the chat the pane past it.
  * - `816`: the rail put away: the chat stays in the pane past the crease, the pane before it left for the rail.
- * - `817`: the panel open: it is the pane past the crease, and the chat the pane before it, the rail making way.
+ * - `817`: the panel open, last dragged to 280dp with the rail out: it is the pane past the crease, and the chat the
+ *   pane before it, the rail making way.
  * - `818`: the same Fold lying flat, one screen with no fold to keep off: laid out as it always has been.
  * - `819`: a tablet with no fold at all, the panel shut and the rail out: laid out as it always has been.
  *
@@ -104,15 +105,19 @@ class HingeSplitScreenshotTest {
         return WindowHinge(Hinge.of(TestWindowLayoutInfo(listOf(fold)), metrics.density))
     }
 
-    /** The Revenue chat on a window folded as [fold] has it, the panel left [panelOpen] for the Expanded size class. */
+    /**
+     * The Revenue chat on a window folded as [fold] has it, the panel left [panelOpen] for the Expanded size class and
+     * dragged to [panelWidth]dp of this window (null: never dragged).
+     */
     @OptIn(ExperimentalMaterial3Api::class)
-    private fun show(fold: FoldingFeature.State?, panelOpen: Boolean) {
+    private fun show(fold: FoldingFeature.State?, panelOpen: Boolean, panelWidth: Int? = null) {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val graph = AppGraph(context, SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, appVersion = SCREENSHOT_APP_VERSION)
         runBlocking {
             graph.session.enterDemo()
             graph.agents.refresh()
             graph.prefs.setPanelOpen(PaneWidthClass.Expanded, panelOpen)
+            panelWidth?.let { graph.prefs.setPanelWidthFraction(it / context.resources.configuration.screenWidthDp.toFloat()) }
         }
         val hinge = crease(fold)
         compose.setContent {
@@ -214,7 +219,7 @@ class HingeSplitScreenshotTest {
 
     @Test
     fun panelOpen() {
-        show(FoldingFeature.State.HALF_OPENED, panelOpen = true)
+        show(FoldingFeature.State.HALF_OPENED, panelOpen = true, panelWidth = 280)
         compose.waitUntil(10_000) { described("Open sidebar") }
         capture("817_hinge_fold_panel_open")
     }
