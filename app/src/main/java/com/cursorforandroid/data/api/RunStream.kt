@@ -11,6 +11,7 @@ import com.cursorforandroid.data.api.dto.SseTextDto
 import com.cursorforandroid.data.api.dto.SseToolCallDto
 import com.cursorforandroid.domain.RunStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -428,8 +429,11 @@ class SseRunStreamer(
             }
             .build()
         val call: Call = client.newCall(request)
-        // Blocking socket reads are not interruptible; cancelling the call from the completion handler is.
-        val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
+        // Blocking socket reads are not interruptible; cancelling the call is. On cancelling, not on completion: a job
+        // blocked in a read never completes, so a completion handler waited for the next frame the server sent — on a
+        // quiet run, the stream and its thread stayed taken until a heartbeat or the read timeout.
+        @OptIn(InternalCoroutinesApi::class)
+        val handle = currentCoroutineContext()[Job]?.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { call.cancel() }
         try {
             val response = try {
                 call.execute()

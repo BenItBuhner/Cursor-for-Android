@@ -227,6 +227,9 @@ fun ConversationScreen(
     val fileUploads by viewModel.fileUploads.collectAsStateWithLifecycle()
     val uploadHint by viewModel.uploadHint.collectAsStateWithLifecycle()
     val queue by viewModel.queue.collectAsStateWithLifecycle()
+    // The stack opens or closes on the tap, the device's record of the choice following (and seeding it again when it changes).
+    val queueStacked by viewModel.queueStacked.collectAsStateWithLifecycle()
+    var queueStackedHere by remember(queueStacked) { mutableStateOf(queueStacked) }
     val thumbnails by viewModel.imageThumbnails.collectAsStateWithLifecycle()
     val picker by viewModel.modelPicker.collectAsStateWithLifecycle()
     val commands by viewModel.commands.collectAsStateWithLifecycle()
@@ -754,48 +757,63 @@ fun ConversationScreen(
             goal?.let { current ->
                 GoalStrip(goal = current, modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp))
             }
-            // What is waiting to go out sits right above the box it came from, oldest first, one line each.
-            if (queue.isNotEmpty()) {
-                QueuedFollowUps(
-                    queue = queue,
-                    thumbnails = thumbnails,
-                    onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
-                    // Sent now while a turn is under way, a message cancels that turn for it.
-                    onSteer = { item ->
-                        if (isActive) {
-                            stopConfirmation.ask(RunInterruption.SendNow, agentId) { viewModel.steerQueued(item.id) }
-                        } else {
-                            haptics.perform(Haptic.Confirm)
-                            viewModel.steerQueued(item.id)
-                        }
-                    },
-                    onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
+            // What is waiting to go out sits right above the box it came from, oldest first, one line each — the
+            // device's and, in Extended mode, the account's in one stack, a deck once there are more than a couple.
+            val accountRows = if (accountQueue) controls.queue else emptyList()
+            if (queue.isNotEmpty() || accountRows.isNotEmpty()) {
+                QueueStack(
+                    keys = queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" },
+                    stacked = queueStackedHere,
+                    onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
                     modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
-                    flights = queueFlights,
-                )
-            }
-            if (accountQueue && controls.queue.isNotEmpty()) {
-                AccountQueueRows(
-                    queue = controls.queue,
-                    inFlightIds = controls.inFlightQueueIds,
-                    // `SubmitPendingFollowupNow` sends the message in place of the turn under way.
-                    onSendNow = { item ->
-                        if (isActive) {
-                            stopConfirmation.ask(RunInterruption.SendNow, agentId) { viewModel.queueSendNow(item.id) }
-                        } else {
-                            haptics.perform(Haptic.Confirm)
-                            viewModel.queueSendNow(item.id)
-                        }
-                    },
-                    onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
-                    onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
-                    onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
-                    // A queued message can be delivered into the turn under way as a steer while there is one to steer.
-                    onSteerNow = if (capabilities.steering && isActive) ({ haptics.perform(Haptic.Confirm); viewModel.queueSteerNow(it.id) }) else null,
-                    onMove = { item, up -> viewModel.queueMove(item.id, up) },
-                    modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
-                    flights = queueFlights,
-                )
+                ) { index, face ->
+                    if (index < queue.size) {
+                        QueuedFollowUpCard(
+                            item = queue[index],
+                            position = index + 1,
+                            count = queue.size,
+                            thumbnails = thumbnails,
+                            onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
+                            // Sent now while a turn is under way, a message cancels that turn for it.
+                            onSteer = { item ->
+                                if (isActive) {
+                                    stopConfirmation.ask(RunInterruption.SendNow, agentId) { viewModel.steerQueued(item.id) }
+                                } else {
+                                    haptics.perform(Haptic.Confirm)
+                                    viewModel.steerQueued(item.id)
+                                }
+                            },
+                            onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
+                            flights = queueFlights,
+                            face = face,
+                        )
+                    } else {
+                        val at = index - queue.size
+                        AccountQueueCard(
+                            item = accountRows[at],
+                            position = at + 1,
+                            count = accountRows.size,
+                            inFlightIds = controls.inFlightQueueIds,
+                            // `SubmitPendingFollowupNow` sends the message in place of the turn under way.
+                            onSendNow = { item ->
+                                if (isActive) {
+                                    stopConfirmation.ask(RunInterruption.SendNow, agentId) { viewModel.queueSendNow(item.id) }
+                                } else {
+                                    haptics.perform(Haptic.Confirm)
+                                    viewModel.queueSendNow(item.id)
+                                }
+                            },
+                            onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
+                            onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
+                            onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
+                            // A queued message can be delivered into the turn under way as a steer while there is one to steer.
+                            onSteerNow = if (capabilities.steering && isActive) ({ haptics.perform(Haptic.Confirm); viewModel.queueSteerNow(it.id) }) else null,
+                            onMove = { item, up -> viewModel.queueMove(item.id, up) },
+                            flights = queueFlights,
+                            face = face,
+                        )
+                    }
+                }
             }
             ComposerBox(
                 value = draft,

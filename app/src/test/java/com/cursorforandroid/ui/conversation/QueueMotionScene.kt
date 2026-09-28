@@ -3,6 +3,7 @@ package com.cursorforandroid.ui.conversation
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,6 +83,14 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
     val sending = mutableStateListOf<String>()
     private val thumbnails = mutableStateMapOf<String, ImageBitmap>()
     var scrolledAway = false
+    /** The reader's choice for a long queue, as the device keeps it (`PreferencesStore.queueStacked`): stacked unless opened. */
+    var stacked by mutableStateOf(true)
+    /** Whether the stack's springs run (the system's animator scale above 0). */
+    var stackAnimates = true
+    /** How the stack moves: its own spring, unless a test holds it part of the way. */
+    var stackSpec by mutableStateOf<AnimationSpec<Float>?>(null)
+    /** Bumped to compose the queue afresh, as the screen does coming back to the chat. */
+    var generation by mutableStateOf(0)
     /** Extended mode: the composer says a send while the agent works queues on the account. */
     var onAccount = false
     val store by lazy { AttachmentStore(compose.activity) }
@@ -120,11 +129,24 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
                                 transcript = messages.mapTo(HashSet()) { it.id },
                                 scrolledAway = { scrolledAway },
                             )
-                            if (queue.isNotEmpty()) {
-                                QueuedFollowUps(queue.toList(), thumbnails.toMap(), {}, {}, {}, Modifier.padding(bottom = 4.dp), flights)
-                            }
-                            if (card.queue.isNotEmpty()) {
-                                AccountQueueRows(card.queue, card.inFlightQueueIds, {}, {}, { _, _ -> }, { _, _ -> }, Modifier.padding(bottom = 4.dp), flights = flights)
+                            val device = queue.toList()
+                            val onCard = card.queue
+                            if (device.isNotEmpty() || onCard.isNotEmpty()) key(generation) {
+                                QueueStack(
+                                    keys = device.map { "device:${it.id}" } + onCard.map { "account:${it.id}" },
+                                    stacked = stacked,
+                                    onStackedChange = { stacked = it },
+                                    modifier = Modifier.padding(bottom = 4.dp),
+                                    animate = { stackAnimates },
+                                    animationSpec = stackSpec ?: StackSpring,
+                                ) { index, face ->
+                                    if (index < device.size) {
+                                        QueuedFollowUpCard(device[index], index + 1, device.size, thumbnails.toMap(), {}, {}, { removed -> flights.dismiss(removed.id); queue.remove(removed) }, flights, face)
+                                    } else {
+                                        val at = index - device.size
+                                        AccountQueueCard(onCard[at], at + 1, onCard.size, card.inFlightQueueIds, {}, {}, { _, _ -> }, { _, _ -> }, null, null, flights, face)
+                                    }
+                                }
                             }
                             ComposerBox(
                                 value = composerText,

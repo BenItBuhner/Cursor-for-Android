@@ -648,6 +648,8 @@ class ConversationRepository(
         var awaiting: List<Awaiting> = emptyList()
         /** Messages filed from the account's queue the account has not yet confirmed gone from it (see [Delivered]). */
         var delivered: List<Delivered> = emptyList()
+        /** What [refileTakenIntoTurn] last read, by identity: the same inputs say the same thing. */
+        private var refiledFrom: List<Any?>? = null
         /** Set by [fileInFrame] when a copy it saw needs the run list read alongside the transcript to be filed (see [adoptDelivered]). */
         var adoptWanted: Boolean = false
         /** The adoption under way, so a run of frames asking for one starts one. */
@@ -750,6 +752,14 @@ class ConversationRepository(
                 val named = a.runId?.let { id -> ordered.firstOrNull { it.id == id } }
                 if (named != null && (a.queuedOnAccount || hasStarted(named.id, a.behindRunId))) {
                     if (named.id in taken || local.any { it.run.id == named.id && it.steeredAfter == null } || !hasStarted(named.id, a.behindRunId)) continue
+                    // The turn it waited behind may have taken it between its steps and answered it (a Project's
+                    // coordinator does): the transcript's copy is followed by an answer that turn's own story carries.
+                    // Then it is that turn's, drawn above the answer, not ahead of the named run below it all. Only a
+                    // frame with the transcript read alongside may say which (see [adoptDelivered]), or one whose
+                    // transcript holds the message's copy already: an older one may predate the turn's taking it.
+                    if (!fileSteers && messages.count { it.type == USER_MESSAGE && normalizePrompt(it.text) == wanted } <= a.priorTranscriptCopies) { adoptWanted = true; continue }
+                    val intoTurn = takenInto(a.staged.message, wanted, named, minCopies = a.priorTranscriptCopies + 1)
+                    if (intoTurn != null) { file(a, intoTurn, wanted, filed); continue }
                     taken += named.id
                     file(a, LocalPrompt(a.staged.message, named), wanted, filed)
                     continue
@@ -776,13 +786,84 @@ class ConversationRepository(
                     // [adoptDelivered]); any other asks for that read and leaves the message on the card meanwhile.
                     if (!fileSteers) { adoptWanted = true; continue }
                     val into = behind ?: ordered.lastOrNull() ?: continue
-                    val story = live?.takeIf { it.runId == into.id }?.items ?: partial[into.id] ?: traces[into.id]
-                    LocalPrompt(a.staged.message, into, steeredAfter = story?.size ?: 0)
+                    takenInto(a.staged.message, wanted, null, minCopies = a.priorTranscriptCopies + 1)?.takeIf { it.run.id == into.id } ?: run {
+                        val story = storyOf(into.id)
+                        LocalPrompt(a.staged.message, into, steeredAfter = story?.size ?: 0)
+                    }
                 }
                 file(a, prompt, wanted, filed)
             }
             if (filed.isNotEmpty()) pruneLocal()
             return filed
+        }
+
+        private fun storyOf(runId: String): List<TimelineItem>? = live?.takeIf { it.runId == runId }?.items ?: partial[runId] ?: traces[runId]
+
+        /**
+         * What the transcript's newest copy of the words [wanted] (the [minCopies]th or later) sits between, as
+         * [storyKey]s: the replies ahead of it back to the prompt before, and the replies after it — its answer — up
+         * to the next prompt. Null without such a copy or an answer after it.
+         */
+        fun answersAround(wanted: String, minCopies: Int = 1): Pair<List<String>, List<String>>? {
+            val copies = messages.indices.filter { messages[it].type == USER_MESSAGE && normalizePrompt(messages[it].text) == wanted }
+            val copy = copies.lastOrNull()?.takeIf { copies.size >= minCopies } ?: return null
+            val replies = messages.subList(copy + 1, messages.size).takeWhile { it.type != USER_MESSAGE }.map { storyKey(it.text) }.filter { it.length >= MIN_STORY_KEY }
+            if (replies.isEmpty()) return null
+            val before = messages.subList(0, copy).takeLastWhile { it.type != USER_MESSAGE }.map { storyKey(it.text) }.filter { it.length >= MIN_STORY_KEY }
+            return before to replies
+        }
+
+        /** Whether [item] is a reply saying one of [texts] ([storyKey]s). */
+        fun says(item: TimelineItem, texts: List<String>): Boolean = item is AssistantMessage && storyKey(item.markdown).let { own ->
+            own.length >= MIN_STORY_KEY && texts.any { own.contains(it.take(STORY_KEY_PREFIX)) || it.contains(own.take(STORY_KEY_PREFIX)) }
+        }
+
+        /**
+         * Where the transcript puts [message] — words [wanted] — when a run other than [instead] took it while under
+         * way: its newest copy (the [minCopies]th or later) is followed by the answer to it, and that answer is in the
+         * story of an earlier run, not in [instead]'s. The message is that run's, drawn after the story the transcript
+         * has ahead of the copy and above the answer, wherever the stream had got to when the message was filed. Null
+         * when the transcript does not show that, or the stories it is read against are not in hand.
+         */
+        private fun takenInto(message: V0ConversationMessageDto, wanted: String, instead: RunDto?, minCopies: Int): LocalPrompt? {
+            val (before, replies) = answersAround(wanted, minCopies) ?: return null
+            if (instead != null && storyOf(instead.id)?.any { says(it, replies) } == true) return null
+            val candidates = allRuns().asReversed().asSequence().filter { !it.id.startsWith(LOCAL_RUN_PREFIX) && it.id != instead?.id && (instead == null || !isNewer(it, instead)) }.take(TAKEN_INTO_RUNS)
+            for (run in candidates) {
+                val story = storyOf(run.id) ?: continue
+                val answer = story.indexOfFirst { says(it, replies) }
+                if (answer < 0) continue
+                val told = (0 until answer).lastOrNull { says(story[it], before) }
+                return LocalPrompt(message, run, steeredAfter = told?.plus(1) ?: answer)
+            }
+            return null
+        }
+
+        /**
+         * A message already filed as the prompt of its run that the transcript, read since, shows was taken into an
+         * earlier turn under way (see [takenInto]) — filed before the transcript had its copy, the run the account
+         * named for it having started: moved into that turn, above its answer. Read again only when the transcript, the
+         * prompts or the stories it is read against have changed. Returns whether anything moved.
+         */
+        fun refileTakenIntoTurn(): Boolean {
+            if (local.isEmpty() || messages.isEmpty()) return false
+            val inputs = listOf(messages, local, traces, partial, runs, live?.items)
+            val last = refiledFrom
+            if (last != null && last.indices.all { last[it] === inputs[it] }) return false
+            refiledFrom = inputs
+            val before = local
+            val tail = allRuns().asReversed().asSequence().filterNot { it.id.startsWith(LOCAL_RUN_PREFIX) }.take(TAKEN_INTO_RUNS).mapTo(HashSet()) { it.id }
+            for (prompt in before) {
+                if (!prompt.filed || prompt.steeredAfter != null || prompt.run.id !in tail) continue
+                val into = takenInto(prompt.message, normalizePrompt(prompt.message.text), prompt.run, minCopies = 1) ?: continue
+                local = local.map { if (it === prompt) into else it }
+                promptImages[prompt.run.id]?.let { images -> promptImages = promptImages - prompt.run.id + (prompt.message.id to images) }
+                delivered = delivered.map { d ->
+                    if (d.localMessageId != prompt.message.id || d.runId != prompt.run.id) d
+                    else Delivered(d.staged, d.followupId, d.localMessageId, into.run.id, steered = true, filedAt = d.filedAt, images = d.images, priorTranscriptCopies = d.priorTranscriptCopies, priorCopies = d.priorCopies, endedSeenAt = d.endedSeenAt)
+                }
+            }
+            return local !== before
         }
 
         /** Files [a] as [prompt] in the frame [fileInFrame] is building, [wanted] being its words as compared. Under the entry's monitor. */
@@ -1144,12 +1225,16 @@ class ConversationRepository(
             var messagesShown: MutableSet<String>? = null
             // What each turn of the record says to the user, and in how many turns each message is.
             val said = recordMessages(window)
+            // A steered prompt's turn is the tail of the one before (see [RecordTurn.steer]): the newest turn with a run
+            // of its own is the live one, and the turn a steer went into is where the steer is drawn.
+            val lastOwn = window.turns.indexOfLast { !it.steer }
+            var host: SteerHost? = null
             for ((i, turn) in window.turns.withIndex()) {
                 trailing.forEach { prompt -> if (insertBefore[prompt] == i) items += echo(prompt) }
                 val run = pairing.runAt(i)
                 // The newest turn of the record is the live one while the chat runs and nothing trails it: no prompt
                 // sent from here, and no run the record has not caught up with.
-                val newest = i == window.turns.lastIndex && appended.isEmpty() && loose.isEmpty()
+                val newest = i == lastOwn && appended.isEmpty() && loose.isEmpty()
                 val complete = run?.let { traces[it.id] }
                 val liveItems = if (complete == null && run != null && current?.runId == run.id && current.items.isNotEmpty()) current.items else null
                 val kept = if (complete == null && liveItems == null && run != null) partial[run.id]?.takeIf { it.isNotEmpty() } else null
@@ -1189,8 +1274,13 @@ class ConversationRepository(
                 val rendered = renderedTurns[turn.stepIndex]?.takeIf { it.inputs.sameAs(inputs) }?.also { perf.turnRenderReused() }
                     ?: RenderedTurn(inputs, renderTurn(inputs)).also { renderedTurns[turn.stepIndex] = it; perf.turnRendered() }
                 val start = items.size
-                items.addAll(rendered.items)
-                run?.let { r -> steers[r.id]?.let { spliceSteersInTurn(items, start, r, it) } }
+                val into = host
+                if (turn.steer && into != null) placeSteerTurn(items, into, rendered.items)
+                else {
+                    items.addAll(rendered.items)
+                    run?.let { r -> steers[r.id]?.let { spliceSteersInTurn(items, start, r, it) } }
+                    host = SteerHost(start, run, standIn != null)
+                }
                 shown += turn.stepIndex
                 val texts = CoordinatorTranscript.messageTexts(rendered.items)
                 if (texts.isNotEmpty()) (messagesShown ?: HashSet<String>().also { messagesShown = it }).addAll(texts)
@@ -1253,6 +1343,27 @@ class ConversationRepository(
             prompts.sortedByDescending { it.steeredAfter ?: 0 }.forEach { steered ->
                 items.add((body + (steered.steeredAfter ?: 0)).coerceIn(body, footer), steerBubble(steered))
             }
+        }
+
+        /** The turn of the record a later steer's turn goes into: where its rows begin in the items, its run, and whether the run's own story stands in for the record's copy of it. */
+        private inner class SteerHost(val start: Int, val run: RunDto?, val storied: Boolean)
+
+        /**
+         * Draws [steer] — the rendered turn of a prompt steered into [host]'s turn (see [RecordTurn.steer]) — within
+         * that turn's rows in [items], never after its footer. Where the run's own story stands in, it already tells what
+         * the steer's turn did: the prompt alone goes in, above the first reply of the steer's that the story carries
+         * (the answer to it), else at the story's end. Where the record's copy is drawn, the steer's turn follows it
+         * whole, the footer after both.
+         */
+        private fun placeSteerTurn(items: MutableList<TimelineItem>, host: SteerHost, steer: List<TimelineItem>) {
+            val own = steer.filterNot { it is RunFooter }
+            val end = items.size
+            val footer = (host.start until end).firstOrNull { (items[it] as? RunFooter)?.let { f -> host.run == null || f.runId == host.run.id } == true } ?: end
+            if (!host.storied) { items.addAll(footer, own); return }
+            val prompt = own.takeWhile { it is UserMessage || it is SystemNotification }
+            val replies = own.drop(prompt.size).filterIsInstance<AssistantMessage>().map { storyKey(it.markdown) }.filter { it.length >= MIN_STORY_KEY }
+            val answer = if (replies.isEmpty()) null else (host.start until footer).firstOrNull { says(items[it], replies) }
+            items.addAll(answer ?: footer, prompt)
         }
 
         private fun steerBubble(steered: LocalPrompt): UserMessage =
@@ -1454,7 +1565,9 @@ class ConversationRepository(
                 val timing = if (window.turnIndexed) window.timing(i) else null
                 RecordPairing.Turn(timing?.timestampMs?.takeIf { it > 0 }, timing?.durationMs, echoes[turn])
             }
-            val result = RecordPairing.pair(turns, candidates)
+            // A steered prompt's turn is the tail of the run before it (see [RecordTurn.steer]): it takes no run.
+            val own = window.turns.indices.filter { !window.turns[it].steer }
+            val result = if (own.size == turns.size) RecordPairing.pair(turns, candidates) else RecordPairing.pair(own.map { turns[it] }, candidates).spread(own, turns.size)
             recordPairingFrom = Triple(window, ordered, local)
             recordPairingEchoes = recordEchoes
             recordPairingWaiting = waiting
@@ -1575,9 +1688,12 @@ class ConversationRepository(
             val story = shown[run.id]
             val after = steered.steeredAfter ?: 0
             if (story == null || story.isEmpty()) {
-                // The run's rows are the transcript's own text and footer: the prompt follows the last of them.
+                // The run's rows are the transcript's own text and footer: the prompt goes above the transcript's answer
+                // to it, else it follows the last of them.
                 val at = items.indexOfLast { it is RunFooter && it.runId == run.id }.takeIf { it >= 0 } ?: items.size
-                items.add(at, bubble)
+                val head = (at - 1 downTo 0).firstOrNull { items[it] is RunFooter }?.plus(1) ?: 0
+                val answer = answersAround(normalizePrompt(steered.message.text))?.second?.let { replies -> (head until at).firstOrNull { says(items[it], replies) } }
+                items.add(answer ?: at, bubble)
                 return
             }
             val anchor = story.getOrNull((after - 1).coerceAtMost(story.lastIndex))
@@ -1695,7 +1811,7 @@ class ConversationRepository(
                 total = w.total,
                 firstStep = kept.firstOrNull()?.stepIndex ?: w.firstStep,
                 turnCount = w.state?.turnCount ?: 0,
-                turns = kept.map { CachedRecordTurn(it.stepIndex, it.stepCount, it.prompt, it.projectMode, it.errorMessage, blobId = it.blobId, complete = it.complete, stepTotal = it.stepTotal, messageSteps = it.messageSteps) },
+                turns = kept.map { CachedRecordTurn(it.stepIndex, it.stepCount, it.prompt, it.projectMode, it.errorMessage, blobId = it.blobId, complete = it.complete, stepTotal = it.stepTotal, messageSteps = it.messageSteps, steer = it.steer) },
                 timings = w.state?.timings?.map { CachedTurnTiming(it.durationMs, it.timestampMs) } ?: emptyList(),
                 turnIndexed = w.turnIndexed,
                 liveOffsetKey = w.state?.live?.offsetKey,
@@ -2115,21 +2231,33 @@ class ConversationRepository(
      * The list's refresh, for the held chats nobody is looking at: one whose row moved while no stream carries it
      * is read again — at once, and in full, when the row names a run the chat does not know (a turn started
      * elsewhere, a worker's report reaching its coordinator); a row that only moved is read as a revalidation is.
+     * A row that stopped running while a stream follows the chat between looks has the stream look in now.
      */
     private fun syncHeld(list: List<Agent>) {
         val held = synchronized(entries) { entries.values.filter { it.held && it.screens == 0 } }
         if (held.isEmpty()) return
         val rows = list.associateBy { it.id }
-        for (e in held) {
-            val row = rows[e.agentId] ?: continue
-            val newRun = synchronized(e) {
-                val moved = row.updatedAtMillis > e.heldRowAt
-                e.heldRowAt = maxOf(e.heldRowAt, row.updatedAtMillis)
-                if (!moved || e.streamJob?.isActive == true) return@synchronized null
-                row.isRunning || row.latestRunId?.let { it.startsWith(LOCAL_RUN_PREFIX) || e.runById(it) != null } == false
-            } ?: continue
-            revalidateNow(e, force = newRun, fresh = newRun)
+        for (e in held) syncHeld(e, rows[e.agentId] ?: continue)
+    }
+
+    /**
+     * One held chat against its row (see [syncHeld]). A move seen while a stream carries the chat is left for the
+     * stream's end ([startStreaming] asks again then): answered at once, a coordinator's quick turns elsewhere — each
+     * started and over between two refreshes — were taken as heard while the chat still followed the first, and the
+     * refresh after found the row where it was and read nothing, the later turns never shown.
+     */
+    private fun syncHeld(e: Entry, row: Agent) {
+        var stopped = false
+        val newRun = synchronized(e) {
+            if (!e.held || e.screens != 0) return
+            val streaming = e.streamJob?.isActive == true
+            stopped = !row.isRunning && streaming
+            if (row.updatedAtMillis <= e.heldRowAt || streaming) return@synchronized null
+            e.heldRowAt = row.updatedAtMillis
+            row.isRunning || row.latestRunId?.let { it.startsWith(LOCAL_RUN_PREFIX) || e.runById(it) != null } == false
         }
+        if (stopped) hub.lookNow(e.agentId)
+        if (newRun != null) revalidateNow(e, force = newRun, fresh = newRun)
     }
 
     /**
@@ -2620,6 +2748,7 @@ class ConversationRepository(
         var filed: List<Pair<Awaiting, LocalPrompt>> = emptyList()
         var adopt = false
         var unfollowed = false
+        var refiled = false
         val workers = synchronized(this) {
             mutate()
             // No screen on the chat — held, or left behind — shows only its window: nothing past it is kept either.
@@ -2630,6 +2759,7 @@ class ConversationRepository(
                 adopt = adoptWanted
                 unfollowed = streamJob?.isActive != true && filed.any { (_, prompt) -> prompt.steeredAfter == null }
             }
+            refiled = refileTakenIntoTurn()
             lastPublishAtMs = monotonicMillis()
             val buildStartedAt = System.nanoTime()
             // Whichever source answered last, a coordinator's message once shown stays on the list (see [ShownMessages]).
@@ -2654,6 +2784,7 @@ class ConversationRepository(
             if (created.isNotEmpty()) agents.applyLineage(agentId, created.associateWith { AgentParentKind.PROJECT_WORKER }, LineageSignal.COORDINATOR_CREATED)
         }
         if (filed.isNotEmpty()) { val toCommit = filed; scope.launch { commitFiled(this@publish, toCommit) } }
+        else if (refiled) scope.launch { persist(this@publish, session.current) }
         if (adopt) requestAdoption(this)
         // A queued message filed under the run it started, nothing followed: that run is found and followed, however
         // the turn before it ended (a Stop's end looks for no next run).
@@ -2683,7 +2814,9 @@ class ConversationRepository(
         val kept = filed.map { (a, prompt) -> Triple(a, prompt, runCatching { attachments.commit(agentId, prompt.run.id, a.staged.attachments) }.getOrDefault(a.staged.attachments.attachments)) }
         e.publish(
             mutate = {
-                for ((_, prompt, moved) in kept) {
+                for ((_, filedAs, moved) in kept) {
+                    // As it stands now: moved into the turn that took it since it was filed (see [Entry.refileTakenIntoTurn]).
+                    val prompt = local.firstOrNull { it.message.id == filedAs.message.id } ?: filedAs
                     val imagesKey = if (prompt.steeredAfter == null) prompt.run.id else prompt.message.id
                     promptImages = if (moved.isEmpty()) promptImages - imagesKey else promptImages + (imagesKey to moved)
                     delivered.firstOrNull { it.localMessageId == prompt.message.id && it.runId == prompt.run.id }?.images = moved
@@ -4364,7 +4497,7 @@ class ConversationRepository(
                 // from the blobs on this device, or else read again by the next load.
                 RecordTurn(
                     turn.stepIndex, turn.stepCount, turn.prompt, turn.projectMode, items ?: emptyList(), errorMessage = turn.errorMessage, turnIndexed = saved.turnIndexed,
-                    blobId = turn.blobId, complete = turn.complete && items != null, stepTotal = turn.stepTotal, messageSteps = turn.messageSteps,
+                    blobId = turn.blobId, complete = turn.complete && items != null, stepTotal = turn.stepTotal, messageSteps = turn.messageSteps, steer = turn.steer,
                 )
             }
             val unbuilt = turns.filter { it.blobId != null && files[RecordTurn.traceKey(it.stepIndex, saved.turnIndexed)] == null }
@@ -4823,7 +4956,13 @@ class ConversationRepository(
             )
             true
         }
-        if (following) job.start() else job.cancel()
+        if (following) {
+            // A held chat's row may have moved on while this followed it (see [syncHeld]): asked again once it ends.
+            job.invokeOnCompletion { cause -> if (cause == null) agents.agent(agentId)?.let { syncHeld(e, it) } }
+            job.start()
+        } else {
+            job.cancel()
+        }
     }
 
     /**
@@ -5352,7 +5491,7 @@ class ConversationRepository(
         val agentId = e.agentId
         val due = synchronized(e) {
             val ordered = allServerRuns(e)
-            e.awaiting.filter { a -> !a.sending && (!a.queuedOnAccount || a.behindRunId == null || ordered.any { it.id != a.behindRunId && isNewer(it, ordered.firstOrNull { r -> r.id == a.behindRunId }) }) }
+            e.awaiting.filter { a -> !a.sending && (!a.queuedOnAccount || a.behindRunId == null || (a.runId != null && e.hasStarted(a.runId, a.behindRunId)) || ordered.any { it.id != a.behindRunId && isNewer(it, ordered.firstOrNull { r -> r.id == a.behindRunId }) }) }
         }
         if (due.isEmpty()) return
         val api = session.current.api
@@ -6031,6 +6170,17 @@ class ConversationRepository(
 
         /** A prompt's text as the server and the phone agree on it: runs of whitespace as one space, trimmed. */
         fun normalizePrompt(text: String): String = QueuePlacement.textKey(text)
+        /**
+         * A reply's words as the transcript and a stream both carry them, letters and digits alone: the stream's
+         * segments and the transcript's messages split and mark up the same text their own way.
+         */
+        fun storyKey(text: String): String = text.filter { it.isLetterOrDigit() }.lowercase()
+        /** A reply this short says too little to tell one turn's answer from another's. */
+        const val MIN_STORY_KEY = 16
+        /** How much of a reply is compared against a story's rows: enough to tell it apart, short of where a stream's segment and a transcript's message part ways. */
+        const val STORY_KEY_PREFIX = 48
+        /** The newest runs a queued message may have been taken into, or filed under, when the transcript is read for where it went (see [Entry.takenInto]). */
+        const val TAKEN_INTO_RUNS = 3
         /** The pauses between looks for the next run and reads of the record's growth while the account runs on (see [keepFollowing]). */
         const val KEEP_FOLLOWING_BASE_MS = 2_000L
         const val KEEP_FOLLOWING_MAX_MS = 15_000L

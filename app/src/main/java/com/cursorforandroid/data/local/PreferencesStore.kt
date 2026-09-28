@@ -165,7 +165,7 @@ class PreferencesStore(
         val collapsedSidebarSections = stringSetPreferencesKey("sidebar_collapsed_sections")
         /** Settings › Appearance › Shorten long Projects list; absent reads as on (see [shortenSidebarLists]). */
         val shortenSidebarLists = booleanPreferencesKey("sidebar_shorten_long_lists")
-        /** Settings › Experimental › Keep chats live; absent reads as off (see [liveSync]). */
+        /** Settings › Advanced › Keep chats live; absent reads as on (see [liveSync]). */
         val liveSync = booleanPreferencesKey("live_sync")
         /** Settings › New chat page: what the New Chat pane lists under its composer (`recent` / `projects`); absent is Recent. */
         val newChatHome = stringPreferencesKey("new_chat_home")
@@ -173,6 +173,8 @@ class PreferencesStore(
         val dismissedNotices = stringPreferencesKey("dismissed_notices")
         /** Settings › Confirm before stopping; absent reads as on (see [confirmStop]). */
         val confirmStop = booleanPreferencesKey("confirm_stop")
+        /** Whether a long queue over the composer stands stacked, as the reader last left one; absent reads as stacked (see [queueStacked]). */
+        val queueStacked = booleanPreferencesKey("queue_stacked")
         /** The widget kinds whose picker previews the system holds, each with the build and boot it was published on (see `WidgetPreviews`). */
         val widgetPreviewsPublished = stringSetPreferencesKey("widget_previews_published")
         /** The conversation panel's width beside the chat on a wide window, as a share of the window, as last dragged; absent until it has been. */
@@ -289,6 +291,14 @@ class PreferencesStore(
     val confirmStop: Flow<Boolean> = data.map { it[Keys.confirmStop] ?: true }
 
     suspend fun setConfirmStop(enabled: Boolean) = edit { it[Keys.confirmStop] = enabled }
+
+    /**
+     * Whether a queue of more than a couple of follow-ups stands as a deck over the composer (`QueueStack`) rather than
+     * as the full list: stacked until the reader opens one, then open in every chat until they stack one again.
+     */
+    val queueStacked: Flow<Boolean> = data.map { it[Keys.queueStacked] ?: true }
+
+    suspend fun setQueueStacked(stacked: Boolean) = edit { it[Keys.queueStacked] = stacked }
 
     // ---- Extended mode (device-level; deliberately untouched by clearSession) ------------------------------------
 
@@ -425,9 +435,11 @@ class PreferencesStore(
     suspend fun setShortenSidebarLists(enabled: Boolean) = edit { it[Keys.shortenSidebarLists] = enabled }
 
     /**
-     * Settings › Experimental › Keep chats live: background live sync (see `LiveSync`); off unless turned on.
+     * Settings › Advanced › Keep chats live: background live sync (see `LiveSync`). On unless turned off: the switch
+     * is written only when it is flipped, so whoever turned it off while it was an experiment keeps it off, and whoever
+     * never touched it has it on.
      */
-    val liveSync: Flow<Boolean> = data.map { it[Keys.liveSync] ?: false }
+    val liveSync: Flow<Boolean> = data.map { it[Keys.liveSync] ?: true }
 
     suspend fun setLiveSync(enabled: Boolean) = edit { it[Keys.liveSync] = enabled }
 

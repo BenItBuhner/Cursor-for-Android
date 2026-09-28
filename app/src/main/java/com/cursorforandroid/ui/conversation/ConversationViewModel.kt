@@ -280,6 +280,15 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     /** The reader closed a notice among the rows (`NoticeCard.dismissKey`): every such notice in this chat goes, and stays gone. */
     fun dismissInlineNotice(key: String) = dismissals.dismissInline(key)
 
+    /** Whether a long queue over the composer stands stacked (see [PreferencesStore.queueStacked]). */
+    val queueStacked: StateFlow<Boolean> = graph.prefs.queueStacked
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    /** The reader opened the stacked queue, or stacked the open one: every chat's queue stands so from now on. */
+    fun setQueueStacked(stacked: Boolean) {
+        viewModelScope.launch { graph.prefs.setQueueStacked(stacked) }
+    }
+
     /** Which private surfaces the screen may offer: the answer chips, the account's queue, steering, Ask and Debug. */
     val capabilities: StateFlow<Capabilities> = graph.extendedMode.capabilities
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Capabilities.DOCUMENTED)

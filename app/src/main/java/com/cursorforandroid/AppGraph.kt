@@ -769,7 +769,7 @@ class AppGraph(
     }
     val conversations: ConversationRepository get() = lazyConversations.value
 
-    /** Background live sync (Settings › Experimental › Keep chats live): started by [LiveSyncBinding]. */
+    /** Background live sync (Settings › Advanced › Keep chats live): started by [LiveSyncBinding]. */
     private val lazyLiveSync = lazy {
         LiveSync(
             target = object : LiveSync.Target {

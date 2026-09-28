@@ -83,7 +83,6 @@ object SettingsCopy {
     const val UNREAD_THIS_PHONE_DETAIL = "Chats from elsewhere show as read until opened here."
     const val SHORTEN_PROJECTS = "Shorten long Projects list"
     const val SHORTEN_PROJECTS_DETAIL = "Shows 5 Projects until you tap Show more."
-    const val GROUP_EXPERIMENTAL = "Experimental"
     const val LIVE_SYNC = "Keep chats live"
     const val LIVE_SYNC_DETAIL = "While the app is open, running chats, their Project coordinators and your last few chats stream in the background, so they open up to date. Uses more data and battery while agents run."
     const val GROUP_UPDATES = "Version and updates"
@@ -255,10 +254,7 @@ fun SettingsScreen(
                     ExtendedModeRow(graph, enabled = extendedMode)
                     HairlineDivider()
                     TranscriptEngineRow(graph, extendedMode = extendedMode)
-                }
-
-                Group(SettingsCopy.GROUP_EXPERIMENTAL)
-                SettingsCard {
+                    HairlineDivider()
                     LiveSyncRow(graph)
                 }
             }
@@ -390,7 +386,7 @@ private fun ShortenProjectsRow(graph: AppGraph) {
 internal fun LiveSyncRow(graph: AppGraph) {
     val scope = rememberCoroutineScope()
     // On the main dispatcher for the reason the Extended mode switch is (see SettingsScreen).
-    val enabled by graph.prefs.liveSync.collectAsStateWithLifecycle(initialValue = false, context = Dispatchers.Main.immediate)
+    val enabled by graph.prefs.liveSync.collectAsStateWithLifecycle(initialValue = true, context = Dispatchers.Main.immediate)
     SettingsToggleRow(
         title = SettingsCopy.LIVE_SYNC,
         description = SettingsCopy.LIVE_SYNC_DETAIL,

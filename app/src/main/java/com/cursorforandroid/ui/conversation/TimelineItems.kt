@@ -149,7 +149,7 @@ private fun HumanMessage(item: UserMessage, modifier: Modifier) {
     val sendMotion = LocalSendMotion.current
     // A copy still landing on the bubble arrives at its fade as it is on that frame, the filing mid-flight included.
     val alphaNow = rememberUpdatedState(alpha)
-    val look = remember { SendTargetLook(restingFade = PendingMessageAlpha, fadeNow = { alphaNow.value }) }
+    val look = remember { SendTargetLook(fixedFade = PendingMessageAlpha, fading = { alphaNow.value }) }
     Box(modifier.fillMaxWidth().padding(start = 32.dp), contentAlignment = Alignment.CenterEnd) {
         MessageActions(
             text = item.text,

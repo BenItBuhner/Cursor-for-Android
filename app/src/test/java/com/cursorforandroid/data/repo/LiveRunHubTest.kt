@@ -498,6 +498,35 @@ class LiveRunHubTest {
     }
 
     /**
+     * A run followed between looks rests up to [LiveRunHub]'s longest pause before it hears its own end; the agent
+     * list's word that the agent stopped ([LiveRunHub.lookNow]) has it look in at once instead.
+     */
+    @Test
+    fun `asked to look now, a resting run hears its end without waiting out the pause`() = runBlocking {
+        hub = LiveRunHub(
+            session, agents, nowProvider = { now }, pollIntervalMs = 50, releaseGraceMs = releaseGrace, reconnectBaseMs = 20, reconnectMaxMs = 40,
+            lookBaseMs = 30_000, lookMaxMs = 30_000, lookQuietMs = 30, lookWindowMs = 150, scope = scope,
+        )
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
+        streamer.emit("run-1", RunStreamEvent.Position("run-1#1"))
+        val subscription = scope.launch { hub.snapshots("bc-1", "run-1", watched = kotlinx.coroutines.flow.MutableStateFlow(false)).collect { } }
+        awaitUntil { hub.stats().contains("resting=1") }
+
+        streamer.emit("run-1", RunStreamEvent.Result("run-1", RunStatus.FINISHED, "Done.", 1_000, null))
+        delay(300)
+        assertThat(snapshot()?.finished).isFalse()
+        hub.lookNow("bc-2")
+        delay(300)
+        assertThat(snapshot()?.finished).isFalse()
+
+        hub.lookNow("bc-1")
+        awaitUntil(timeoutMs = 2_000) { snapshot()?.finished == true }
+        assertThat(connections()).isEqualTo(2)
+        subscription.cancel()
+    }
+
+    /**
      * Cancelling a coroutine does not stop it: a released pass can still be applying events when the next
      * subscriber restarts the stream. Whatever the scheduling, it must not write into the accumulator that
      * replaced its own — the trace would read as the agent saying everything twice.

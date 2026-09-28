@@ -281,6 +281,8 @@ data class CachedRecordTurn(
     val complete: Boolean = true,
     val stepTotal: Int? = null,
     val messageSteps: Int? = null,
+    /** The prompt went into the turn under way (see `RecordTurn.steer`). */
+    val steer: Boolean = false,
 )
 
 @Serializable
