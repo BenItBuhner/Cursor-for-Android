@@ -6,6 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,8 +20,11 @@ import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.repo.AgentListState
 import com.cursorforandroid.domain.AgentParentKind
 import com.cursorforandroid.domain.LocalAgentState
+import com.cursorforandroid.ui.agents.AgentsViewModel
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.panel.sectionRow
+import com.cursorforandroid.util.AppClock
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
@@ -128,7 +132,13 @@ private fun projectBodyItems(graph: AppGraph, projectId: String, onOpenAgent: (S
     }
     contextFile?.let { file -> ContextFileSheet(file, onDismiss = viewModel::closeContextFile) }
     val now = viewModel.now()
-    return { projectSection(state, local, busy, actions, nowMillis = now) }
+    val clock = produceState(now) {
+        while (true) {
+            delay(AgentsViewModel.CLOCK_TICK_MS)
+            value = AppClock.now()
+        }
+    }
+    return { projectSection(state, local, busy, actions, nowMillis = now, clock = clock) }
 }
 
 /**
