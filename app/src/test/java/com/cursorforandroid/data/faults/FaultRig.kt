@@ -211,7 +211,8 @@ class FaultRig(
         .build()
         // As `AppGraph` widens the account client: every lane of the throttle on the wire at once.
         .also { it.dispatcher.maxRequestsPerHost = ApiThrottle.ON_THE_WIRE + 2 }
-    private val accountRpc = ConnectJsonClient(accountClient, baseUrl)
+    /** The account service's Connect client, its throttle's lanes with it. */
+    val accountRpc = ConnectJsonClient(accountClient, baseUrl)
     private val sessionTokens = SessionTokenProvider(accountClient, key, apiUrl = baseUrl, now = { now })
     /** The account's list, pins and records (`BackgroundComposerService`), over [accountClient] on the same host. */
     val accountAgents: BackgroundComposerApi = BackgroundComposerApi(accountRpc, sessionTokens)

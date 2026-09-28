@@ -1,7 +1,9 @@
 package com.cursorforandroid.data.api
 
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
@@ -163,6 +165,8 @@ class ApiThrottle(
     maxInFlight: Int = DEFAULT_MAX_IN_FLIGHT,
     private val now: () -> Long = System::currentTimeMillis,
     blobsInFlight: Int = BLOBS_IN_FLIGHT,
+    /** The longest a control, blob or media call keeps its permit (see [Gate]). */
+    controlHoldMs: Long = CONTROL_HOLD_MS,
 ) {
     /**
      * Where a call waits for its permit: [CONTROL], the account's lists, queues and writes, a few at a time; [BLOBS],
@@ -172,12 +176,22 @@ class ApiThrottle(
      * which stays open for as long as the chat is on screen and would otherwise hold one of the control lane's few
      * permits the whole while; [MEDIA], the reads behind a figure on screen — which store a Project has, a store
      * file's presigned link, a file of the agent's machine — which someone is looking at a spinner for, and which
-     * waited behind a big Project's refresh and its record's blob prefetch when they shared the control lane. Every
-     * lane waits out the same pause, and a refusal on any of them pauses them all.
+     * waited behind a big Project's refresh and its record's blob prefetch when they shared the control lane;
+     * [STATE], a chat's whole conversation state (`StreamConversation`), which on a coordinator of thousands of turns
+     * takes a minute or more, and held the control lane's three permits for as long when a Project's kept-live chats
+     * each read theirs — the queue, the list and the chat on screen waiting behind them (Bennett's 0.4.15 dump,
+     * `control 3/3 +3 waiting` with nothing on the wire for a minute); [STATE_ON_SCREEN], the same read for a chat on
+     * screen (see [OnScreenChats]), so the chats nobody is looking at never hold the one someone is. Every lane waits
+     * out the same pause, and a refusal on any of them pauses them all.
      */
-    enum class Lane { CONTROL, BLOBS, WATCH, MEDIA }
+    enum class Lane { CONTROL, BLOBS, WATCH, MEDIA, STATE, STATE_ON_SCREEN }
 
-    private class Gate(val size: Int) {
+    /**
+     * [holdMs]: the longest one call keeps a permit — past it the call is cancelled and fails as a timeout, which
+     * its caller retries like any other — so no call, whatever it waits on (a resolver that does not answer after
+     * Doze is bounded by no socket timeout), keeps a lane taken; null for a lane whose calls are meant to stay open.
+     */
+    private class Gate(val size: Int, val holdMs: Long?) {
         val semaphore = Semaphore(size)
         val waiting = java.util.concurrent.atomic.AtomicInteger()
         val inFlight = java.util.concurrent.atomic.AtomicInteger()
@@ -191,7 +205,12 @@ class ApiThrottle(
             }
             inFlight.incrementAndGet()
             try {
-                return block()
+                if (holdMs == null) return block()
+                return try {
+                    withTimeout(holdMs) { block() }
+                } catch (e: TimeoutCancellationException) {
+                    throw java.io.InterruptedIOException("timeout").apply { initCause(e) }
+                }
             } finally {
                 inFlight.decrementAndGet()
                 semaphore.release()
@@ -200,10 +219,12 @@ class ApiThrottle(
     }
 
     private val gates = mapOf(
-        Lane.CONTROL to Gate(maxInFlight),
-        Lane.BLOBS to Gate(blobsInFlight),
-        Lane.WATCH to Gate(WATCHES_IN_FLIGHT),
-        Lane.MEDIA to Gate(MEDIA_IN_FLIGHT),
+        Lane.CONTROL to Gate(maxInFlight, controlHoldMs),
+        Lane.BLOBS to Gate(blobsInFlight, controlHoldMs),
+        Lane.WATCH to Gate(WATCHES_IN_FLIGHT, null),
+        Lane.MEDIA to Gate(MEDIA_IN_FLIGHT, controlHoldMs),
+        Lane.STATE to Gate(STATES_IN_FLIGHT, STATE_HOLD_MS),
+        Lane.STATE_ON_SCREEN to Gate(STATES_IN_FLIGHT, STATE_HOLD_MS),
     )
     @Volatile private var pausedUntilMillis = 0L
     private val refusals = java.util.concurrent.atomic.AtomicInteger()
@@ -266,11 +287,17 @@ class ApiThrottle(
         const val BLOBS_IN_FLIGHT = 8
         /** Open chats' live streams at once (see [Lane.WATCH]): one per chat on screen, two panes at most. */
         const val WATCHES_IN_FLIGHT = 2
+        /** Conversation states read at once, in each of [Lane.STATE] and [Lane.STATE_ON_SCREEN]: two panes on screen, two chats behind them. */
+        const val STATES_IN_FLIGHT = 2
+        /** The longest a control, blob or media call keeps its permit (see [Gate]): past every client's own call timeout, which is what normally ends one. */
+        const val CONTROL_HOLD_MS = 90_000L
+        /** The longest a conversation state read keeps its permit: the record client's call timeout (see `AppGraph`). */
+        const val STATE_HOLD_MS = 5 * 60_000L
         /**
          * Every lane's permits together with the defaults: the calls a client sharing one throttle can have on the wire
          * at once, which its dispatcher's per-host limit must let through, or the lanes queue behind each other there.
          */
-        const val ON_THE_WIRE = DEFAULT_MAX_IN_FLIGHT + BLOBS_IN_FLIGHT + WATCHES_IN_FLIGHT + MEDIA_IN_FLIGHT
+        const val ON_THE_WIRE = DEFAULT_MAX_IN_FLIGHT + BLOBS_IN_FLIGHT + WATCHES_IN_FLIGHT + MEDIA_IN_FLIGHT + 2 * STATES_IN_FLIGHT
         const val DEFAULT_PAUSE_MS = 1_500L
         const val MIN_PAUSE_MS = 250L
         const val MAX_PAUSE_MS = 15_000L

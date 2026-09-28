@@ -61,13 +61,51 @@ class ApiThrottleTest {
         val shown = List(6) { CompletableDeferred<Unit>() }
         val figures = shown.map { gate -> async { throttle.call(lane = ApiThrottle.Lane.MEDIA) { gate.await() } } }
         runCurrent()
-        assertThat(throttle.describe()).isEqualTo("control 3/3 +7 waiting · blobs 8/8 +142 waiting · watch 0/2 · media 4/4 +2 waiting")
+        assertThat(throttle.describe()).isEqualTo("control 3/3 +7 waiting · blobs 8/8 +142 waiting · watch 0/2 · media 4/4 +2 waiting · state 0/2 · state_on_screen 0/2")
 
         held.complete(Unit)
         shown.forEach { it.complete(Unit) }
         advanceUntilIdle()
         (background + figures).forEach { it.await() }
-        assertThat(throttle.describe()).isEqualTo("control 0/3 · blobs 0/8 · watch 0/2 · media 0/4")
+        assertThat(throttle.describe()).isEqualTo("control 0/3 · blobs 0/8 · watch 0/2 · media 0/4 · state 0/2 · state_on_screen 0/2")
+    }
+
+    /**
+     * Bennett's 0.4.15 dump: `control 3/3 +3 waiting` with nothing on the wire, the chat's refresh among the waiting.
+     * A call that never ends — a lookup that does not answer after Doze is bounded by no socket timeout — gives its
+     * permit back at the hold ceiling, failing as a timeout its caller retries, and the call behind it goes out.
+     */
+    @Test
+    fun `a call that never ends gives its permit back at the hold ceiling, and the one waiting goes out`() = runTest {
+        val throttle = ApiThrottle(maxInFlight = 1, now = { testScheduler.currentTime }, controlHoldMs = 1_000L)
+        val stuck = async { runCatching { throttle.call<Unit> { CompletableDeferred<Unit>().await() } } }
+        val behind = async { throttle.call { testScheduler.currentTime } }
+        runCurrent()
+        assertThat(throttle.describe()).startsWith("control 1/1 +1 waiting")
+        advanceTimeBy(999)
+        runCurrent()
+        assertThat(behind.isCompleted).isFalse()
+        advanceTimeBy(2)
+        runCurrent()
+        assertThat(stuck.await().exceptionOrNull()).isInstanceOf(java.io.InterruptedIOException::class.java)
+        assertThat(behind.await()).isEqualTo(1_000L)
+        assertThat(throttle.inFlight(ApiThrottle.Lane.CONTROL)).isEqualTo(0)
+    }
+
+    /** A chat's conversation state reads in lanes of their own: the control lane full, the one on screen still goes out, and a kept-live chat's never holds it. */
+    @Test
+    fun `a chat's state reads go out with the control lane full, the one on screen ahead of the kept-live chats'`() = runTest {
+        val throttle = ApiThrottle(maxInFlight = 3, now = { testScheduler.currentTime })
+        val held = CompletableDeferred<Unit>()
+        val control = List(6) { async { throttle.call { held.await() } } }
+        val keptLive = List(4) { async { throttle.call(lane = ApiThrottle.Lane.STATE) { held.await() } } }
+        runCurrent()
+        val onScreen = async { throttle.call(lane = ApiThrottle.Lane.STATE_ON_SCREEN) { "state" } }
+        runCurrent()
+        assertThat(onScreen.isCompleted).isTrue()
+        assertThat(throttle.describe()).startsWith("control 3/3 +3 waiting · blobs 0/8 · watch 0/2 · media 0/4 · state 2/2 +2 waiting · state_on_screen 0/2")
+        held.complete(Unit)
+        (control + keptLive).forEach { it.await() }
     }
 
     @Test

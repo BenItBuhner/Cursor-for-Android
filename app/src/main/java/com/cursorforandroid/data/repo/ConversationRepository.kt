@@ -19,6 +19,8 @@ import com.cursorforandroid.data.api.dto.V0ConversationMessageDto
 import com.cursorforandroid.data.api.dto.V0ConversationResponseDto
 import com.cursorforandroid.data.api.ConnectRpcException
 import com.cursorforandroid.data.api.DeviceNetwork
+import com.cursorforandroid.data.api.OFFLINE
+import com.cursorforandroid.data.api.OnScreenChats
 import com.cursorforandroid.data.api.isTransportFailure
 import com.cursorforandroid.data.api.isLostReply
 import com.cursorforandroid.data.api.toCursorError
@@ -625,6 +627,8 @@ class ConversationRepository(
         var quietFailures = 0
         /** The quiet re-read waiting its pause (see [quietRefreshFailure]). */
         var quietJob: Job? = null
+        /** [quietJob] is the wait that confirms an offline reading before it is said (see [confirmOffline]). */
+        var confirmingOffline = false
         /**
          * When the account's word last confirmed the Beta engine's window current (the app clock): a live stream held
          * with nothing new to say, or a sync that found the chat at rest. A reopen or a return to the foreground
@@ -1830,7 +1834,7 @@ class ConversationRepository(
                 turnIndexed = w.turnIndexed,
                 liveOffsetKey = w.state?.live?.offsetKey,
                 liveStatus = w.state?.live?.status,
-                rootProject = w.state?.isRootProject == true,
+                rootProject = w.state?.isRootProject == true || projectMode,
                 currentAtMillis = currentAt,
             )
         }
@@ -2195,6 +2199,7 @@ class ConversationRepository(
             synchronized(e) {
                 if (e.screens == 0) TranscriptPerf.opened(agentId)
                 e.screens++
+                OnScreenChats.opened(agentId)
                 e.attached++
                 // A screen attaching can see the chat, whatever the last one that left had done.
                 e.paused = false
@@ -2349,6 +2354,7 @@ class ConversationRepository(
         synchronized(e) {
             if (e.screens == 0) return
             e.screens--
+            OnScreenChats.closed(agentId)
             leave(e)
         }
     }
@@ -3384,12 +3390,13 @@ class ConversationRepository(
                     quietFailures = 0
                     quietJob?.cancel()
                     quietJob = null
+                    confirmingOffline = false
                     transcriptError = null
                     transcriptUnavailable = false
                     fetched = true
                     fetchedAt = now
                     inputsUpdatedAt = agents.agent(agentId)?.updatedAtMillis ?: 0L
-                    if (built.turns.any { it.projectMode }) projectMode = true
+                    if (built.turns.any { it.projectMode } || built.state?.isRootProject == true) projectMode = true
                     project = projectMode
                     pruneLocal()
                     promptImages = onDevice + promptImages.filterKeys { key -> local.any { it.run.id == key } }
@@ -4407,29 +4414,71 @@ class ConversationRepository(
             publish(transform = { copy(isLoading = false) })
             return
         }
-        publish(mutate = { unreached = failure.isUnreached() }, transform = { copy(isLoading = false, transcriptError = message) })
+        // Said in the words the failure has now: a lookup that failed while Doze held the app off the network, said
+        // later, is not "offline" on a phone that is back on it.
+        val said = failure?.userMessage() ?: message
+        publish(mutate = { unreached = failure.isUnreached() }, transform = { copy(isLoading = false, transcriptError = said) })
     }
 
     /**
-     * Counts a background refresh the server was slow to answer — a timeout or a transient server error; not a
-     * refusal, a host that could not be looked up or reached, or the phone being offline, which say something the
-     * reader should see — and schedules the next quiet read after [quietRetryDelaysMs]'s pause, the last pause for
-     * every one after. True while the failure is still to be kept quiet: every pause but the last spent. A read that
-     * answers resets the count (see [loadFromRecord]).
+     * Counts a background refresh that failed on the way to Cursor or on a slow answer — a timeout, a transient
+     * server error, and on a phone that is online a lookup or a connection that failed: a resolver's moment after
+     * Doze or a network handoff — and schedules the next quiet read after [quietRetryDelaysMs]'s pause, the last
+     * pause for every one after. True while the failure is still to be kept quiet: every pause but the last spent. A
+     * read that answers resets the count (see [loadFromRecord]). A refusal is said at once; so is being offline, once
+     * the phone still says so a moment later (see [confirmOffline]).
      */
     private fun Entry.quietRefreshFailure(failure: Throwable?): Boolean {
-        if (!failure.isSlowAnswer() || DeviceNetwork.isOnline() == false || quietRetryDelaysMs.isEmpty()) return false
+        if (quietRetryDelaysMs.isEmpty()) return false
+        val online = DeviceNetwork.isOnline()
+        if (online == false && failure.isUnreached()) return confirmOffline()
+        if (!failure.isSlowAnswer() && !failure.isUnreached()) return false
         val entry = this
         return synchronized(this) {
             val failures = ++quietFailures
             val pause = quietRetryDelaysMs[(failures - 1).coerceAtMost(quietRetryDelaysMs.size - 1)]
             quietJob?.cancel()
+            confirmingOffline = false
             quietJob = scope.launch {
                 delay(pause)
                 if (synchronized(entry) { entry.attached > 0 && !entry.paused }) revalidateNow(entry, force = true)
             }
             failures <= quietRetryDelaysMs.size
         }
+    }
+
+    /**
+     * The phone reads offline as the refresh fails. Right after Doze or a network handoff that reading is a moment's
+     * (the system has no active network until it hands the app one back), so it is checked again after
+     * [OFFLINE_CONFIRM_MS] before "offline" is said. Once said, the phone's word is checked every
+     * [OFFLINE_PROBE_MS], without a request, and the chat read again the moment it is back online: nothing else asks
+     * while the reader waits. Always true: the failure is this function's to say.
+     */
+    private fun Entry.confirmOffline(): Boolean {
+        val entry = this
+        synchronized(this) {
+            if (confirmingOffline && quietJob?.isActive == true) return true
+            quietJob?.cancel()
+            confirmingOffline = true
+            quietJob = scope.launch {
+                delay(OFFLINE_CONFIRM_MS)
+                var said = false
+                while (synchronized(entry) { entry.attached > 0 }) {
+                    if (DeviceNetwork.isOnline() != false) {
+                        synchronized(entry) { entry.confirmingOffline = false }
+                        if (synchronized(entry) { !entry.paused }) revalidateNow(entry, force = true)
+                        return@launch
+                    }
+                    if (!said) {
+                        said = true
+                        entry.publish(mutate = { unreached = true }, transform = { copy(isLoading = false, transcriptError = OFFLINE) })
+                    }
+                    delay(OFFLINE_PROBE_MS)
+                }
+                synchronized(entry) { entry.confirmingOffline = false }
+            }
+        }
+        return true
     }
 
     /**
@@ -4568,7 +4617,10 @@ class ConversationRepository(
                         recordWindow = window
                         restored = window
                     }
-                    if (built.any { it.projectMode }) projectMode = true
+                    // A Project root's newest turns can all be its workers' injected reports, none a prompt sent in
+                    // Project mode: the saved state's word is what says the chat is a coordinator before the account
+                    // answers (Bennett's 0.4.15 coordinator, painted from the disk while its state read never landed).
+                    if (built.any { it.projectMode } || saved.rootProject) projectMode = true
                     project = projectMode
                 },
                 transform = { copy(isProjectConversation = project) },
@@ -6255,6 +6307,10 @@ class ConversationRepository(
          * the reader is told; then every half minute until the record answers.
          */
         val QUIET_RETRY_DELAYS_MS = listOf(2_000L, 5_000L, 15_000L, 30_000L)
+        /** How long an offline reading at a failed refresh is given to pass before "offline" is said (see [confirmOffline]). */
+        const val OFFLINE_CONFIRM_MS = 3_000L
+        /** How often the phone's word is checked, without a request, while "offline" is said (see [confirmOffline]). */
+        const val OFFLINE_PROBE_MS = 2_000L
         /** How many looks, [KEEP_FOLLOWING_BASE_MS] apart, find the account idle after a run ended before the records' word is taken (see [keepFollowing]). */
         const val KEEP_FOLLOWING_IDLE_LOOKS = 4
         /** How seldom a load that left the chat running with no run under way has it reconciled with the server (see [reconcileAfterLoad]). */
