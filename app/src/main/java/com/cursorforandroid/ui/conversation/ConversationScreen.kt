@@ -766,6 +766,7 @@ fun ConversationScreen(
                     stacked = queueStackedHere,
                     onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
                     modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
+                    delivered = { key -> queueFlights.delivered(key.substringAfter(':')) },
                 ) { index, face ->
                     if (index < queue.size) {
                         QueuedFollowUpCard(

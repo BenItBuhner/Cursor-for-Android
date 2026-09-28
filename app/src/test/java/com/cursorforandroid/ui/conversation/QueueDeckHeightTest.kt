@@ -23,9 +23,9 @@ import java.nio.ByteBuffer
 
 /**
  * The queue card's height, one 16 ms frame at a time on a held clock: what the transcript over the dock follows. A row
- * that leaves (the run taking it, the reader removing it) closes up over a spring rather than in the frame it went, as a
- * send opens one; the delivery's copy still stands over the leaving row from the first frame. The third send stacking
- * the list into a deck settles the card's height without dipping below where it comes to rest.
+ * the reader takes off (removed, or taken back to edit) closes up over a spring rather than in the frame it went, as a
+ * send opens one; a row the run takes hands its room to its bubble at once, the copy standing over it. The third send
+ * stacking the list into a deck settles the card's height without dipping below where it comes to rest.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -76,10 +76,41 @@ class QueueDeckHeightTest {
     }
 
     @Test
-    fun `a delivery from a two-row list closes the card up over frames, the copy standing over the leaving row`() {
+    fun `a row the reader removes closes the card up over frames, rather than in the frame it went`() {
         scene.queue += queued("Run the migration first", "Then reseed the fixtures")
         scene.show(motion)
-        val two = stackHeight()
+        val heights = heights(40) {
+            // As the card's trash glyph does: nothing flies from a row the reader took off.
+            scene.flights.dismiss("q-1")
+            scene.queue.removeAll { it.id == "q-1" }
+        }
+        assertThat(heights.last()).isLessThan(heights.first() - 30 * dp)
+        assertSmooth(heights, closing = true)
+        assertThat(motion.flight).isNull()
+    }
+
+    @Test
+    fun `a row taken back to edit from an opened long queue closes the card up over frames too`() {
+        scene.queue += queued("Run the migration first", "Then reseed the fixtures", "Then rerun the flaky suite", "Then write it up")
+        scene.stacked = false
+        scene.show(motion)
+        val heights = heights(40) {
+            scene.flights.dismiss("q-1")
+            scene.queue.removeAll { it.id == "q-1" }
+        }
+        assertThat(heights.last()).isLessThan(heights.first() - 30 * dp)
+        assertSmooth(heights, closing = true)
+    }
+
+    /**
+     * A row the run takes lifts off into its bubble, filed in the same frame: on the chat, the bubble's room opens in
+     * the transcript as the row's closes on the card, so the card gives it up at once and the transcript over it holds
+     * still (springing the card there would push the transcript up by the bubble and then glide it back down).
+     */
+    @Test
+    fun `a delivery hands the row's room to its bubble at once, the copy standing over the leaving row`() {
+        scene.queue += queued("Run the migration first", "Then reseed the fixtures")
+        scene.show(motion)
         val leaving = checkNotNull(scene.flights.anchor("q-1").surface).boundsInWindow()
         var flight: SendFlight? = null
         val heights = heights(40, onFrame = { flight = flight ?: motion.flight }) {
@@ -87,23 +118,13 @@ class QueueDeckHeightTest {
             scene.messages += UserMessage("u-2", "Run the migration first")
         }
         val one = heights.last()
-        assertThat(one).isLessThan(two - 30 * dp)
-        assertSmooth(heights, closing = true)
-        // Frames in, the card still holds most of the leaving row's slot: the copy lifts off from where the row stood.
-        assertThat(heights[2]).isGreaterThan(two - 8 * dp)
+        assertThat(one).isLessThan(heights.first() - 30 * dp)
+        // One step, in the frame the change is composed, and none after it.
+        assertThat(heights.zipWithNext { a, b -> a - b }.count { it > 1f }).isEqualTo(1)
         assertThat(checkNotNull(flight).takeoff.composer).isEqualTo(leaving)
         scene.frames(SendMotion.FlightMillis + 400L)
         assertThat(motion.flight).isNull()
         assertThat(stackHeight()).isEqualTo(one)
-    }
-
-    @Test
-    fun `a row the reader removes closes up over frames too`() {
-        scene.queue += queued("Run the migration first", "Then reseed the fixtures")
-        scene.show(motion)
-        val heights = heights(40) { scene.queue.removeAll { it.id == "q-1" } }
-        assertThat(heights.last()).isLessThan(heights.first() - 30 * dp)
-        assertSmooth(heights, closing = true)
     }
 
     @Test

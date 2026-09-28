@@ -141,6 +141,7 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
                                     modifier = Modifier.padding(bottom = 4.dp),
                                     animate = { stackAnimates },
                                     animationSpec = stackSpec ?: StackSpring,
+                                    delivered = { key -> flights.delivered(key.substringAfter(':')) },
                                 ) { index, face ->
                                     if (index < device.size) {
                                         QueuedFollowUpCard(device[index], index + 1, device.size, thumbnails.toMap(), {}, { steered += it.id }, { removed -> flights.dismiss(removed.id); queue.remove(removed) }, flights, face, steers = true)
