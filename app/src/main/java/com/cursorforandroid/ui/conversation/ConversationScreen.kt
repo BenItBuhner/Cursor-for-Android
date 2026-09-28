@@ -434,7 +434,6 @@ fun ConversationScreen(
     val panelState = rememberSidePanelState()
     val pinnedPanel = LocalPinnedPanel.current
     val panelTabs = rememberPanelTabStates()
-    val panel by panelViewModel.state.collectAsStateWithLifecycle()
     val panelActions = rememberPanelActions(panelViewModel, onToast = viewModel::showMessage, onOpenAgent = onOpenAgent, onAskToCopyFile = if (isDemo) null else viewModel::askToCopyFileIntoWorkspace)
     ChatKeyboardShortcuts(agentId, viewModel, panelState)
     TranscriptHitScroll(agentId, rows, conversation, transcriptScroll, viewModel)
@@ -451,7 +450,6 @@ fun ConversationScreen(
     // the media viewer among the chat's media in transcript order (see [ConversationMedia]), the artifacts the panel
     // has listed after them; the list is read at the tap, off the items as they are then.
     val latestItems = rememberUpdatedState(conversation.items)
-    val latestArtifacts = rememberUpdatedState(panel.artifacts.valueOrNull.orEmpty())
     // A link to an agent — a coordinator cites its workers by id — opens that agent's chat the way a worker card does,
     // read by its id first when the list does not hold it (see [AgentLinkOpener]); a store sheet it was tapped in goes
     // away with the chat it stood over.
@@ -464,7 +462,7 @@ fun ConversationScreen(
                 val target = storeRef(path, agentId)
                 if (canReadStores && target != null) openStorePath = path.text else runCatching { uriHandler.openUri(StorePath.webUrl(target?.ownerId ?: agentId)) }
             },
-            entries = { ConversationMedia.of(latestItems.value, latestArtifacts.value) },
+            entries = { ConversationMedia.of(latestItems.value, panelViewModel.artifactsLoad.value.valueOrNull.orEmpty()) },
             onOpenAgentLink = agentLinks::open,
         )
     }
@@ -475,8 +473,9 @@ fun ConversationScreen(
     // refuse (DesktopEligibility). It opens over the whole screen for the whole of the way there: the steps while the
     // machine is found, the failing step with a retry and the diagnostics to share, then the viewer.
     val canOpenDesktop = capabilities.remoteDesktop && !isDemo && DesktopEligibility.canOpen(agent)
+    val desktop by panelViewModel.desktopState.collectAsStateWithLifecycle()
     DesktopDialog(
-        state = panel.desktop,
+        state = desktop,
         agentName = agent?.name,
         onViewOnlyChange = panelActions::setDesktopViewOnly,
         onRetry = { viewOnly -> panelActions.openDesktop(viewOnly) },
@@ -492,6 +491,8 @@ fun ConversationScreen(
             // The panel's figures — generated images, recordings, artifacts — resolve through the same media context and
             // open into the same viewer as the transcript's, among the same pages.
             CompositionLocalProvider(LocalMarkdownMedia provides markdownMedia, LocalAgentLinkStatuses provides agentLinkStatuses, LocalPanelGraph provides graph, LocalRunStopConfirmation provides stopConfirmation) {
+                // Followed only while the panel is composed: closed, the chat's screen does not read the panel's state.
+                val panel by remember(panelViewModel) { panelViewModel.opened() }.collectAsStateWithLifecycle()
                 ConversationPanel(panel, panelActions, onClose = { scope.launch { panelState.close() } }, tabStates = panelTabs)
             }
         },
