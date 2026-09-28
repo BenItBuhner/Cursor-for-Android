@@ -7,6 +7,7 @@ import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.api.WorkerLaunch
 import com.cursorforandroid.data.api.userMessage
 import com.cursorforandroid.data.media.MediaLoader
+import com.cursorforandroid.data.repo.AgentListState
 import com.cursorforandroid.data.repo.ContextState
 import com.cursorforandroid.data.repo.ProjectViewState
 import com.cursorforandroid.domain.Agent
@@ -22,7 +23,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -54,15 +54,13 @@ class ProjectViewModel(private val graph: AppGraph, val projectId: String) : Vie
     val isBusy: StateFlow<Boolean> = busy.asStateFlow()
     val contextFile: StateFlow<OpenContextFile?> = openFile.asStateFlow()
 
-    /** Chats the coordinator could adopt: the account's own chats, running or not, archived ones aside. */
-    val adoptable: StateFlow<List<Agent>> = graph.agents.state
-        .map { s -> s.agents.filter { it.scope == AgentScope.PRIMARY && !it.isArchived && it.id != projectId }.sortedByDescending { it.listedAtMillis } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** Chats the coordinator could adopt: the account's own chats, running or not, archived ones aside. Read while the Adopt sheet is open. */
+    fun adoptable(list: AgentListState): List<Agent> =
+        list.agents.filter { it.scope == AgentScope.PRIMARY && !it.isArchived && it.id != projectId }.sortedByDescending { it.listedAtMillis }
 
-    /** Other Projects a primary could be moved under. */
-    val otherProjects: StateFlow<List<Agent>> = graph.agents.state
-        .map { s -> s.agents.filter { it.isProjectRoot && it.id != projectId && !it.isArchived }.sortedBy { it.name.lowercase() } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** Other Projects a primary could be moved under. Read while the Move sheet is open. */
+    fun otherProjects(list: AgentListState): List<Agent> =
+        list.agents.filter { it.isProjectRoot && it.id != projectId && !it.isArchived }.sortedBy { it.name.lowercase() }
 
     val isDemo: Boolean get() = graph.session.isDemo
 
