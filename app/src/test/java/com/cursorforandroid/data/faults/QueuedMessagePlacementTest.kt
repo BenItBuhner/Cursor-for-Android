@@ -272,6 +272,35 @@ class QueuedMessagePlacementTest {
         assertThat(s.activeRunId).isEqualTo(live.runId)
     }
 
+    @Test
+    fun `the up arrow on this device's queued message steers it into the running turn - no cancel, filed once among the turn's rows`() = runBlocking<Unit> {
+        server.queueLagMs = 3_000L
+        val rig = rig(pollMs = 3_000L)
+        rig.open()
+        val sentAt = System.nanoTime()
+        // Sent while the agent works: the device's queue holds it for the turn's end.
+        val id = rig.followUps.enqueue(agentId, MESSAGE).id
+        rig.watch(600) { assertThat(server.requests(Route.CreateRun)).isEmpty() }
+        assertThat(rig.followUps.state(agentId).value.queue.map { it.id }).containsExactly(id)
+        val steered = rig.followUps.steerNow(agentId, id)
+        assertWithMessage("the steer: ${steered.exceptionOrNull()}").that(steered.isSuccess).isTrue()
+        rig.awaitUntilOr(45_000, "line") { state.items.any { it is UserMessage && it.text == MESSAGE } }
+        val followupId = server.delivered.single { it.second == live.runId }.first
+        rig.awaitUntilOr(20_000, "line") { rig.steering.state(agentId).value.queue.none { it.id == followupId } }
+        delay(1_500)
+        assertOnePlace(followupId, MESSAGE, fromNanos = sentAt)
+        val s = state
+        assertThat(s.items.count { it is UserMessage && it.text == MESSAGE }).isEqualTo(1)
+        assertThat(rig.followUps.state(agentId).value.queue).isEmpty()
+        // Into the turn, not in place of it: nothing cancelled, nothing started, the same run still under way.
+        assertThat(server.requests(Route.CancelRun)).isEmpty()
+        assertThat(server.requests(Route.CreateRun)).isEmpty()
+        assertThat(server.requests(Route.Steer)).hasSize(1)
+        val at = s.items.indexOfFirst { it is UserMessage && it.text == MESSAGE }
+        assertThat(s.items.take(at).any { it.id.startsWith("activity-${live.runId}-") }).isTrue()
+        assertThat(s.activeRunId).isEqualTo(live.runId)
+    }
+
     // -- (4) refused as busy from this device's queue: handed to the account, the same rule -----------------------------
 
     @Test

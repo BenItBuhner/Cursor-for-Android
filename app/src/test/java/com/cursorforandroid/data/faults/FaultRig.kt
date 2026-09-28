@@ -45,6 +45,7 @@ import com.cursorforandroid.domain.AgentScope
 import com.cursorforandroid.domain.TranscriptEngine
 import com.cursorforandroid.domain.FollowUpComposerState
 import com.cursorforandroid.domain.QueuedFollowUp
+import com.cursorforandroid.domain.SteerOutcome
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -268,6 +269,15 @@ class FaultRig(
             FollowUpRepository.AccountHandoff(steering.sendFollowup(agentId, followup).getOrThrow(), followup.followupId)
         },
         accountQueueAvailable = { extended },
+        accountSteering = if (!extended) null else object : FollowUpRepository.AccountSteering {
+            override suspend fun handOff(agentId: String, item: QueuedFollowUp): FollowUpRepository.AccountHandoff {
+                val followup = AccountFollowup(text = item.previewText, images = item.images.map { it.image })
+                return FollowUpRepository.AccountHandoff(steering.sendFollowup(agentId, followup, refresh = false).getOrThrow(), followup.followupId)
+            }
+
+            override suspend fun promote(agentId: String, followupId: String): SteerOutcome =
+                steering.promotePending(agentId, followupId).onFailure { steering.refreshQueue(agentId) }.getOrThrow()
+        },
         store = followUpStore,
         persist = { true },
         scope = scope,
