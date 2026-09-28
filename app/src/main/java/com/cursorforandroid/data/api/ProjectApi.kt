@@ -38,6 +38,9 @@ interface ProjectLineageApi {
     /** The same pass stopped at the page older than [stopBelowActivityMillis] (see `RootScanApi.scanRoots`); sources that cannot date their pages read as [scanRoots]. */
     suspend fun scanRoots(maxPages: Int, stopBelowActivityMillis: Long?): RootScan? = scanRoots(maxPages)
 
+    /** The same pass starting from [firstPage], the newest page the list just read (see `RootScanApi.scanRoots`); sources that cannot take it read as before. */
+    suspend fun scanRoots(maxPages: Int, stopBelowActivityMillis: Long?, firstPage: AccountList?): RootScan? = scanRoots(maxPages, stopBelowActivityMillis)
+
     /** The chats branched off or spawned by [parentId], as the account's list would describe them. */
     suspend fun children(parentId: String): List<ComposerSnapshot>
 

@@ -3,6 +3,7 @@ package com.cursorforandroid.data.faults
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.cursorforandroid.data.api.AccountFollowup
+import com.cursorforandroid.data.api.AccountList
 import com.cursorforandroid.data.api.ApiThrottle
 import com.cursorforandroid.data.api.BlobCache
 import com.cursorforandroid.data.local.BlobDiskStore
@@ -228,13 +229,15 @@ class FaultRig(
         override suspend fun record(id: String): ComposerSnapshot? = accountAgents.record(id)
         override suspend fun scanRoots(maxPages: Int): RootScan = accountAgents.scanRoots(maxPages)
         override suspend fun scanRoots(maxPages: Int, stopBelowActivityMillis: Long?): RootScan = accountAgents.scanRoots(maxPages, stopBelowActivityMillis)
+        override suspend fun scanRoots(maxPages: Int, stopBelowActivityMillis: Long?, firstPage: AccountList?): RootScan =
+            accountAgents.scanRoots(maxPages, stopBelowActivityMillis, firstPage)
     }
     val projects: ProjectRepository = ProjectRepository(session, agents, lineageApi, actions = projectApi, store = projectApi, scope = scope, pollIntervalMs = 60_000, capabilities = { capabilities }, retryDelaysMs = listOf(500L, 500L, 500L)).also { it.watchList() }
     val pins: PinRepository = PinRepository(
         session, prefs, agents, accountAgents, scope = scope, capabilities = { capabilities }, retryDelaysMs = listOf(500L, 1_000L, 2_000L), pending = pending,
         onList = { list, token ->
             agents.applySources(list.sources, token)
-            projects.scheduleRootDiscovery(list.composers.filter { it.scope == AgentScope.PROJECT_ROOT }.map { it.id }, deep = agents.lastRefreshDepth == RefreshDepth.Deep)
+            projects.scheduleRootDiscovery(list.composers.filter { it.scope == AgentScope.PROJECT_ROOT }.map { it.id }, deep = agents.lastRefreshDepth == RefreshDepth.Deep, firstPage = list.takeIf { it.isFirstPage })
         },
     ).also { pins ->
         agents.accountPrime = { pins.primeForFetch() }
