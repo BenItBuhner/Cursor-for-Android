@@ -475,7 +475,8 @@ class AgentsViewModel(
         private const val STALE_AFTER_MS = 30_000L
         private const val POLL_INTERVAL_MS = 30_000L
         private const val FULL_POLL_EVERY = 5
-        private const val CLOCK_TICK_MS = 60_000L
+        /** How often what is relative to "now" is redrawn while the data stands still: the sidebar's rows, a Project's ages. */
+        const val CLOCK_TICK_MS = 60_000L
         /** Doublings of the polling interval a run of failures can reach. */
         private const val MAX_POLL_BACKOFF_SHIFT = 5
         /** The most the interval can grow to, in multiples of itself: half a minute becomes eight. */
