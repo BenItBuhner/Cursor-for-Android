@@ -48,8 +48,10 @@ import java.nio.ByteBuffer
  * how bright the bubble's words are, as a share of the way from the page to the words at full strength. No step between
  * two frames jumps from the sending look to the sent one — when the bubble is filed where it stands, when the server's
  * copy takes the sending bubble's place in the same frame (a new key in the list, a row composed afresh), when the copy
- * comes in halfway through the fade, and when the bubble is where a queued message the run took landed. Without the
- * screen's fades the swap is the snap Bennett saw, which the sampling is shown to catch. A bubble scrolled off and
+ * comes in halfway through the fade, and when the bubble is where a queued message the run took landed — filed after
+ * the flight, or while it was still in the air, when the bubble waits at its sending look until the copy is gone.
+ * Without the screen's fades the swap is the snap Bennett saw, and a fade run under the copy lands it at full strength;
+ * the sampling is shown to catch both. A bubble scrolled off and
  * back, or recomposed, does not fade again; with animations off nothing fades.
  *
  * With `SENT_FADE_DEMO_DIR` set, [demoBefore] and [demoAfter] write their frames there as PNGs (the demo's strip and clip).
@@ -269,23 +271,51 @@ class SentFadeTest {
         assertSmoothFromSendingToSent(alphas)
     }
 
-    @Test
-    fun `a queued message filed mid-flight has the copy arrive at the bubble's fade as it is then`() {
+    /**
+     * The queued message filed as [confirmed] 48 ms into its flight — the account's answer beating the copy to the
+     * bubble, as it mostly does — then on until the flight is done: every frame of it, the bubble under the copy and
+     * the look the copy heads for are still the sending look.
+     */
+    private fun confirmMidFlight(confirmed: UserMessage) {
         deliverQueued()
         val flight = checkNotNull(motion.flight)
         scene.frames(48)
         assertThat(flight.phase).isEqualTo(SendFlight.Phase.Flying)
         assertThat(checkNotNull(flight.target).look.fade).isWithin(0.001f).of(PendingMessageAlpha)
-        scene.replace("local-q", UserMessage("local-q", queued))
-        scene.frames(128)
-        assertThat(flight.phase).isEqualTo(SendFlight.Phase.Flying)
-        // Read live: the look the copy heads for comes up with the bubble under it.
-        val midway = checkNotNull(flight.target).look.fade
-        assertThat(midway).isGreaterThan(PendingMessageAlpha + 0.1f)
-        assertThat(midway).isEqualTo(scene.sentFades!!.alpha(UserMessage("local-q", queued)))
-        scene.frames(480)
+        scene.replace("local-q", confirmed)
+        var left = 60
+        while (motion.flights.isNotEmpty() && left-- > 0) {
+            frame()
+            flight.target?.let { assertThat(it.look.fade).isWithin(0.001f).of(PendingMessageAlpha) }
+            assertThat(scene.sentFades!!.alpha(confirmed)).isWithin(0.001f).of(PendingMessageAlpha)
+        }
         assertThat(motion.flights).isEmpty()
+    }
+
+    @Test
+    fun `a queued message filed mid-flight lands at its sending look, then fades up to full strength, not snaps`() {
+        confirmMidFlight(UserMessage("local-q", queued))
+        assertSmoothFromSendingToSent(sample(queued, 24, emptyMap()))
         assertThat(scene.sentFades!!.fading("local-q")).isFalse()
+    }
+
+    @Test
+    fun `the server's copy taking the queued bubble's place mid-flight waits out the flight too, then fades up`() {
+        confirmMidFlight(UserMessage("run-q-msg", queued))
+        assertSmoothFromSendingToSent(sample(queued, 24, emptyMap()))
+        assertThat(scene.sentFades!!.fading("run-q-msg")).isFalse()
+    }
+
+    @Test
+    fun `a fade that does not wait out the flight is spent under the copy, which the sampling catches`() {
+        scene.sentFadesSeeFlights = false
+        deliverQueued()
+        scene.frames(48)
+        scene.replace("local-q", UserMessage("local-q", queued))
+        scene.frames(SendMotion.FlightMillis.toLong())
+        assertThat(motion.flights).isEmpty()
+        // The copy gone, the bubble it leaves is at full strength already: the sending look was never seen.
+        assertThat(sample(queued, 4, emptyMap()).first()).isAtLeast(0.9f)
     }
 
     // ---- The demo's frames ----
