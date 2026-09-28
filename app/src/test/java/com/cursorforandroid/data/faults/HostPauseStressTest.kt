@@ -47,7 +47,7 @@ class HostPauseStressTest {
 
     private fun server(): FaultServer = FaultServer(rttMillis = 300L..900L).start().also { closers += it }
 
-    private fun client(): OkHttpClient = CursorApiFactory.okHttp(pauses) { "fault-key" }.newBuilder()
+    private fun client(): OkHttpClient = CursorApiFactory.okHttp(CursorApiFactory.newRoot(), pauses) { "fault-key" }.newBuilder()
         .dns(Dns.SYSTEM)
         .apply { interceptors().removeAll { it is RetryInterceptor } }
         .addInterceptor(RetryInterceptor(now = { virtual.get() }, sleeper = { ms, _ -> virtual.addAndGet(ms) }, random = { 1.0 }, pauses = pauses))

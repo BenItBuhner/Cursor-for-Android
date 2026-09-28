@@ -100,6 +100,10 @@ class TranscriptPresenter {
     @Synchronized
     fun present(items: List<TimelineItem>, coordinatorMode: Boolean, runActive: Boolean): Presented {
         val startedAt = System.nanoTime()
+        again(items, coordinatorMode, runActive)?.let { presented ->
+            TranscriptPerf.focused?.presenterRun(System.nanoTime() - startedAt, built = 0, reused = presented.segmentsReused)
+            return presented
+        }
         val interruptedAll = TranscriptRows.interruptedFooters(items)
         // The other fact that crosses a turn: a message — or the whole activity — a later turn's log carries again is
         // the earlier turn's, and is drawn there alone (see CoordinatorTranscript.repeatedMessages, replayedActivity).
@@ -155,6 +159,28 @@ class TranscriptPresenter {
         val index = SubagentRows.index(rows).let { if (it == subagents) subagents else it.also { fresh -> subagents = fresh } }
         TranscriptPerf.focused?.presenterRun(System.nanoTime() - startedAt, built = built, reused = reused)
         return Presented(presentedItems, rows, mode, goal, segmentsBuilt = built, segmentsReused = reused, subagents = index)
+            .also { last = Last(items.toList(), coordinatorMode, runActive, it) }
+    }
+
+    /** The last presentation's input — its items copied, so a caller's list changed in place does not match — and its answer. */
+    private class Last(val items: List<TimelineItem>, val coordinatorMode: Boolean, val runActive: Boolean, var presented: Presented)
+
+    private var last: Last? = null
+
+    /**
+     * The last answer when the input is the last one — the same item instances, mode and liveness, as a state that
+     * moved only a flag (loading older, the queue) gives — else null. The passes of [present] read nothing but these
+     * three and this presenter's state, which a presentation of the same input leaves as it found it; an input
+     * [present] comes to read must join this check. The answer says no segment was cut, as none was.
+     */
+    private fun again(items: List<TimelineItem>, coordinatorMode: Boolean, runActive: Boolean): Presented? {
+        val last = last ?: return null
+        if (last.coordinatorMode != coordinatorMode || last.runActive != runActive || last.items.size != items.size) return null
+        for (i in items.indices) if (last.items[i] !== items[i]) return null
+        val presented = last.presented
+        if (presented.segmentsBuilt == 0) return presented
+        return Presented(presented.items, presented.rows, presented.coordinatorMode, presented.goal, segmentsBuilt = 0, segmentsReused = segments.size, subagents = presented.subagents)
+            .also { last.presented = it }
     }
 
     /** The last presentation's index, kept while it says the same so the rows reading it are not recomposed. */
