@@ -31,6 +31,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 import java.nio.ByteBuffer
 import kotlin.math.abs
 
@@ -331,5 +332,57 @@ class QueueStackTest {
         scene.frame()
         assertThat(listOf("q-1", "q-2", "q-3").map(::box)).isEqualTo(list)
         assertThat(abs(list[0].width - list[2].width)).isLessThan(1f)
+    }
+
+    private val demoDir = System.getenv("QUEUE_DEMO_DIR")?.let(::File)
+    private var demoFrame = 0
+
+    /** On by [millis], a frame at a time, each written to [demoDir] when it is set. */
+    private fun film(millis: Long) {
+        var left = millis
+        while (left > 0) {
+            demoDir?.let { scene.drawTo(File(it, "stack_%04d.png".format(demoFrame++))) }
+            compose.mainClock.advanceTimeBy(16)
+            compose.waitForIdle()
+            left -= 16
+        }
+    }
+
+    private fun sendAndFilm(id: String, text: String) {
+        compose.runOnUiThread { scene.composerText = text }
+        film(500)
+        checkNotNull(scene.sendQueued(motion, id))
+        film(SendMotion.FlightMillis + 500L)
+    }
+
+    /**
+     * The demo: four follow-ups sent while the agent works — the first with two pictures and a spec — the third
+     * stacking the list into a deck and the fourth sinking into its back; the deck opened into the list and stacked
+     * again; then the run taking the front card, pictures and all, into the transcript as the next comes forward.
+     */
+    @Test
+    fun stackDemo() {
+        scene.show(motion)
+        film(400)
+        var sent = emptyList<com.cursorforandroid.domain.MessageAttachment>()
+        compose.runOnUiThread { sent = scene.attach() }
+        sendAndFilm("q-1", "Match the header to these, and follow the spec")
+        sendAndFilm("q-2", "Then reseed the fixtures")
+        sendAndFilm("q-3", "Then rerun the flaky suite on the emulator matrix")
+        assertThat(scene.stacked).isTrue()
+        sendAndFilm("q-4", "Then write up what changed for the release notes")
+        film(400)
+        tapHandle()
+        film(1_400)
+        assertThat(scene.stacked).isFalse()
+        tapHandle()
+        film(1_200)
+        scene.deliver("q-1", bubble = "u-2", attachments = sent)
+        film(SendMotion.FlightMillis + 1_000L)
+        scene.deliver("q-2", bubble = "u-3")
+        film(SendMotion.FlightMillis + 1_200L)
+        assertThat(motion.flights).isEmpty()
+        assertThat(scene.messages.map { it.id }).containsExactly("u-1", "u-2", "u-3").inOrder()
+        assertList("q-3", "q-4")
     }
 }
