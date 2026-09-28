@@ -24,6 +24,7 @@ import com.cursorforandroid.data.api.ConnectRepositoryBranchesApi
 import com.cursorforandroid.data.api.RepositoryBranchesApi
 import com.cursorforandroid.data.api.ConnectAgentStartApi
 import com.cursorforandroid.data.api.ApiThrottle
+import com.cursorforandroid.data.api.HostPause
 import com.cursorforandroid.data.api.ConnectJsonClient
 import com.cursorforandroid.data.api.ConnectProjectCreationApi
 import com.cursorforandroid.data.api.ConnectPromptUploadApi
@@ -310,13 +311,16 @@ class AppGraph(
         if (lazyNewChatDrafts.isInitialized()) newChatDrafts.flush()
     }
 
+    /** The pause each host asked for with a `429`, held by the REST calls, the run streams and the account's Connect calls alike. */
+    private val hostPauses = HostPause()
+
     /** The connection pool and threads every OkHttp client below is built on (see [CursorApiFactory.newRoot]). */
     private val httpRoot = lazy { CursorApiFactory.newRoot() }
 
     /** The account's API: one client, with the SSE stream sharing its dispatcher and connection pool. */
     private val realParts = lazy {
-        val client = CursorApiFactory.okHttp(httpRoot.value) { keyStore.apiKey() }
-        CursorApiFactory.retrofit(client) to SseRunStreamer(CursorApiFactory.sseClient(client), { keyStore.apiKey() })
+        val client = CursorApiFactory.okHttp(httpRoot.value, hostPauses) { keyStore.apiKey() }
+        CursorApiFactory.retrofit(client) to SseRunStreamer(CursorApiFactory.sseClient(client), { keyStore.apiKey() }, pauses = hostPauses)
     }
     private val realBackend = real ?: CursorBackend(isDemo = false, parts = realParts)
     /** Seeded when the demo is entered, so a launch into a real account never pays for the dataset. */
@@ -361,7 +365,7 @@ class AppGraph(
      * chats' streams, where no call timeout runs yet.
      */
     private val lazyAccountClient = lazy { CursorApiFactory.loginClient(httpRoot.value).also { it.dispatcher.maxRequestsPerHost = ApiThrottle.ON_THE_WIRE + 2 } }
-    private val lazyAccountRpc = lazy { ConnectJsonClient(lazyAccountClient.value, CursorLoginEndpoints.API_URL) }
+    private val lazyAccountRpc = lazy { ConnectJsonClient(lazyAccountClient.value, CursorLoginEndpoints.API_URL, throttle = ApiThrottle(pauses = hostPauses)) }
 
     /** How long the account's calls are still held off by a pause the server asked for (a `429`, see `ApiThrottle`); 0 when none, or before any call. */
     fun accountPauseMillis(): Long {
