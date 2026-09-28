@@ -7,6 +7,7 @@ import android.graphics.RecordingCanvas
 import android.graphics.RenderNode
 import android.media.ImageReader
 import android.view.View
+import java.lang.reflect.Field
 import java.lang.reflect.Method
 
 /**
@@ -25,6 +26,7 @@ class Compositor(val width: Int, val height: Int) : AutoCloseable {
 
     // Not `apply`: inside it `width` and `height` would be the new node's own, zero, and the scene would clip to nothing.
     private val scene = RenderNode("promo-scene").also { it.setPosition(0, 0, width, height) }
+    private val root = rootNode.get(renderer) as RenderNode
     private var litFor: Pair<Int, Float>? = null
     private var renders = 0
 
@@ -45,6 +47,25 @@ class Compositor(val width: Int, val height: Int) : AutoCloseable {
         } finally {
             a.recycle()
         }
+    }
+
+    /**
+     * Runs the render-node animators [view]'s window starts (a pressed ripple's) in this renderer's frames from now on.
+     * The window's own renderer never draws here: the animators it is handed wait at its root for a frame that never
+     * comes, so its root becomes this renderer's. A window with no renderer yet keeps them for its first frame, and
+     * this is that frame. Their clock is the frame's, Robolectric's uptime, which the director moves a frame at a time.
+     */
+    fun adoptAnimators(view: View) {
+        val info = attachInfo.get(view) ?: return
+        val windowRenderer = threadedRenderer.get(info) as HardwareRenderer?
+        if (windowRenderer != null) {
+            if (rootNode.get(windowRenderer) !== root) rootNode.set(windowRenderer, root)
+            return
+        }
+        @Suppress("UNCHECKED_CAST")
+        val pending = pendingAnimators.get(info) as MutableList<RenderNode>? ?: return
+        pending.forEach { registerAnimating.invoke(renderer, it) }
+        pending.clear()
     }
 
     /** Records the scene with [record] and renders it into [into], [width] x [height] BGRA with no row padding. */
@@ -93,6 +114,13 @@ class Compositor(val width: Int, val height: Int) : AutoCloseable {
         private val styleable: Class<*> by lazy { Class.forName("com.android.internal.R\$styleable") }
         private val lighting: IntArray by lazy { styleable.getField("Lighting").get(null) as IntArray }
         private fun lightingIndex(attr: String): Int = styleable.getField("Lighting_$attr").getInt(null)
+
+        private val attachInfo: Field by lazy { View::class.java.getDeclaredField("mAttachInfo").apply { isAccessible = true } }
+        private val attachInfoClass: Class<*> by lazy { Class.forName("android.view.View\$AttachInfo") }
+        private val threadedRenderer: Field by lazy { attachInfoClass.getDeclaredField("mThreadedRenderer").apply { isAccessible = true } }
+        private val pendingAnimators: Field by lazy { attachInfoClass.getDeclaredField("mPendingAnimatingRenderNodes").apply { isAccessible = true } }
+        private val rootNode: Field by lazy { HardwareRenderer::class.java.getDeclaredField("mRootNode").apply { isAccessible = true } }
+        private val registerAnimating: Method by lazy { HardwareRenderer::class.java.getMethod("registerAnimatingRenderNode", RenderNode::class.java) }
 
         private val updateDisplayList: Method by lazy { View::class.java.getMethod("updateDisplayListIfDirty") }
         private val canHaveDisplayList: Method by lazy { View::class.java.getMethod("canHaveDisplayList") }

@@ -262,12 +262,16 @@ class Director(
         }
         val target = checkNotNull(compositor) { "No segment open" }
         val pixels = sink.buffer()
-        render(target, scale, pixels)
+        render(target, scale, pixels, animate = true)
         sink.write(pixels, meta)
     }
 
-    /** Every window the app has open, bottom to top, where the window manager put it, over the dim a dialog asks for. */
-    private fun render(target: Compositor, scale: Float, into: ByteArray) {
+    /**
+     * Every window the app has open, bottom to top, where the window manager put it, over the dim a dialog asks for.
+     * With [animate], [target] runs the windows' render-node animations from here on (see [Compositor.adoptAnimators]):
+     * the segment's does, a still's short-lived one must not.
+     */
+    private fun render(target: Compositor, scale: Float, into: ByteArray, animate: Boolean) {
         target.light(activity, scale)
         target.render(into) { canvas ->
             canvas.drawColor(Color.BLACK)
@@ -275,6 +279,9 @@ class Director(
             for (root in fetchRobolectricWindowRoots()) {
                 val view = root.decorView
                 if (!view.isAttachedToWindow || view.visibility != View.VISIBLE || view.width == 0 || view.height == 0) continue
+                // Brought up to date first: drawing it is what starts a press's ripple, whose animators are adopted with it.
+                val displayList = Compositor.displayList(view)
+                if (animate) target.adoptAnimators(view)
                 val params = root.windowLayoutParams.orNull()
                 if (params != null && params.flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND != 0) {
                     canvas.drawColor(Color.argb((params.dimAmount * 255).roundToInt(), 0, 0, 0))
@@ -282,7 +289,7 @@ class Director(
                 val (x, y) = windowOrigin(view, params)
                 canvas.save()
                 canvas.translate(x, y)
-                canvas.drawRenderNode(Compositor.displayList(view))
+                canvas.drawRenderNode(displayList)
                 canvas.restore()
             }
         }
@@ -318,7 +325,7 @@ class Director(
         val width = even(decor.width * scale)
         val height = even(decor.height * scale)
         val pixels = ByteArray(width * height * 4)
-        Compositor(width, height).use { render(it, scale, pixels) }
+        Compositor(width, height).use { render(it, scale, pixels, animate = false) }
         FrameSink.png(pixels, width, height, File(Promo.out, "$name.png"))
     }
 
