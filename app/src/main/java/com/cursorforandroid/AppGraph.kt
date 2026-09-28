@@ -1010,13 +1010,13 @@ class AppGraph(
     private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /**
-     * Opens what the session's restore reads first — the key store with the Android Keystore behind it, and the
-     * settings file — on background threads, for `Application.onCreate`: the restore the activity starts a moment
-     * later finds both open instead of paying for them while the splash screen waits.
+     * Opens the key store, with the Android Keystore behind it — the slowest read of the session's restore — on a
+     * background thread, for `Application.onCreate`: the restore the activity starts a moment later finds it open
+     * instead of paying for it while the splash screen waits. The settings are left to the restore, which reads them
+     * in one snapshot beside it.
      */
     fun warmUp() {
         startupScope.launch(Dispatchers.IO) { runCatching { keyStore.apiKey() } }
-        startupScope.launch { runCatching { prefs.sessionSnapshot() } }
     }
 
     private val sessionStartLock = Any()
