@@ -221,7 +221,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         // The newest rows are what the first frame composes: their markdown is parsed here, not on that frame.
         presented.rows.asReversed().asSequence().take(PRIMED_ROWS).forEach { row ->
             when (row) {
-                is TranscriptRow.Message -> (row.call.payload as? ToolPayload.CoordinatorMessage)?.message?.let(MarkdownCache::prime)
+                is TranscriptRow.Message -> if (!row.call.isRunning) (row.call.payload as? ToolPayload.CoordinatorMessage)?.message?.let(MarkdownCache::prime)
                 is TranscriptRow.Item -> when (val item = row.item) {
                     is UserMessage -> MarkdownCache.prime(item.text)
                     is AssistantMessage -> if (!item.isStreaming) MarkdownCache.prime(item.markdown)
