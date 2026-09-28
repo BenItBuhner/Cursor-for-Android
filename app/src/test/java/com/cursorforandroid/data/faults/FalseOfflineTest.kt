@@ -208,8 +208,9 @@ class FalseOfflineTest {
         second.dnsFailure = resolverDown
         val said = second.saidFailures(project)
         second.conversations.attach(project)
-        second.awaitUntil(30_000) { second.state(project).items.isNotEmpty() }
-        delay(2_500)
+        // The first read has failed on the lookup — said at once, before — and a quiet retry has failed after it.
+        second.awaitUntil(60_000) { second.conversations.loadDiagnostics(project)?.record?.error != null }
+        delay(1_000)
         val failedLookups = second.dnsLookups.get()
         second.dnsFailure = null
         val cleared = System.nanoTime()
@@ -265,8 +266,9 @@ class FalseOfflineTest {
         second.dnsFailure = resolverDown
         val said = second.saidFailures(project)
         second.conversations.attach(project)
-        second.awaitUntil(30_000) { second.state(project).items.isNotEmpty() }
-        delay(1_000)
+        // The read has failed while the phone read offline; it is back online a moment later, as Doze lets it go.
+        second.awaitUntil(60_000) { second.conversations.loadDiagnostics(project)?.record?.error != null }
+        delay(500)
         online = true
         second.dnsFailure = null
         second.awaitUntil(30_000) { second.state(project).atRest() && second.conversations.loadDiagnostics(project)!!.fetched }

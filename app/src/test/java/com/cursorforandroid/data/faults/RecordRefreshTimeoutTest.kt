@@ -25,6 +25,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.After
@@ -314,6 +315,11 @@ class RecordRefreshTimeoutTest {
     @Test
     fun `a Project root whose newest turns are all injected reports reopens from the disk as a coordinator before the account answers`() = runBlocking<Unit> {
         bigProject()
+        // Its prompts all its workers' injected reports, none sent in Project mode: only the account's state says root.
+        server.records[project] = server.records.getValue(project).map { step ->
+            val human = step["humanMessage"] as? JsonObject ?: return@map step
+            JsonObject(step + ("humanMessage" to JsonObject(human - "agentMode")))
+        }
         server.rootProjects += project
         val disk = folder.newFolder("disk-root")
         val first = FaultRig(server.baseUrl, disk, readTimeoutMs = 2_000L, extended = true, engine = TranscriptEngine.BETA).also { it.now = now; rigs += it }
@@ -322,16 +328,20 @@ class RecordRefreshTimeoutTest {
         first.close()
         rigs.clear()
 
-        // The next process: the account's state of the chat does not answer, and the disk is all there is.
+        // The next process: nothing the account says about the chat answers — its state, its record, its live
+        // stream, each of which carries the state — and the disk is all there is.
         val held = Fault.Held()
-        server.outage(Route.RecordState, held)
+        val silent = listOf(Route.RecordState, Route.Record, Route.Live)
+        silent.forEach { server.outage(it, held) }
         val second = FaultRig(server.baseUrl, disk, readTimeoutMs = 20_000L, extended = true, engine = TranscriptEngine.BETA).also { it.now = now; rigs += it }
         second.conversations.attach(project)
         second.awaitUntil(30_000) { second.state(project).items.isNotEmpty() }
-        println("   painted from the disk: ${second.state(project).items.size} items, isProjectConversation=${second.state(project).isProjectConversation}")
-        assertThat(second.state(project).isProjectConversation).isTrue()
+        val coordinator = runCatching { second.awaitUntil(10_000) { second.state(project).isProjectConversation } }.isSuccess
+        println("   painted from the disk: ${second.state(project).items.size} items, isProjectConversation=$coordinator")
+        assertWithMessage("a Project root painted from the disk, as a coordinator").that(coordinator).isTrue()
+        assertThat(second.conversations.loadDiagnostics(project)!!.fetched).isFalse()
         held.release()
-        server.clear(Route.RecordState)
+        silent.forEach { server.clear(it) }
     }
 
     private fun iso(ms: Long) = Instant.ofEpochMilli(ms).toString()
