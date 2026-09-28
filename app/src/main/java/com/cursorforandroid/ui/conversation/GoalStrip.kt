@@ -133,9 +133,10 @@ fun GoalStrip(
                 .heightIn(min = RowHeight)
                 .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 2.dp)
                 .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            // Opened, the glyphs stay on the label's line rather than centring on an objective of any length.
+            verticalAlignment = if (expanded) Alignment.Top else Alignment.CenterVertically,
         ) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(12.dp))
+            Icon(icon, null, tint = tint, modifier = Modifier.padding(top = if (expanded) 2.dp else 0.dp).size(12.dp))
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -155,7 +156,7 @@ fun GoalStrip(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            Icon(CursorIcons.ChevronDown, null, tint = colors.iconQuaternary, modifier = Modifier.size(14.dp).rotate(chevron))
+            Icon(CursorIcons.ChevronDown, null, tint = colors.iconQuaternary, modifier = Modifier.padding(top = if (expanded) 1.dp else 0.dp).size(14.dp).rotate(chevron))
         }
         if (expanded) {
             HairlineDivider(Modifier.padding(horizontal = CursorDimens.composerPadding))
