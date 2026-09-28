@@ -1058,10 +1058,13 @@ class AppGraph(
      * exactly what this reads.
      */
     private suspend fun handOffRestored() {
-        val signedIn = session.state.first { it !is SessionState.Loading } as? SessionState.SignedIn ?: return
-        if (signedIn.isDemo || onboarding.modeChoicePending.first { it != null } != false) return
+        fun ready() = (session.state.value as? SessionState.SignedIn)?.isDemo == false && onboarding.modeChoicePending.value == false
+        session.state.first { it !is SessionState.Loading }
+        onboarding.modeChoicePending.first { it != null }
+        if (!ready()) return
         runCatching { extendedMode.migrateInstall() }
-        if (session.state.value !== signedIn) return
+        // Not the same state necessarily: the key's validation republishes it with the account's fresh profile.
+        if (!ready()) return
         if (capabilities().accountSession) startupScope.launch { runCatching { lazySessionTokens.value.accessToken() } }
         startupScope.launch { runCatching { pullRequests.restoreFromCache() } }
         startupListFetch.set(
