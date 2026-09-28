@@ -60,7 +60,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -334,6 +336,12 @@ class AgentRepository(
      * stood in from the record so the pin is never blank. Null (the default) when there is no account to ask.
      */
     private val recordOf: suspend (String) -> ComposerSnapshot? = { null },
+    /**
+     * Whether the account service's throttle is holding every call for a pause the server asked for (a `429`, see
+     * `ApiThrottle.pausedUntil`): a record asked for by id meanwhile would wait the pause out and most likely be
+     * refused again, so none is asked until it has passed.
+     */
+    private val accountPaused: () -> Boolean = { false },
     /** How many `/v0/agents` pages the running pass reads on a refresh (see [RunningScan]). */
     private val runningScanPages: Int = RUNNING_SCAN_PAGES,
     /** How many agents the running scan named that no page holds are fetched by id per pass. */
@@ -476,6 +484,13 @@ class AgentRepository(
     private val recordMutex = Mutex()
 
     /**
+     * The last read of the account's list ahead of a fetch ([accountPrime]) failed: its records by id — the same RPC,
+     * one row at a time — would meet the same refusal or silence, so none is asked, and the next fetch publishes its
+     * first page without waiting for the account, until a read of the list gets through again.
+     */
+    @Volatile private var accountListUnread = false
+
+    /**
      * Agents a refresh brought that the list did not hold, whose account record has not been read, by id, with when
      * the hold began: not drawn until the record (or a stamp) places them, the account says it has none, or
      * [PLACEMENT_HOLD_MS] passes (see [AgentListState.awaitingPlacement]). Extended mode only — default mode never
@@ -596,6 +611,7 @@ class AgentRepository(
         _state.value = AgentListState()
         placements.clear()
         recordUnresolved.clear()
+        accountListUnread = false
         holdUntilPlaced.clear()
         aliveConfirmedAt.clear()
         retractMisses.clear()
@@ -772,7 +788,7 @@ class AgentRepository(
                 val gone = (failure as? CursorApiException)?.httpCode == 404
                 // The public API's refusal is not the last word while the account still has the record: the row
                 // stands in from the record (its name, look and archive flag), as a pinned chat's does.
-                val asked = runCatching { recordOf(id) }
+                val asked = runCatching { recordById(id) }
                 val record = asked.getOrNull()
                 val accountAnswered = asked.isSuccess && !session.isDemo && capabilities().accountSession
                 when {
@@ -802,6 +818,24 @@ class AgentRepository(
     }
 
     private fun Throwable.describe(): String = "${javaClass.simpleName}: ${message ?: "-"}"
+
+    /**
+     * One chat's account record by id ([recordOf]), given [RECORD_BY_ID_TIMEOUT_MS] at most: a read the account
+     * service does not answer fails as a timeout rather than keeping one of [byIdPool]'s few permits for as long as
+     * the socket's read timeout, which every other pass by id — the next refresh's among them — would queue behind.
+     */
+    private suspend fun recordById(id: String): ComposerSnapshot? = try {
+        withTimeout(RECORD_BY_ID_TIMEOUT_MS) { recordOf(id) }
+    } catch (e: TimeoutCancellationException) {
+        throw java.io.InterruptedIOException("The account record of $id did not arrive in time.").apply { initCause(e) }
+    }
+
+    /** A failure the next read would likely meet too, being about the service rather than the row: a refusal to pause, a timeout, a dropped connection, a 5xx. */
+    private fun Throwable.isPassing(): Boolean = when (this) {
+        is ConnectRpcException -> isRateLimited || (httpCode !in 400..499 && !isUnreadableAnswer)
+        is CursorApiException -> isRateLimited || httpCode !in 400..499
+        else -> this is java.io.IOException
+    }
 
     /**
      * How long a row that could not be fetched waits before it is asked for again: the wait the server named on a
@@ -1077,7 +1111,8 @@ class AgentRepository(
      * The account's list paged alongside the public one (Extended mode): set by the graph to the pin repository's
      * page read, so the rows a page brings are published placed and named. Called by [loadMore] ahead of each public
      * page, once per page — the ask is the list's, so a second ask while one is on its way is a no-op rather than a
-     * second account page. Best effort: a failure of the account's page fails nothing of the public one.
+     * second account page. Best effort: a failure of the account's page fails nothing of the public one, and the
+     * public page waits for it no longer than a fetch's first page waits for the account (see [awaitAccountWord]).
      */
     @Volatile var accountPage: (suspend () -> Unit)? = null
 
@@ -1092,6 +1127,7 @@ class AgentRepository(
     suspend fun loadMore(): RefreshOutcome {
         val backend = session.current
         val startedIn = token()
+        var accountRead: Job? = null
         val job = synchronized(publishLock) {
             if (generation.get() != startedIn || owner !== backend) return RefreshOutcome.Skipped
             loadingMore?.takeIf { it.isActive }?.let { return RefreshOutcome.Skipped }
@@ -1112,7 +1148,11 @@ class AgentRepository(
                         publish(backend, startedIn) { it.copy(isLoadingMore = false, hasMore = false) }
                         return@launch
                     }
-                    accountPage?.takeIf { !backend.isDemo }?.let { hook -> pending.track("account page") { runCatching { hook() }.exceptionOrNull()?.let { if (it is CancellationException) throw it } } }
+                    // The account's page is the same RPC as its list: not asked while that is refused or unanswered.
+                    accountRead = accountPage?.takeIf { !backend.isDemo && !accountListUnread && !accountPaused() }?.let { hook ->
+                        scope.launch { pending.track("account page") { runCatching { hook() }.exceptionOrNull()?.let { if (it is CancellationException) throw it } } }
+                    }
+                    accountRead?.let { awaitAccountWord(it) }
                     fetchMore(backend, startedIn, cursor, synchronized(publishLock) { legacyCursor })
                 } finally {
                     pending.end(work)
@@ -1121,7 +1161,10 @@ class AgentRepository(
             }.also { loadingMore = it }
         }
         job.join()
-        return if (synchronized(publishLock) { generation.get() == startedIn && !_state.value.isLoadingMore && _state.value.loadMoreError == null }) RefreshOutcome.Refreshed else RefreshOutcome.Failed
+        val landed = synchronized(publishLock) { generation.get() == startedIn && !_state.value.isLoadingMore && _state.value.loadMoreError == null }
+        if (!landed) return RefreshOutcome.Failed
+        followWithRecords(startedIn, accountRead)
+        return RefreshOutcome.Refreshed
     }
 
     private suspend fun fetchMore(backend: CursorBackend, startedIn: Int, cursor: String, legacy: String?) {
@@ -1170,7 +1213,6 @@ class AgentRepository(
                     }
                 }
             }
-            pending.track("account records by id") { materializeRecords(startedIn) }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
             // The page's failure is the tail's to show, in the server's words, with Retry: the list above it stands.
@@ -1198,10 +1240,37 @@ class AgentRepository(
      * The account's list read ahead of a fetch's first publication (Extended mode): set by the graph to the pin
      * repository's read, so the rows a page brings are published already placed — the workers under their
      * Projects, the coordinators as roots — rather than published bare and moved once the account has spoken. The
-     * fetch starts it with the first page's request and waits for it [ACCOUNT_WORD_WAIT_MS] at most; a read that
-     * is slower, or fails, holds nothing up (the rows are re-placed when it lands or is retried).
+     * fetch starts it with the first page's request and waits for it [ACCOUNT_WORD_WAIT_MS] at most — not at all
+     * while the account service's throttle holds every call, or after the last read failed; a read that is slower,
+     * or fails, holds nothing up (the rows are re-placed when it lands or is retried). True when the list was read.
      */
-    @Volatile var accountPrime: (suspend () -> Unit)? = null
+    @Volatile var accountPrime: (suspend () -> Boolean)? = null
+
+    /**
+     * Waits for [prime] — the account's list read ahead of this fetch — before its first page is published: at most
+     * [ACCOUNT_WORD_WAIT_MS], and no longer once the account service's throttle holds every call (the read is then
+     * waiting out a pause it will most likely be refused after), nor at all when the last read failed.
+     */
+    private suspend fun awaitAccountWord(prime: Job) {
+        if (accountListUnread) return
+        withTimeoutOrNull(ACCOUNT_WORD_WAIT_MS) {
+            while (prime.isActive && !accountPaused()) withTimeoutOrNull(ACCOUNT_PAUSE_POLL_MS) { prime.join() }
+        }
+    }
+
+    /**
+     * The rows still without their account record, asked for it by id once the list's work is over (see
+     * [materializeRecords]): its own job, so neither the fetch nor the page that landed the rows — nor a pull, a
+     * page asked for, a pin sync waiting on them — waits on the account service; each record is merged as it lands.
+     * After [prime] (the account's list or page read alongside the public one) has landed or failed: it brings most
+     * records at once, and when the list failed the records by id are not asked either (see [accountListUnread]).
+     */
+    private fun followWithRecords(startedIn: Int, prime: Job? = null) {
+        scope.launch {
+            prime?.join()
+            stats.timed("account records by id", calls = { n: Int -> n }) { materializeRecords(startedIn) }
+        }
+    }
 
     private suspend fun fetch(silent: Boolean, depth: RefreshDepth) {
         val backend = session.current
@@ -1210,7 +1279,18 @@ class AgentRepository(
         dropForeignList(backend)
         val startedIn = generation.get()
         // The account's word is asked for alongside the first page, and waited for before that page is published.
-        val prime = accountPrime?.takeIf { !backend.isDemo }?.let { hook -> scope.async { runCatching { hook() }.exceptionOrNull()?.let { if (it is CancellationException) throw it } } }
+        val prime = accountPrime?.takeIf { !backend.isDemo }?.let { hook ->
+            scope.launch {
+                val read = try {
+                    hook()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    false
+                }
+                if (generation.get() == startedIn) accountListUnread = !read
+            }
+        }
         // The rows as they were when the fetch started. Rows that appear while the pages are in flight and are not in
         // the server's answer were launched here meanwhile; the complete-listing cleanup below must not make a chat
         // the user just started vanish. And a row whose latest run is not the one it had is a new turn to verify.
@@ -1228,6 +1308,7 @@ class AgentRepository(
         // tail's row does not blink off between one call's end and the next one's start; the parts name themselves
         // inside it for the diagnostics. Ended in `finally`: a fetch cut short leaves nothing registered.
         val work = pending.begin("list refresh (${depth.name.lowercase()}${if (silent) ", silent" else ""})")
+        var followRecords = false
         try {
             var truncated = false
             var lastCursor: String? = null
@@ -1249,7 +1330,7 @@ class AgentRepository(
                     seen += page.items.map { it.id }
                     page.items.minOfOrNull { parseIsoMillis(it.createdAt) }?.let { windowFloor = minOf(windowFloor, it) }
                     if (page.items.isNotEmpty()) {
-                        if (pagesRead == 1) prime?.let { withTimeoutOrNull(ACCOUNT_WORD_WAIT_MS) { it.join() } }
+                        if (pagesRead == 1) prime?.let { awaitAccountWord(it) }
                         // Rows the earlier legacy read knew are enriched as their page lands, not only at the end;
                         // the demo's account word — which chats are Projects, which hang off which — is local and
                         // free, so its rows are published placed from the first page, as the account's are.
@@ -1338,15 +1419,15 @@ class AgentRepository(
             // The pass ends by reconciling the pages with what stands apart from them: the agents the running scan
             // named that no page holds, the pinned chats no page holds and the roots the registry knows are fetched
             // by id — the three passes side by side, each a few at a time (see [byId]), none waiting on another —
-            // and then every row still without its account record is asked for it, so the desktop's predicates
-            // place the rows the public endpoints brought bare.
+            // and then, once the fetch is over, every row still without its account record is asked for it, so the
+            // desktop's predicates place the rows the public endpoints brought bare.
             if (landed) {
                 coroutineScope {
                     launch { stats.timed("running scan: rows fetched by id", calls = { n: Int -> n }) { materializeRunning(startedIn) } }
                     launch { stats.timed("pinned rows fetched by id", calls = { n: Int -> n }) { resolvePinned(startedIn) } }
                     launch { stats.timed("registry roots fetched by id", calls = { n: Int -> n }) { materializeRoots(startedIn) } }
                 }
-                stats.timed("account records by id", calls = { n: Int -> n }) { materializeRecords(startedIn) }
+                followRecords = true
             }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
@@ -1360,6 +1441,8 @@ class AgentRepository(
             // indicator is a fetch in flight, never a flag left behind by one that is not.
             publish { s -> if (s.isRefreshing) s.copy(isRefreshing = false) else s }
         }
+        // Started once the fetch's own work has ended: neither the fetch nor its item of work waits on the account.
+        if (followRecords) followWithRecords(startedIn, prime)
     }
 
     /**
@@ -1482,7 +1565,7 @@ class AgentRepository(
                     pinnedUnresolved.remove(id)
                     return@byId
                 }
-                val record = runCatching { recordOf(id) }.getOrNull()
+                val record = runCatching { recordById(id) }.getOrNull()
                 if (record != null && generation.get() == startedIn) {
                     upsert(record.toStandIn(), startedIn)
                     pinnedUnresolved.remove(id)
@@ -1511,10 +1594,13 @@ class AgentRepository(
      * the desktop's predicates have the record's fields to read (see [Agent.placed]). The desktop never shows a row
      * without its record; this is the closest the public list can come. Running rows first, then the newest; a few
      * per pass, the next pass takes the rest; a chat the account gave no record for is asked again after
-     * [RECORD_RETRY_MS]. Nothing is asked in default mode or in the demo.
+     * [RECORD_RETRY_MS]. Nothing is asked in default mode or in the demo, nor while the account service is refusing
+     * or not answering its list (see [accountListUnread], [accountPaused]); a pass one of whose reads failed in
+     * passing leaves the rest to the next pass.
      */
     suspend fun materializeRecords(startedIn: Int = token(), budget: Int = MAX_MATERIALIZED_RECORDS): Int {
         if (session.isDemo || !_state.value.hasLoaded || _state.value.isFromCache || !capabilities().accountSession) return 0
+        if (accountListUnread || accountPaused()) return 0
         return recordMutex.withLock {
             val now = AppClock.now()
             val due = _state.value.agents
@@ -1524,6 +1610,7 @@ class AgentRepository(
                 .take(budget)
             if (due.isEmpty()) return@withLock 0
             val asked = java.util.concurrent.atomic.AtomicInteger()
+            val stalled = java.util.concurrent.atomic.AtomicBoolean(false)
             pending.track("account records by id (${due.size})") { coroutineScope {
                 due.forEach { row ->
                     launch {
@@ -1531,13 +1618,15 @@ class AgentRepository(
                             if (generation.get() != startedIn) return@withPermit
                             // A page or another pass may have brought the record meanwhile.
                             if (agent(row.id)?.record != null) return@withPermit
+                            if (stalled.get() || accountPaused()) return@withPermit
                             asked.incrementAndGet()
                             val record = try {
-                                recordOf(row.id)
+                                recordById(row.id)
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (t: Throwable) {
                                 recordUnresolved[row.id] = now + retryDelayFor(t)
+                                if (t.isPassing()) stalled.set(true)
                                 return@withPermit
                             }
                             if (record == null) {
@@ -1827,8 +1916,11 @@ class AgentRepository(
             dto.latestRunId?.let { runId -> runCatching { api.getRun(id, runId) }.getOrNull() }
         }
         // Extended mode: the row lands with its account record, as every row of the desktop's list does, so it is
-        // published placed rather than published bare and moved once the record has been read.
-        val record = if (agent(id)?.record == null && !session.isDemo && capabilities().accountSession) runCatching { recordOf(id) }.getOrNull() else null
+        // published placed rather than published bare and moved once the record has been read — unless the account
+        // service is refusing or not answering (see [materializeRecords]): then the row lands bare and is placed
+        // once the account answers again, rather than waiting on it.
+        val askRecord = agent(id)?.record == null && !session.isDemo && capabilities().accountSession && !accountListUnread && !accountPaused()
+        val record = if (askRecord) runCatching { recordById(id) }.getOrNull() else null
         // Merged into the row as it is at publication, under the lock a cancel patches under, and with the run as
         // this device knows it (see [known]): a Stop that landed while the record was on its way — the read a chat's
         // load launched before it — is not undone by a record that predates it. A record whose latest run began
@@ -2700,8 +2792,12 @@ class AgentRepository(
         /** How many of an agent's newest runs are kept by their start (see [runStarts]): the turns a stale read can still name. */
         private const val RUN_STARTS_KEPT = 8
 
-        /** How long a fetch's first publication waits for the account's list (see [accountPrime]). */
-        const val ACCOUNT_WORD_WAIT_MS = 4_000L
+        /** How long a fetch's first publication waits for the account's list (see [accountPrime]): about a round trip past the page's. */
+        const val ACCOUNT_WORD_WAIT_MS = 1_200L
+        /** How often that wait looks at whether the account service's throttle has paused every call (see [awaitAccountWord]). */
+        private const val ACCOUNT_PAUSE_POLL_MS = 50L
+        /** The longest one account record asked for by id may take (see [recordById]): a few round trips, a short pause and its retry. */
+        const val RECORD_BY_ID_TIMEOUT_MS = 6_000L
         /**
          * The most a refresh re-reads: 500 agents, the newest first. The list pages past that only as the reader
          * scrolls to its end ([loadMore]), and the rows so loaded stay as they were between refreshes.

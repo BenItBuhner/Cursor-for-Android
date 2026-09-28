@@ -620,6 +620,7 @@ class AppGraph(
             pending = pendingWork,
             // A pinned chat the public API will not give (Extended mode): stood in from its account record.
             recordOf = { id -> if (!session.isDemo && capabilities().accountSession) lazyAccountAgents.value.record(id) else null },
+            accountPaused = { lazyAccountRpc.isInitialized() && lazyAccountRpc.value.throttle.pausedUntil() != null },
             start = { lazyAgentStart.value },
             uploads = { promptUploads },
         ).also { repo ->
