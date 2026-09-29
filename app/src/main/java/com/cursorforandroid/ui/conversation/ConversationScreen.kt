@@ -230,6 +230,7 @@ fun ConversationScreen(
     val fileUploads by viewModel.fileUploads.collectAsStateWithLifecycle()
     val uploadHint by viewModel.uploadHint.collectAsStateWithLifecycle()
     val queue by viewModel.queue.collectAsStateWithLifecycle()
+    val refusedQueuedId by viewModel.refusedQueuedId.collectAsStateWithLifecycle()
     // The stack opens or closes on the tap, the device's record of the choice following (and seeding it again when it changes).
     val queueStacked by viewModel.queueStacked.collectAsStateWithLifecycle()
     var queueStackedHere by remember(queueStacked) { mutableStateOf(queueStacked) }
@@ -806,7 +807,7 @@ fun ConversationScreen(
                                 position = index + 1,
                                 count = queue.size,
                                 thumbnails = thumbnails,
-                                // A message on its way refuses all three (the snackbar says why) and keeps its flight: the
+                                // A message on its way refuses all three (its card says why) and keeps its flight: the
                                 // run may yet take it, and its row then lifts off into the bubble like any delivered one.
                                 onEdit = { if (viewModel.editQueued(it.id)) queueFlights.dismiss(it.id) else haptics.perform(Haptic.Reject) },
                                 // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
@@ -817,6 +818,7 @@ fun ConversationScreen(
                                 flights = queueFlights,
                                 face = face,
                                 steers = isActive,
+                                refused = refusedQueuedId == queue[index].id,
                             )
                         } else {
                             val at = index - queue.size

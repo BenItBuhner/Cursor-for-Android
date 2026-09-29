@@ -251,6 +251,10 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     /** Where each message sent from here and not yet filed stands, by its bubble's id — the transcript draws it on the bubble. */
     val outgoingStatuses: StateFlow<Map<String, OutgoingStatus>> = outgoing.statuses
     val toastMessage: StateFlow<String?> = toast.asStateFlow()
+    private val refused = MutableStateFlow<String?>(null)
+    private var refusalShown: Job? = null
+    /** The queued follow-up whose remove, edit or up arrow was just refused, being on its way: its card says so, briefly. */
+    val refusedQueuedId: StateFlow<String?> = refused.asStateFlow()
     /**
      * Follow-ups sent while the agent was busy, oldest first; they go out by themselves once it is free. A steered
      * one is not among them: it shows in the transcript as a pending prompt instead.
@@ -803,11 +807,17 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
 
     /**
      * A card's glyph tapped while its message is on its way — a held message's retry out, its card still reading as
-     * waiting: the request cannot be called back, so the tap is refused and the snackbar says why, rather than the
-     * card taking it silently and the message reaching the agent all the same.
+     * waiting: the request cannot be called back, so the tap is refused and the card itself says why for a moment
+     * ([refusedQueuedId]), rather than taking it silently and the message reaching the agent all the same.
      */
     private fun refusedOnItsWay(id: String) {
-        if (graph.followUps.isOnItsWay(agentId, id)) toast.value = FollowUpRepository.ON_ITS_WAY
+        if (!graph.followUps.isOnItsWay(agentId, id)) return
+        refused.value = id
+        refusalShown?.cancel()
+        refusalShown = viewModelScope.launch {
+            delay(REFUSAL_SHOWN_MS)
+            refused.value = null
+        }
     }
 
     /**
@@ -1057,6 +1067,8 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         const val ANSWER_SHOWN_MS = 1_800L
         /** How long a pull's failure waits to be told by the screen before it is put away untold. */
         const val FAILURE_SHOWN_MS = 6_000L
+        /** How long a held card says why its glyphs refused a tap before it goes back to the wait. */
+        const val REFUSAL_SHOWN_MS = 3_000L
     }
 
     class Factory(private val graph: AppGraph, private val agentId: String) : ViewModelProvider.Factory {

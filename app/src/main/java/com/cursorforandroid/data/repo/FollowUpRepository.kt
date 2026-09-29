@@ -462,7 +462,7 @@ class FollowUpRepository(
             val claimed = found.copy(error = null, needsConfirmation = false, isSending = true, sendStartedAtMillis = AppClock.now())
             e.update { copy(queue = queue.map { if (it.id == id) claimed else it }) }
             claimed
-        } ?: return Result.failure(IllegalStateException(if (isOnItsWay(agentId, id)) ON_ITS_WAY else "That message is no longer queued."))
+        } ?: return Result.failure(IllegalStateException("That message is no longer queued."))
         e.scheduleSave()
         return work.async { steerInto(e, item, steering, startedIn) }.await()
     }
@@ -1141,8 +1141,6 @@ class FollowUpRepository(
         private const val AGENT_BUSY = "agent_busy"
         /** What a waiting card's up arrow says mid-turn with no account to steer through (default mode, the demo). */
         const val STEER_NEEDS_EXTENDED = "Steering into a running turn needs Extended mode; this message sends when the turn ends."
-        /** What a remove, edit or up arrow on a message [isOnItsWay] says: the request is out and cannot be called back. */
-        const val ON_ITS_WAY = "That message is being sent. It can't be changed until Cursor answers."
         private const val RUN_NOT_CANCELLABLE = "run_not_cancellable"
         /** The ids of the placeholder runs prompts sent from here are shown under until the server answers (see [ConversationRepository]). */
         private const val LOCAL_RUN_PREFIX = "local-"

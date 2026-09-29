@@ -8,13 +8,14 @@ import com.cursorforandroid.data.FakeCursorApi
 import com.cursorforandroid.data.FakeRunStreamer
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.data.repo.CursorBackend
-import com.cursorforandroid.data.repo.FollowUpRepository
 import com.cursorforandroid.domain.QueuedFollowUp
 import com.cursorforandroid.util.MainDispatcherRule
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Before
@@ -25,16 +26,19 @@ import org.robolectric.annotation.Config
 
 /**
  * A waiting card's remove, edit and up arrow while its held message's retry is on the wire (COMP-1): the card reads
- * as waiting, but the request is out and cannot be called back. Each tap is refused and the snackbar says why —
- * never taken silently, the message then reaching the agent the reader thought they had deleted. Nothing is resent:
- * once the server has refused the attempt, the delete goes through and the message is never sent.
+ * as waiting, but the request is out and cannot be called back. Each tap is refused and the card says why for a
+ * moment, no snackbar — never taken silently, the message then reaching the agent the reader thought they had
+ * deleted. Nothing is resent: once the server has refused the attempt, the delete goes through and the message is
+ * never sent.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
 class HeldCardTapsTest {
 
+    private val scheduler = TestCoroutineScheduler()
+
     @get:Rule
-    val mainDispatcher = MainDispatcherRule()
+    val mainDispatcher = MainDispatcherRule { UnconfinedTestDispatcher(scheduler) }
 
     private val api = FakeCursorApi()
     private val streamer = FakeRunStreamer()
@@ -74,22 +78,27 @@ class HeldCardTapsTest {
         awaitUntil { head()?.isSending == true }
         assertThat(head()!!.isHeld).isTrue()
 
-        assertThat(vm.removeQueued(item.id)).isFalse()
-        assertThat(vm.toastMessage.value).isEqualTo(FollowUpRepository.ON_ITS_WAY)
-        vm.clearToast()
-        assertThat(vm.editQueued(item.id)).isFalse()
-        assertThat(vm.toastMessage.value).isEqualTo(FollowUpRepository.ON_ITS_WAY)
+        val refusals = listOf(
+            { vm.removeQueued(item.id) },
+            { vm.editQueued(item.id) },
+            { vm.steerQueued(item.id, turnUnderWay = false) },
+        )
+        for (tap in refusals) {
+            assertThat(tap()).isFalse()
+            assertThat(vm.refusedQueuedId.value).isEqualTo(item.id)
+            // The card says why; nothing rises from the foot of the screen.
+            assertThat(vm.toastMessage.value).isNull()
+            scheduler.advanceTimeBy(3_001)
+            assertThat(vm.refusedQueuedId.value).isNull()
+        }
         assertThat(vm.draftText.value).isEmpty()
-        vm.clearToast()
-        assertThat(vm.steerQueued(item.id, turnUnderWay = false)).isFalse()
-        assertThat(vm.toastMessage.value).isEqualTo(FollowUpRepository.ON_ITS_WAY)
-        vm.clearToast()
         assertThat(graph.followUps.state(AGENT).value.queue.map { it.id }).containsExactly(item.id)
 
         // The server refuses the attempt: the card is the reader's again, and a delete now takes it for good.
         gate.complete(Unit)
         awaitUntil { head()?.let { it.busyRefusals == 2 && !it.isSending } == true }
         assertThat(vm.removeQueued(item.id)).isTrue()
+        assertThat(vm.refusedQueuedId.value).isNull()
         assertThat(vm.toastMessage.value).isNull()
         assertThat(graph.followUps.state(AGENT).value.queue).isEmpty()
 
@@ -104,6 +113,7 @@ class HeldCardTapsTest {
         val vm = ConversationViewModel(graph, AGENT)
         assertThat(vm.removeQueued("queued-gone")).isFalse()
         assertThat(vm.editQueued("queued-gone")).isFalse()
+        assertThat(vm.refusedQueuedId.value).isNull()
         assertThat(vm.toastMessage.value).isNull()
     }
 
