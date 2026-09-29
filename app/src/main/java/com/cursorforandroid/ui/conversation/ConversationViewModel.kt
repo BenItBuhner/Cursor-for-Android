@@ -376,7 +376,9 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
             // Read now, not when the disk was: anything picked while the setting was read is in it too.
             if (!allowed && graph.followUps.state(agentId).value.draft.mode?.needsAccountService == true) graph.followUps.setDraftMode(agentId, null)
             val restored = graph.followUps.state(agentId).value.draft
-            picker.update { it.adopting(restored) }
+            // A model picked in memory stands over the disk copy's, as the repository folds them (`FollowUpDraft.over`):
+            // a pick landing between the read above and this update is not written over by the draft read before it.
+            picker.update { it.copy(mode = restored.mode, override = it.override ?: restored.model?.let(::choiceOf)) }
             if (restored.isBlank) return@launch
             if (composerIsEmpty()) adoptDraft(restored, unlessWrittenInto = true)
         }
