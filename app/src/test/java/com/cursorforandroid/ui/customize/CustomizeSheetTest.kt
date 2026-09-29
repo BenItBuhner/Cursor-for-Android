@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -50,6 +51,7 @@ class CustomizeSheetTest {
     private lateinit var graph: AppGraph
     private val repoCount = 60
     private val lastSlug = "repo-%02d".format(repoCount - 1)
+    private val readAllTag = "sheet-header-action-$READ_ALL"
 
     @Before
     fun setUp() = runBlocking<Unit> {
@@ -70,19 +72,17 @@ class CustomizeSheetTest {
     }
 
     /**
-     * The rule's own `waitUntil` runs on the frame clock, which the disk-backed list preferences do not; this waits
-     * on the wall while keeping the main looper and the composition moving.
+     * Waits for [condition] on the semantics tree, whose every read idles the rule first. Wait for what is drawn, never
+     * for the view model's value: [AgentsViewModel.uiState] is set on `Dispatchers.Default` before the sheet is handed
+     * it on the main thread, so a state the view model already holds can be missing from the frame assertions read.
      */
-    private fun awaitOnScreen(condition: () -> Boolean) {
-        repeat(500) {
-            compose.waitForIdle()
-            if (condition()) return
-            Thread.sleep(20)
-        }
-        throw AssertionError("Condition was still not satisfied after 10s")
-    }
+    private fun awaitOnScreen(condition: () -> Boolean) = compose.waitUntil(timeoutMillis = 10_000, condition = condition)
 
     private fun composed(text: String) = compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty()
+
+    /** The header's Read all as drawn, saying [state]: "60 unread chats" once every chat is in the frame. */
+    private fun readAllSays(state: String) =
+        compose.onAllNodes(hasTestTag(readAllTag) and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state)).fetchSemanticsNodes().isNotEmpty()
 
     private fun openRepoPage(): AgentsViewModel {
         val viewModel = AgentsViewModel(graph)
@@ -90,7 +90,7 @@ class CustomizeSheetTest {
             CursorTheme(mode = ThemeMode.Dark) { CustomizeSheet(viewModel, onDismiss = {}) }
         }
         // Wait for the list itself: the Repo page of an account whose agents have not landed yet has no rows at all.
-        awaitOnScreen { composed("Repo") && viewModel.uiState.value.repoSlugs.size == repoCount }
+        awaitOnScreen { composed("Repo") && readAllSays("$repoCount unread chats") }
         compose.onNodeWithText("Repo").performClick()
         awaitOnScreen { composed("All repositories") }
         return viewModel
@@ -102,8 +102,8 @@ class CustomizeSheetTest {
         compose.setContent {
             CursorTheme(mode = ThemeMode.Dark) { CustomizeSheet(viewModel, onDismiss = {}) }
         }
-        awaitOnScreen { composed("Grouping") && viewModel.uiState.value.unreadCount == repoCount }
-        val readAll = compose.onNodeWithTag("sheet-header-action-$READ_ALL")
+        awaitOnScreen { composed("Grouping") && readAllSays("$repoCount unread chats") }
+        val readAll = compose.onNodeWithTag(readAllTag)
         readAll.assertIsDisplayed().assertIsEnabled().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "$repoCount unread chats"))
         // In the header row, beside the title, and above the first section: the sheet opens on Grouping.
         val readAllBounds = readAll.fetchSemanticsNode().boundsInRoot
@@ -126,8 +126,9 @@ class CustomizeSheetTest {
         assertThat(readAllBeside.center.y).isWithin(1f).of(reset.center.y)
 
         readAll.performClick()
-        awaitOnScreen { viewModel.uiState.value.unreadCount == 0 }
-        readAll.assertIsNotEnabled().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Nothing unread"))
+        awaitOnScreen { readAllSays("Nothing unread") }
+        readAll.assertIsNotEnabled()
+        assertThat(viewModel.uiState.value.unreadCount).isEqualTo(0)
         assertThat(compose.onAllNodesWithText(READ_ALL).fetchSemanticsNodes()).hasSize(1)
     }
 
@@ -146,7 +147,8 @@ class CustomizeSheetTest {
     fun `a repository tapped on the repo page drops it from the filter`() {
         val viewModel = openRepoPage()
         compose.onNodeWithText("repo-00").performClick()
-        awaitOnScreen { viewModel.uiState.value.prefs.repos != null }
+        // A row's check mark carries no semantics, so this waits on the view model, idling the rule before each check.
+        compose.waitUntil(timeoutMillis = 10_000) { compose.runOnIdle { viewModel.uiState.value.prefs.repos != null } }
         val repos = viewModel.uiState.value.prefs.repos
         assertThat(repos).doesNotContain("acme/repo-00")
         assertThat(repos).hasSize(repoCount - 1)
