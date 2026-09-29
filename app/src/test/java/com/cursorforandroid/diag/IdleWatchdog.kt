@@ -53,14 +53,59 @@ class IdleWatchdog : TestEnvironmentLifecyclePlugin {
             if (ch != null && seenChoreographers.add(ch)) appendLine(choreographer("root[$i]", ch))
         }
         appendLine(queue("main", Looper.getMainLooper().queue))
+        appendLine(runCatching { compose() }.getOrElse { "IDLEDUMP compose failed: $it" })
         Thread.getAllStackTraces().forEach { (t, st) ->
-            if (t.name.contains("Main Thread") || t.name.contains("Render") || t.name.contains("Choreographer")) {
+            val interesting = t.name.contains("Main Thread") || t.name.contains("Choreographer") ||
+                (t.state == Thread.State.RUNNABLE && st.none { it.methodName == "accept" || it.methodName == "epollWait" || it.className.startsWith("sun.nio.ch") || it.methodName == "socketRead0" || it.methodName == "read0" } && st.isNotEmpty())
+            if (interesting) {
                 appendLine("IDLEDUMP thread ${t.name} ${t.state}")
                 st.take(30).forEach { appendLine("IDLEDUMP     at $it") }
             }
         }
         appendLine("IDLEDUMP ===== end")
     }
+
+    private fun compose(): String = buildString {
+        val companion = Class.forName("androidx.compose.runtime.Recomposer").getDeclaredField("Companion").get(null)
+        val flow = companion.javaClass.getMethod("getRunningRecomposers").invoke(companion) as kotlinx.coroutines.flow.StateFlow<*>
+        val infos = (flow.value as? Collection<*>).orEmpty()
+        appendLine("IDLEDUMP recomposers=${infos.size}")
+        infos.forEachIndexed { i, info ->
+            val rec = info?.let { field(it, "this$0") } ?: return@forEachIndexed
+            appendLine("IDLEDUMP rec[$i] ${short(rec.toString())} ${scalars(rec)}")
+            fields(rec.javaClass).forEach { f ->
+                f.isAccessible = true
+                val v = runCatching { f.get(rec) }.getOrNull() ?: return@forEach
+                when {
+                    v.javaClass.name.endsWith("BroadcastFrameClock") -> {
+                        val awaiters = (field(v, "awaiters") as? List<*>).orEmpty()
+                        appendLine("IDLEDUMP rec[$i].frameClock awaiters=${awaiters.size}")
+                        awaiters.take(10).forEach { a -> appendLine("IDLEDUMP     awaiter ${chain(a?.let { field(it, "continuation") })}") }
+                    }
+                    v is Collection<*> && v.isNotEmpty() -> appendLine("IDLEDUMP rec[$i].${f.name} n=${v.size} ${short(v.take(5).toString())}")
+                    v.javaClass.name.contains("ScatterSet") || v.javaClass.name.contains("MutableVector") -> appendLine("IDLEDUMP rec[$i].${f.name} ${short(v.toString())}")
+                }
+            }
+        }
+        val snap = Class.forName("androidx.compose.runtime.snapshots.SnapshotKt").declaredFields
+            .firstOrNull { it.name == "currentGlobalSnapshot" }?.let { it.isAccessible = true; it.get(null) }
+        val global = (snap as? java.util.concurrent.atomic.AtomicReference<*>)?.get() ?: snap
+        if (global != null) appendLine("IDLEDUMP globalSnapshot ${global.javaClass.name} modified=${short(field(global, "modified").toString())}")
+    }
+
+    private fun chain(c: Any?): String {
+        var cur = c
+        val out = StringBuilder()
+        var n = 0
+        while (cur != null && n < 25) {
+            out.append(" <- ").append(short(cur.toString(), 160))
+            cur = field(cur, "completion") ?: field(cur, "continuation") ?: field(cur, "uCont")
+            n++
+        }
+        return out.toString()
+    }
+
+    private fun short(s: String, max: Int = 1500) = if (s.length > max) s.take(max) + "..." else s
 
     private fun choreographer(label: String, ch: Any): String = buildString {
         appendLine("IDLEDUMP $label.choreographer ${scalars(ch)}")
