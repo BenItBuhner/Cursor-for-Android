@@ -43,14 +43,18 @@ data class AgentRow(
     /** This row's children, their children and so on, depth first — what a collapsed parent stands for. */
     fun descendants(): List<AgentRow> = children.flatMap { listOf(it) + it.descendants() }
 
+    // Built once from the children's own counts, so a read in composition never walks the subtree. They must stay
+    // functions of the constructor's values alone: equals leaves them out.
+    private val descendantCount: Int = children.size + children.sumOf { it.descendantCount }
+
     /** What the Project's row counts: the chats loaded under it, or the account's own count when that is more. */
-    val shownCount: Int get() = maxOf(descendants().size, memberCount ?: 0)
+    val shownCount: Int = maxOf(descendantCount, memberCount ?: 0)
 
     /** A turn is going somewhere in the subtree: the working glyph on the collapsed parent's count. */
-    val hasRunningDescendant: Boolean get() = children.any { it.indicator == AgentIndicator.Running || it.hasRunningDescendant }
+    val hasRunningDescendant: Boolean = children.any { it.indicator == AgentIndicator.Running || it.hasRunningDescendant }
 
     /** The chats in this subtree with a turn going, this one included: what a Project's shortcut says is working. */
-    val workingCount: Int get() = (if (indicator == AgentIndicator.Running) 1 else 0) + children.sumOf { it.workingCount }
+    val workingCount: Int = (if (indicator == AgentIndicator.Running) 1 else 0) + children.sumOf { it.workingCount }
 }
 
 data class AgentSection(
