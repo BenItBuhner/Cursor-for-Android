@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.WindowCompat
 import com.cursorforandroid.ui.components.ProvideHaptics
+import com.cursorforandroid.ui.components.ProvideSharedAnimationTicker
 
 enum class ThemeMode { System, Dark, Light }
 
@@ -97,13 +98,15 @@ fun CursorTheme(
         }
     }
 
-    CompositionLocalProvider(
-        LocalCursorColors provides colors,
-        LocalCursorTypography provides typography,
-        LocalCursorShapes provides shapes,
-    ) {
-        MaterialTheme(colorScheme = materialScheme, typography = materialTypography, shapes = materialShapes) {
-            ProvideHaptics(content = content)
+    ProvideSharedAnimationTicker {
+        CompositionLocalProvider(
+            LocalCursorColors provides colors,
+            LocalCursorTypography provides typography,
+            LocalCursorShapes provides shapes,
+        ) {
+            MaterialTheme(colorScheme = materialScheme, typography = materialTypography, shapes = materialShapes) {
+                ProvideHaptics(content = content)
+            }
         }
     }
 }

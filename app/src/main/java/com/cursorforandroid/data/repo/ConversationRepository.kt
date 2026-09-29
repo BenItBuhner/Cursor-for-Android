@@ -442,12 +442,13 @@ class ConversationRepository(
         private val expiredBefore = entry.expiredBefore
         private val projectMode = entry.projectMode
         private val isProject = entry.state.value.isProjectConversation
+        private val promptsAwaited = entry.promptsAwaited
         val ids: Set<String> = items.mapTo(HashSet(items.size)) { it.id }
 
         fun matches(entry: Entry, runId: String): Boolean = liveRunId == runId &&
             messages === entry.messages && runs === entry.runs && local === entry.local &&
             traces === entry.traces && partial === entry.partial && promptImages === entry.promptImages &&
-            window == entry.window && runsComplete == entry.runsComplete &&
+            window == entry.window && runsComplete == entry.runsComplete && promptsAwaited == entry.promptsAwaited &&
             expiredRuns.size == entry.expiredRuns.size && expiredRuns == entry.expiredRuns && expiredBefore == entry.expiredBefore && projectMode == entry.projectMode && isProject == entry.state.value.isProjectConversation
     }
 
@@ -930,6 +931,13 @@ class ConversationRepository(
         /** True once this session fetched the inputs from the network (as opposed to disk). */
         var fetched = false
         /**
+         * The runs were drawn ahead of the transcript with no prompt in hand (see [publishRunsFirst]), and the load's
+         * read of it has not ended: a coordinator's messages in the turns without a prompt are held back until it
+         * does (see [build]). Each answers a prompt the transcript is about to place above it; drawn now, it stood
+         * under no prompt, the chat's replies stacked, until the prompts slid in between them.
+         */
+        var promptsAwaited = false
+        /**
          * The inputs came from the disk as a read of an earlier process left them — the transcript with the runs it
          * was read beside — so the next read's run list may be compared with them as with a copy fetched here (see
          * [load]). Spent by that read, whatever it comes to.
@@ -1193,7 +1201,8 @@ class ConversationRepository(
                 ?: return build(shownTraces(), full)
             val prefix = builtPrefix?.takeIf { it.matches(this, tail.runId) } ?: buildPrefix(tail.runId, layout)
             val steered = local.firstOrNull { it.run.id == tail.runId && it.steeredAfter != null }
-            val story = if (steered == null) tail.items else tail.items.toMutableList().also { spliceSteered(it, last!!, steered, mapOf(tail.runId to tail.items)) }
+            val told = if (awaitsPrompts() && layout.turns.last().prompt == null) CoordinatorTranscript.withoutMessages(tail.items) else tail.items
+            val story = if (steered == null) told else told.toMutableList().also { spliceSteered(it, last!!, steered, mapOf(tail.runId to told)) }
             // The run's end, as [TimelineBuilder.fromTurns] would close it: a run over by its record whose story has none
             // yet — the reply the record ended on, then its footer.
             val closed = if (!last!!.statusEnum().isActive && story.none { it is RunFooter && it.runId == last.id }) TimelineBuilder.withReplies(story, TimelineBuilder.recordReply(last)) + TimelineBuilder.footer(last) else story
@@ -1694,8 +1703,15 @@ class ConversationRepository(
             return result
         }
 
-        /** The timeline with [shown] standing in for the runs that have a trace; [omit]'s runs contribute their prompt only (see [buildPrefix]). */
-        private fun build(shown: Map<String, List<TimelineItem>>, layout: Layout, steersOf: (RunDto) -> Boolean = { true }, omit: Set<String> = emptySet()): List<TimelineItem> {
+        /** True while a coordinator's messages in the turns without a prompt are held back (see [promptsAwaited]): no transcript is in hand yet. */
+        private fun awaitsPrompts(): Boolean = promptsAwaited && messages.isEmpty()
+
+        /** The timeline with [traced] standing in for the runs that have a trace; [omit]'s runs contribute their prompt only (see [buildPrefix]). */
+        private fun build(traced: Map<String, List<TimelineItem>>, layout: Layout, steersOf: (RunDto) -> Boolean = { true }, omit: Set<String> = emptySet()): List<TimelineItem> {
+            val shown = if (!awaitsPrompts()) traced else {
+                val bare = layout.turns.mapNotNullTo(HashSet()) { turn -> turn.run?.id?.takeIf { turn.prompt == null } }
+                traced.mapValues { (runId, items) -> if (runId in bare) CoordinatorTranscript.withoutMessages(items) else items }
+            }
             // Prompts the server has not answered for yet read as pending; their placeholder run is the key.
             val pending = local.filterNot { it.filed }.mapTo(HashSet()) { it.run.id }
             val stories = keptStories().keys
@@ -3159,6 +3175,7 @@ class ConversationRepository(
                     e.publish(
                         mutate = {
                             transcript?.let { messages = it }
+                            promptsAwaited = false
                             newest?.let { mergeNewestPage(it.page, endKnown = it.endKnown); runOrder = if (it.ascending) RunOrder.OLDEST_FIRST else RunOrder.NEWEST_FIRST; latestFetchedById = it.latestFetched }
                             unavailable = transcriptFailed && messages.isEmpty()
                             this.transcriptUnavailable = unavailable
@@ -3233,6 +3250,8 @@ class ConversationRepository(
             if (t is CancellationException) throw t
             e.reportLoadFailure(t)
         }
+        // The read failed: what it held back is drawn, as it stands — no prompt is on its way to place it.
+        if (synchronized(e) { e.promptsAwaited }) e.publish(mutate = { promptsAwaited = false })
     }
 
     /**
@@ -3259,6 +3278,7 @@ class ConversationRepository(
                 latestFetchedById = newest.latestFetched
                 // Newer runs than the transcript in hand: undated until the transcript lands (see [load]).
                 inputsUpdatedAt = 0L
+                promptsAwaited = messages.isEmpty()
                 pruneLocal()
                 promptImages = onDevice + promptImages.filterKeys { key -> local.any { it.run.id == key } }
                 latest = latestRun()
@@ -5568,6 +5588,15 @@ class ConversationRepository(
             if (followupId in returned) returned = returned - followupId
         })
         if (gone.isNotEmpty()) e.scope.launch { gone.forEach { attachments.discard(it.staged.attachments) }; persist(e, session.current) }
+    }
+
+    /**
+     * A word of this device's under the account's row for [followupId] (see [QueuePlacement.returned]): a steer from the
+     * device's card the account took into its queue but would not promote, which now waits there. Goes with the row.
+     */
+    fun noteQueuedNote(agentId: String, followupId: String, note: String) {
+        val e = synchronized(entries) { entries[agentId] } ?: return
+        e.publish(mutate = { returned = returned + (followupId to note) })
     }
 
     /**
