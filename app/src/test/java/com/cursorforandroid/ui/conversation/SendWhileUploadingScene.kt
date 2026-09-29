@@ -98,11 +98,19 @@ internal class SendWhileUploadingScene(
             check(graph.extendedMode.setEngine(TranscriptEngine.STABLE)) { "The transcript engine could not be set." }
             if (running) {
                 api.addRunningAgent(AGENT, "Crash on launch", RUN, createdAt = STARTED_AT)
-                api.transcripts[AGENT] = listOf(V0ConversationMessageDto("$RUN-u", "user_message", "The app crashes on launch on Android 15. Find out why and fix it."))
+                api.transcripts[AGENT] = listOf(V0ConversationMessageDto("$RUN-u", "user_message", PROMPT))
                 streamer.emit(RUN, RunStreamEvent.Status(RUN, RunStatus.RUNNING))
                 streamer.emit(RUN, RunStreamEvent.Assistant("Reading the startup path first. "))
             } else {
-                api.addIdleAgent(AGENT, "Crash on launch", RUN, createdAt = STARTED_AT)
+                api.addIdleAgent(AGENT, "Crash on launch", RUN, createdAt = STARTED_AT, result = REPLY)
+                api.transcripts[AGENT] = listOf(
+                    V0ConversationMessageDto("$RUN-u", "user_message", PROMPT),
+                    V0ConversationMessageDto("$RUN-a", "assistant_message", REPLY),
+                )
+                // The finished run's log is served whole, so its activity is read and no "Loading the activity" row shows.
+                streamer.emit(RUN, RunStreamEvent.Assistant(REPLY))
+                streamer.emit(RUN, RunStreamEvent.Result(RUN, RunStatus.FINISHED, REPLY, 65_000, null))
+                streamer.emit(RUN, RunStreamEvent.Done)
             }
             graph.agents.refresh()
         }
@@ -118,6 +126,12 @@ internal class SendWhileUploadingScene(
         compose.waitUntil(30_000) { compose.onAllNodes(hasText(placeholder)).fetchSemanticsNodes().isNotEmpty() }
         if (running) compose.waitUntil(30_000) { graph.followUps.decide(AGENT).busy }
         compose.waitUntil(15_000) { viewModel.capabilities.value.promptFiles }
+        if (!running) {
+            waitFor(30_000, describe = { "the finished turn's activity" }) {
+                graph.conversations.state(AGENT).value.traceStatus.pending == 0 &&
+                    compose.onAllNodes(hasText("Loading the activity", substring = true), useUnmergedTree = true).fetchSemanticsNodes().isEmpty()
+            }
+        }
     }
 
     /**
@@ -165,5 +179,7 @@ internal class SendWhileUploadingScene(
         const val STARTED_AT = "2025-01-15T13:57:00.000Z"
         const val COMPOSER = "follow-up-composer"
         const val UPLOADING = "Uploading…"
+        const val PROMPT = "The app crashes on launch on Android 15. Find out why and fix it."
+        const val REPLY = "Fixed: the splash theme referenced a color missing on API 35."
     }
 }
