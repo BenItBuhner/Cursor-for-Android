@@ -81,6 +81,9 @@ class FleetListScaleBenchmarkTest {
         assertWithMessage(r.open.line()).that(r.openFirstFrames).isAtMost(MAX_OPEN_FRAMES)
         assertWithMessage(r.idle.line()).that(r.idle.tickScopes.sorted()[r.idle.tickScopes.size / 2]).isAtMost(MAX_SCOPES_PER_TICK)
         assertWithMessage(r.scroll.line()).that(r.scroll.scopes / r.scroll.frames.coerceAtLeast(1)).isAtMost(MAX_SCOPES_PER_SCROLL_FRAME)
+        assertWithMessage(r.idle.line()).that(r.idle.top.map { it.first }).containsNoneOf("agents.ChatRowMenu", "agents.ChatOverflowMenu")
+        assertWithMessage(r.idle.line()).that(r.idle.extra.getValue("organizerPasses") as Int)
+            .isAtMost(r.idle.extra.getValue("agentListChanges") as Int)
     }
 
     private class Result(val open: ScaleMeter.Phase, val openFirstFrames: Int, val idle: ScaleMeter.Phase, val scroll: ScaleMeter.Phase, val back: ScaleMeter.Phase) {
@@ -117,19 +120,27 @@ class FleetListScaleBenchmarkTest {
         val list = rig.pinned(sidebarList)
 
         // Thirty seconds of the fleet ticking under the open list.
+        var organizerBefore = rig.vm.organizerPasses
+        var listChangesBefore = rig.vm.agentListChanges
         val idle = rig.phase("list-idle")
         repeat(idleTicks) { rig.tick(idle) }
         meter.end(idle, heap = true)
         (rig.counters() - baseline).into(idle)
+        idle.extra["organizerPasses"] = rig.vm.organizerPasses - organizerBefore
+        idle.extra["agentListChanges"] = rig.vm.agentListChanges - listChangesBefore
         idle.top = meter.attributed { repeat(ATTRIBUTION_TICKS) { rig.tick(null) } }.second
 
         // Top to bottom and back, ticking, every Project and the Big Project's children listed.
         val listed = listInFull(list)
+        organizerBefore = rig.vm.organizerPasses
+        listChangesBefore = rig.vm.agentListChanges
         val scroll = rig.phase("list-scroll")
         scroll.extra["listed"] = listed
         val downFrames = rig.drag(list, scroll, down = true)
         val upFrames = rig.drag(list, scroll, down = false)
         meter.end(scroll)
+        scroll.extra["organizerPasses"] = rig.vm.organizerPasses - organizerBefore
+        scroll.extra["agentListChanges"] = rig.vm.agentListChanges - listChangesBefore
         scroll.top = meter.attributed { rig.drag(list, ScaleMeter.Phase("unreported", size.name), down = true, maxFrames = ATTRIBUTION_DRAG_FRAMES) }.second
         scroll.extra["dragFramesDown"] = downFrames
         scroll.extra["dragFramesUp"] = upFrames
@@ -138,6 +149,8 @@ class FleetListScaleBenchmarkTest {
         // A minute in the background while the fleet goes on, then back.
         val back = rig.phase("list-return")
         val before = rig.counters()
+        organizerBefore = rig.vm.organizerPasses
+        listChangesBefore = rig.vm.agentListChanges
         compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         repeat(BACKGROUND_TICKS) {
             rig.fleet.deliver(rig.api, rig.graph, rig.fleet.tick())
@@ -147,6 +160,8 @@ class FleetListScaleBenchmarkTest {
         val returnFrames = meter.settle(back, quiet = 10, max = 240)
         meter.end(back)
         (rig.counters() - before).into(back)
+        back.extra["organizerPasses"] = rig.vm.organizerPasses - organizerBefore
+        back.extra["agentListChanges"] = rig.vm.agentListChanges - listChangesBefore
         back.extra["settledFrames"] = returnFrames
         back.extra["settledMs"] = ScaleMeter.Phase.f(back.wall.sum())
         return Result(open, firstFrames, idle, scroll, back)
@@ -177,8 +192,8 @@ class FleetListScaleBenchmarkTest {
         const val ATTRIBUTION_TICKS = 5
         const val BACKGROUND_TICKS = 60
         const val ATTRIBUTION_DRAG_FRAMES = 120
-        const val MAX_SCOPES_PER_TICK = 4_000
+        const val MAX_SCOPES_PER_TICK = 40
         const val MAX_OPEN_FRAMES = 60
-        const val MAX_SCOPES_PER_SCROLL_FRAME = 400
+        const val MAX_SCOPES_PER_SCROLL_FRAME = 4
     }
 }
