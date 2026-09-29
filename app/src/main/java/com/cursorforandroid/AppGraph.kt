@@ -174,6 +174,7 @@ import com.cursorforandroid.ui.settings.DIAGNOSTICS_DIR
 import com.cursorforandroid.update.AndroidUpdatePlatform
 import com.cursorforandroid.update.allocatableBytes
 import com.cursorforandroid.util.AppClock
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -239,6 +240,13 @@ class AppGraph(
     repositoryBranchesApi: RepositoryBranchesApi? = null,
     /** Injectable for tests only: the account's transcription, so the composer's voice input can be driven against a scripted account. */
     transcriptionApi: TranscriptionApi? = null,
+    /**
+     * Where the agent list is organized for its screens (see [com.cursorforandroid.ui.agents.AgentsViewModel.uiState]).
+     * Injectable for tests only: the Compose test rule runs a screen's collectors on whichever thread publishes to
+     * them, and a state written from a background thread while the main thread composes can go unseen, leaving the
+     * screen on the state before it.
+     */
+    val agentListDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val app = context.applicationContext
 
@@ -518,6 +526,8 @@ class AppGraph(
         override suspend fun record(id: String): ComposerSnapshot? = lazyAccountAgents.value.record(id)
         override suspend fun scanRoots(maxPages: Int): RootScan = lazyAccountAgents.value.scanRoots(maxPages)
         override suspend fun scanRoots(maxPages: Int, stopBelowActivityMillis: Long?): RootScan = lazyAccountAgents.value.scanRoots(maxPages, stopBelowActivityMillis)
+        override suspend fun scanRoots(maxPages: Int, stopBelowActivityMillis: Long?, firstPage: AccountList?): RootScan =
+            lazyAccountAgents.value.scanRoots(maxPages, stopBelowActivityMillis, firstPage)
         override suspend fun createWorker(managerId: String, launch: WorkerLaunch): ComposerSnapshot = lazyProjectApi.value.createWorker(managerId, launch)
         override suspend fun setWorkerManager(workerId: String, managerId: String, spawnKind: WorkerSpawnKind) = lazyProjectApi.value.setWorkerManager(workerId, managerId, spawnKind)
         override suspend fun clearWorkerManager(workerId: String) = lazyProjectApi.value.clearWorkerManager(workerId)
@@ -636,6 +646,7 @@ class AppGraph(
             pending = pendingWork,
             // A pinned chat the public API will not give (Extended mode): stood in from its account record.
             recordOf = { id -> if (!session.isDemo && capabilities().accountSession) lazyAccountAgents.value.record(id) else null },
+            accountPaused = { accountPauseMillis() > 0L },
             start = { lazyAgentStart.value },
             uploads = { promptUploads },
         ).also { repo ->
@@ -688,7 +699,7 @@ class AppGraph(
                 // The root registry is filled from the account list — to the page older than every Project it
                 // knows, or the whole list on a deep refresh and a few times an hour — the memberships read after;
                 // the Projects group is drawn from the registry, not from the pages the sidebar holds.
-                projects.scheduleRootDiscovery(list.composers.filter { it.scope == AgentScope.PROJECT_ROOT }.map { it.id }, deep = agents.lastRefreshDepth == RefreshDepth.Deep)
+                projects.scheduleRootDiscovery(list.composers.filter { it.scope == AgentScope.PROJECT_ROOT }.map { it.id }, deep = agents.lastRefreshDepth == RefreshDepth.Deep, firstPage = list.takeIf { it.isFirstPage })
             },
             capabilities = capabilities,
             stats = refreshStats,
@@ -868,7 +879,8 @@ class AppGraph(
             },
             accountQueueAvailable = { capabilities().accountQueue && !session.isDemo },
             // A waiting card's up arrow mid-turn: the message filed with the account's queue and promoted into the turn
-            // under way, as an account row's steer is — the queue read once, by the promote, so the card never shows it twice.
+            // under way, as an account row's steer is — the queue read once, by the promote; the card stands for the
+            // account's row of it until the transcript shows it (see FollowUpRepository.steerNow).
             accountSteering = object : FollowUpRepository.AccountSteering {
                 override suspend fun handOff(agentId: String, item: QueuedFollowUp): FollowUpRepository.AccountHandoff {
                     val followup = accountFollowupOf(item)
@@ -877,6 +889,9 @@ class AppGraph(
 
                 override suspend fun promote(agentId: String, followupId: String): SteerOutcome =
                     steering.promotePending(agentId, followupId).onFailure { steering.refreshQueue(agentId) }.getOrThrow()
+
+                override suspend fun withdraw(agentId: String, followupId: String): Boolean =
+                    steering.deletePending(agentId, followupId).isSuccess
             },
             store = followUpStore,
             persist = { !session.isDemo },

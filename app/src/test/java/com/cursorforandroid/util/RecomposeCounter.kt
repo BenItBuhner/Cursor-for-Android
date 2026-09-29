@@ -99,6 +99,9 @@ class RecomposeScopes : CompositionObserver, RecomposeScopeObserver {
 
     fun reset() { scopes = 0; byName.clear() }
 
+    /** Runs of the scopes whose name contains [part]. */
+    fun count(part: String): Int = byName.entries.filter { part in it.key }.sumOf { it.value }
+
     fun top(n: Int = 40): String = byName.entries.sortedByDescending { it.value }.take(n).joinToString("\n") { "  ${it.value}x ${it.key}" }
 
     /** The slot tables of subcompositions (BoxWithConstraints, LazyColumn items…) hanging off a remembered context. */
