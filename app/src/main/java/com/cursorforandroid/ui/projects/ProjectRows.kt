@@ -15,6 +15,9 @@ internal data class WorkerLine(val worker: ProjectWorker, val row: AgentRow)
  * primary, the first of an id listed twice, and the summary's counts over the primaries as listed.
  */
 internal data class ProjectRows(val workers: List<WorkerLine> = emptyList(), val running: Int = 0, val needsInput: Int = 0) {
+    /** Each primary's line by its id, built with the rows rather than on the frame that asks. */
+    val byId: Map<String, WorkerLine> = workers.associateBy { it.worker.agent.id }
+
     companion object {
         fun of(state: ProjectViewState, local: LocalAgentState, nowMillis: Long): ProjectRows = ProjectRowsBuilder().build(state, local, nowMillis)
     }
@@ -43,11 +46,10 @@ internal class ProjectRowsBuilder {
         }
         lastLocal = local
         lastTick = tick
-        lines = built.associateBy { it.worker.agent.id }
         return ProjectRows(
             workers = built,
             running = state.workers.count { it.agent.isRunning } + (if (state.root?.isRunning == true) 1 else 0),
             needsInput = state.workers.count { it.agent.hasPendingInteraction },
-        )
+        ).also { lines = it.byId }
     }
 }
