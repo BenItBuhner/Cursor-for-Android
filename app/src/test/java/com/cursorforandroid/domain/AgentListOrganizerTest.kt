@@ -70,7 +70,7 @@ class AgentListOrganizerTest {
 
         assertThat(organized.unreadCount).isEqualTo(1)
         assertThat(organized.runningCount).isEqualTo(1)
-        assertThat(organized.sections.flatMap { it.rows }.map { it.agent.id }).containsNoneOf(heldRunning.id)
+        assertThat(organized.sections.flatMap { it.rows }.map { it.agent.id }).doesNotContain(heldRunning.id)
     }
 
     @Test

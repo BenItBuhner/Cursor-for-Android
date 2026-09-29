@@ -65,6 +65,7 @@ import com.cursorforandroid.ui.components.Haptics
 import com.cursorforandroid.ui.components.ProjectGlyph
 import com.cursorforandroid.ui.components.RunningGlyph
 import com.cursorforandroid.ui.components.StateGlyph
+import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.ui.components.stylusWriting
 import com.cursorforandroid.ui.components.Haptic
 import com.cursorforandroid.ui.theme.CursorDimens
@@ -104,7 +105,7 @@ fun AgentRowItem(
     selected: Boolean,
     prefs: ListPreferences,
     actions: AgentRowActions,
-    haptics: Haptics,
+    haptics: Haptics = rememberHaptics(),
     modifier: Modifier = Modifier,
     nowMillis: Long = AppClock.now(),
     /** The share picker only opens a chat; the pin / archive / delete menu stays on the sidebar. */
