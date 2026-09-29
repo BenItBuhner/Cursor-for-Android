@@ -679,15 +679,25 @@ object TranscriptRows {
     }
 
     /** The newest group of events, when it is small enough to open: its stretch's index, the stretch, and the entry's index within it. */
-    internal fun newestGroupToOpen(rows: List<TranscriptRow>): Triple<Int, TranscriptRow.Stretch, Int>? {
-        for (r in rows.indices.reversed()) {
+    internal fun newestGroupToOpen(rows: List<TranscriptRow>): Triple<Int, TranscriptRow.Stretch, Int>? =
+        groupToOpen(rows, newestEventsStretch(rows, 0, rows.size))
+
+    /** The index of the newest stretch among `rows[from, to)` with a group of events among its entries, or -1. */
+    internal fun newestEventsStretch(rows: List<TranscriptRow>, from: Int, to: Int): Int {
+        for (r in to - 1 downTo from) {
             val stretch = rows[r] as? TranscriptRow.Stretch ?: continue
-            val e = stretch.entries.indexOfLast { it is TranscriptRow.Entry.Events }
-            if (e < 0) continue
-            val group = (stretch.entries[e] as TranscriptRow.Entry.Events).group
-            return if (group.count >= OPEN_BELOW || group.startsOpen) null else Triple(r, stretch, e)
+            if (stretch.entries.any { it is TranscriptRow.Entry.Events }) return r
         }
-        return null
+        return -1
+    }
+
+    /** The newest group of the stretch at [r] (see [newestEventsStretch]; -1 for none), when it is small enough to open. */
+    internal fun groupToOpen(rows: List<TranscriptRow>, r: Int): Triple<Int, TranscriptRow.Stretch, Int>? {
+        if (r < 0) return null
+        val stretch = rows[r] as TranscriptRow.Stretch
+        val e = stretch.entries.indexOfLast { it is TranscriptRow.Entry.Events }
+        val group = (stretch.entries[e] as TranscriptRow.Entry.Events).group
+        return if (group.count >= OPEN_BELOW || group.startsOpen) null else Triple(r, stretch, e)
     }
 
     /** [stretch] with the group at [entryIndex] marked as opening on its own. */
