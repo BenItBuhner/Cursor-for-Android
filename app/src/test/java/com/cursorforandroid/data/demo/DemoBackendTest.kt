@@ -355,6 +355,7 @@ class DemoBackendTest {
             val coordinator = dataset.seeds.single { it.id == DemoPerfSeeds.SCALE_BIG_PROJECT_ID }
             assertThat(coordinator.earlier.size + 1).isEqualTo(2_000)
             assertThat(coordinator.liveScript).isEqualTo("scale")
+            assertThat(dataset.seeds.map { it.liveScript }.distinct()).containsExactly("scale")
         }
     }
 }

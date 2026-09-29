@@ -225,7 +225,9 @@ internal object DemoPerfSeeds {
                     "Implement shard $ordinal, run its checks, and report the result to the coordinator."
                 },
                 replies = if (running) emptyList() else listOf("Shard $ordinal is complete; checks passed and the branch is ready."),
-                liveScript = "scale".takeIf { running },
+                // Finished rows can trade into RUNNING on the ten-second scale clock; if one is opened after that,
+                // it must stream the same one-step-per-second script as a row that started running.
+                liveScript = "scale",
                 earlier = earlier,
             )
             when {
