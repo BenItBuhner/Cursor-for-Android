@@ -79,6 +79,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -864,20 +865,69 @@ class AgentRepository(
     /**
      * Applies [transform] to the list, but only while it still belongs to [startedIn] (and, when given, to
      * [backend]). The check and the write are one critical section shared with [reset], so nothing can be published
-     * into a list that has since been replaced.
+     * into a list that has since been replaced. [skipUnchanged]: the caller changed nothing the classification reads
+     * but the rows, so a [transform] that returns the list it was given publishes nothing — no classification pass.
      */
-    private fun publish(backend: CursorBackend?, startedIn: Int, transform: (AgentListState) -> AgentListState): Boolean =
+    private fun publish(backend: CursorBackend?, startedIn: Int, skipUnchanged: Boolean = false, transform: (AgentListState) -> AgentListState): Boolean =
         synchronized(publishLock) {
             if (generation.get() != startedIn) return false
             if (backend != null) {
                 if (session.current !== backend) return false
                 owner = backend
             }
+            val previous = _state.value
+            val next = transform(previous)
+            if (skipUnchanged && next === previous) return true
             // Every publication ends with the classification pass: whatever [transform] did to the rows — merged a
             // page, folded in a record, restored the disk — each row is placed by what is known of its lineage.
-            _state.value = transform(_state.value).classified()
+            _state.value = next.classified()
+            publishCounts.passes.incrementAndGet()
+            if (_state.value !== previous) publishCounts.changes.incrementAndGet()
             true
         }
+
+    /**
+     * What the list's publications have cost, counted: every pass of [classified] ([passes]) and every publication
+     * that changed the list its collectors see ([changes]; the flow keeps the list it holds when an equal one is
+     * published). For the benchmarks: each change is a pass of every collector of [state].
+     */
+    internal class PublishCounts {
+        val passes = AtomicInteger()
+        val changes = AtomicInteger()
+    }
+
+    internal val publishCounts = PublishCounts()
+
+    /**
+     * What one pass reads, published together: [add] queues an item, the first one queued starts a [windowMs] timer,
+     * and [flush] — the timer's, or the pass's own when it ends — hands everything queued to [publish] at once. A pass
+     * that reads a dozen records publishes the list once rather than a dozen times, each a pass of every collector
+     * of the list; a slow read in the middle of it holds the others' results back [windowMs] at most. The timer runs
+     * in [scope], the pass's own, so the pass flushes before it ends.
+     */
+    private class PublishBatch<T>(private val scope: CoroutineScope, private val windowMs: Long, private val publish: (List<T>) -> Unit) {
+        private val queued = ArrayList<T>()
+        private var timer: Job? = null
+
+        fun add(item: T) {
+            synchronized(this) {
+                queued += item
+                if (timer == null) timer = scope.launch { delay(windowMs); flush() }
+            }
+        }
+
+        // Under the batch's own lock, so two flushes never publish out of order.
+        fun flush() {
+            synchronized(this) {
+                timer?.cancel()
+                timer = null
+                if (queued.isEmpty()) return
+                val items = queued.toList()
+                queued.clear()
+                publish(items)
+            }
+        }
+    }
 
     /**
      * Places every row the desktop's way (see [AgentsWindowList]): the parent link is the record's own
@@ -915,11 +965,6 @@ class AgentRepository(
             settled
         }
         return held
-    }
-
-    /** Lets a hold go (the account has no record for the row) and republishes, so the row is drawn. */
-    private fun releaseHold(id: String, startedIn: Int) {
-        if (holdUntilPlaced.remove(id) != null) publish(null, startedIn) { it }
     }
 
     /**
@@ -1164,7 +1209,7 @@ class AgentRepository(
     private suspend fun fetchMore(backend: CursorBackend, startedIn: Int, cursor: String, legacy: String?) {
         val api = backend.api
         val startedAt = AppClock.now()
-        fun publish(transform: (AgentListState) -> AgentListState): Boolean = publish(backend, startedIn, transform)
+        fun publish(transform: (AgentListState) -> AgentListState): Boolean = publish(backend, startedIn, transform = transform)
         // What the page is about to cover: the rows known so far, and where the pages read in sequence so far end.
         val before = _state.value.agents
         val knownBefore = before.mapTo(HashSet()) { it.id }
@@ -1305,9 +1350,9 @@ class AgentRepository(
         val holdNew = knownBefore.isNotEmpty() && !backend.isDemo && capabilities().accountSession
         // Everything published by this fetch belongs to the backend and session it started against; a demo / real
         // switch or a sign-out half-way through must not leak the old list into the new one.
-        fun publish(transform: (AgentListState) -> AgentListState): Boolean = publish(backend, startedIn, transform)
+        fun publish(transform: (AgentListState) -> AgentListState): Boolean = publish(backend, startedIn, transform = transform)
         firstPageLanded = false
-        publish { it.copy(isRefreshing = it.isRefreshing || !silent, error = null) }
+        publish(backend, startedIn, skipUnchanged = true) { if ((it.isRefreshing || silent) && it.error == null) it else it.copy(isRefreshing = it.isRefreshing || !silent, error = null) }
         // The whole fetch is one item of work in flight — its pages, its passes and the moments between them — so the
         // tail's row does not blink off between one call's end and the next one's start; the parts name themselves
         // inside it for the diagnostics. Ended in `finally`: a fetch cut short leaves nothing registered.
@@ -1376,7 +1421,7 @@ class AgentRepository(
                 synchronized(publishLock) { if (generation.get() == startedIn) legacyCursor = legacyRead.windowCursor }
             }
             stats.stage("v1 pages", pagesRead, pagesStartedAt, note = "${seen.size} rows" + if (truncated) ", more behind" else "")
-            pending.track("run records (verify)") { stats.timed("run records (verify)", calls = { n: Int -> n }) { verifyRunStatuses(api, before, startedAt) { transform -> publish(transform) } } }
+            pending.track("run records (verify)") { stats.timed("run records (verify)", calls = { n: Int -> n }) { verifyRunStatuses(backend, startedIn, before, startedAt) } }
             if (legacyRead.pagesRead > 0) {
                 _runningScan.update { it.copy(ids = legacyRead.running, scannedAtMillis = AppClock.now(), pagesRead = legacyRead.pagesRead, complete = legacyRead.complete) }
             }
@@ -1443,7 +1488,7 @@ class AgentRepository(
             pending.end(work)
             // A fetch that ends any other way — cut short with the indicator up — lets the indicator go with it: an
             // indicator is a fetch in flight, never a flag left behind by one that is not.
-            publish { s -> if (s.isRefreshing) s.copy(isRefreshing = false) else s }
+            publish(backend, startedIn, skipUnchanged = true) { s -> if (s.isRefreshing) s.copy(isRefreshing = false) else s }
         }
         // Started once the fetch's own work has ended: neither the fetch nor its item of work waits on the account.
         if (followRecords) followWithRecords(startedIn, prime)
@@ -1616,32 +1661,38 @@ class AgentRepository(
             val asked = java.util.concurrent.atomic.AtomicInteger()
             val stalled = java.util.concurrent.atomic.AtomicBoolean(false)
             pending.track("account records by id (${due.size})") { coroutineScope {
-                due.forEach { row ->
-                    launch {
-                        byIdPool.withPermit {
-                            if (generation.get() != startedIn) return@withPermit
-                            // A page or another pass may have brought the record meanwhile.
-                            if (agent(row.id)?.record != null) return@withPermit
-                            if (stalled.get() || accountPaused()) return@withPermit
-                            asked.incrementAndGet()
-                            val record = try {
-                                recordById(row.id)
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (t: Throwable) {
-                                recordUnresolved[row.id] = now + retryDelayFor(t)
-                                if (t.isPassing()) stalled.set(true)
-                                return@withPermit
+                // The records read, and the rows the account lists no record for, land together (see [PublishBatch]).
+                val batch = PublishBatch<Pair<String, ComposerSnapshot?>>(this, PUBLISH_BATCH_MS) { read ->
+                    // The account lists no such chat: no record is coming to place it, so its hold goes and it is drawn as it is.
+                    val released = read.count { (id, record) -> record == null && holdUntilPlaced.remove(id) != null }
+                    val records = read.mapNotNull { it.second }
+                    if (records.isNotEmpty()) applyAccountSnapshots(records, startedIn) else if (released > 0) publish(null, startedIn) { it }
+                }
+                try {
+                    due.map { row ->
+                        launch {
+                            byIdPool.withPermit {
+                                if (generation.get() != startedIn) return@withPermit
+                                // A page or another pass may have brought the record meanwhile.
+                                if (agent(row.id)?.record != null) return@withPermit
+                                if (stalled.get() || accountPaused()) return@withPermit
+                                asked.incrementAndGet()
+                                val record = try {
+                                    recordById(row.id)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (t: Throwable) {
+                                    recordUnresolved[row.id] = now + retryDelayFor(t)
+                                    if (t.isPassing()) stalled.set(true)
+                                    return@withPermit
+                                }
+                                if (record == null) recordUnresolved[row.id] = now + RECORD_RETRY_MS
+                                batch.add(row.id to record)
                             }
-                            if (record == null) {
-                                recordUnresolved[row.id] = now + RECORD_RETRY_MS
-                                // The account lists no such chat: no record is coming to place it, so it is drawn as it is.
-                                releaseHold(row.id, startedIn)
-                                return@withPermit
-                            }
-                            applyAccountSnapshots(listOf(record), startedIn)
                         }
-                    }
+                    }.joinAll()
+                } finally {
+                    batch.flush()
                 }
             } }
             asked.get()
@@ -1701,11 +1752,13 @@ class AgentRepository(
      *    is going while the legacy list still describes the previous one — the record tells which;
      *  - rows with no run-level status at all, with recent activity: the legacy list failed or does not know them.
      * A quiet row with no status is left at rest: `updatedAt` going quiet is what a finished run looks like, and
-     * reading hundreds of old records would gain nothing. A record that cannot be read leaves its row as it is.
+     * reading hundreds of old records would gain nothing. A record that cannot be read leaves its row as it is. The
+     * records read land together (see [PublishBatch]), and records that change no row publish nothing.
      */
-    private suspend fun verifyRunStatuses(api: CursorApi, before: Map<String, Agent>, startedAt: Long, publish: ((AgentListState) -> AgentListState) -> Boolean): Int {
+    private suspend fun verifyRunStatuses(backend: CursorBackend, startedIn: Int, before: Map<String, Agent>, startedAt: Long): Int {
+        val api = backend.api
         // A fetch that can no longer publish (backend switch, sign-out) has no rows of its own to settle.
-        if (!publish { it }) return 0
+        if (!publish(backend, startedIn, skipUnchanged = true) { it }) return 0
         fun recent(agent: Agent) = agent.updatedAtMillis >= startedAt - VERIFY_RECENT_WINDOW_MS
         fun justActive(agent: Agent) = agent.updatedAtMillis >= startedAt - VERIFY_JUST_ACTIVE_WINDOW_MS
         fun newTurn(agent: Agent) = before[agent.id]?.latestRunId.let { it != null && it != agent.latestRunId }
@@ -1718,18 +1771,37 @@ class AgentRepository(
         if (candidates.isEmpty()) return 0
         // Through the by-id pool: a dozen run records at once queued the list's own pages behind them on a phone.
         coroutineScope {
-            candidates.map { agent ->
-                async {
-                    byIdPool.withPermit {
-                        val run = runCatching { runRecord(agent.id, agent.latestRunId!!, api) }.getOrElse { t -> if (t is CancellationException) throw t; null } ?: return@withPermit
-                        // As this device knows the run, read under the lock a cancel patches under: a Stop that landed
-                        // while the record was on its way is not undone by it.
-                        publish { s -> s.copy(agents = s.agents.map { if (it.id == agent.id) it.withLatestRun(known(agent.id, run)) else it }) }
+            // As this device knows each run, read under the lock a cancel patches under: a Stop that landed while the
+            // record was on its way is not undone by it.
+            val batch = PublishBatch<Pair<String, RunDto>>(this, PUBLISH_BATCH_MS) { read ->
+                val runs = read.toMap()
+                publish(backend, startedIn, skipUnchanged = true) { s -> s.withLatestRuns(runs) }
+            }
+            try {
+                candidates.map { agent ->
+                    async {
+                        byIdPool.withPermit {
+                            val run = runCatching { runRecord(agent.id, agent.latestRunId!!, api) }.getOrElse { t -> if (t is CancellationException) throw t; null } ?: return@withPermit
+                            batch.add(agent.id to run)
+                        }
                     }
-                }
-            }.awaitAll()
+                }.awaitAll()
+            } finally {
+                batch.flush()
+            }
         }
         return candidates.size
+    }
+
+    /** [runs] by agent id folded into their rows (see [Agent.withLatestRun]); the list as it was when no row changes. */
+    private fun AgentListState.withLatestRuns(runs: Map<String, RunDto>): AgentListState {
+        var changed = false
+        val next = agents.map { agent ->
+            val run = runs[agent.id] ?: return@map agent
+            val updated = agent.withLatestRun(known(agent.id, run))
+            if (updated == agent) agent else updated.also { changed = true }
+        }
+        return if (changed) copy(agents = next) else this
     }
 
     /**
@@ -2679,6 +2751,10 @@ class AgentRepository(
         if (rootId.isBlank() || !signal.isPlacing) return
         synchronized(publishLock) {
             if (generation.get() != startedIn) return
+            // An answer that stamps, drops and re-counts nothing — a Project's poll reading the same members again — has
+            // nothing to classify anew and publishes nothing.
+            val registryBefore = registryChanges.value
+            var retracted = false
             members.forEach { (id, kind) -> if (id != rootId) place(id, AgentParent(rootId, kind), signal) }
             members.keys.forEach { retractMisses.remove(it) }
             if (retract.isNotEmpty() && signal.isAuthoritative) {
@@ -2689,7 +2765,7 @@ class AgentRepository(
                 // cannot name. Those stamps go only once the omission has stood across [RETRACT_CONFIRM_ANSWERS]
                 // answers over [RETRACT_CONFIRM_MS], so a known child is never let go to the top level on one read.
                 val now = AppClock.now()
-                placements.entries.removeAll { (id, placement) ->
+                retracted = placements.entries.removeAll { (id, placement) ->
                     if (placement.parent.id != rootId || placement.parent.kind !in retract || id in members || !placement.signal.isRetractable) return@removeAll false
                     if (members.isNotEmpty() && placement.signal != LineageSignal.COORDINATOR_CREATED) {
                         retractMisses.remove(id)
@@ -2704,7 +2780,7 @@ class AgentRepository(
             if (signal == LineageSignal.MEMBERSHIP && (AgentParentKind.PROJECT_WORKER in retract || members.isNotEmpty())) {
                 revalidateRoot(rootId, membershipWorkers = members.values.count { it == AgentParentKind.PROJECT_WORKER })
             }
-            publish(null, startedIn) { it }
+            if (retracted || registryChanges.value != registryBefore) publish(null, startedIn) { it }
         }
     }
 
@@ -2819,6 +2895,8 @@ class AgentRepository(
         const val RETRACT_CONFIRM_MS = 10 * 60 * 1000L
         /** Run records read per refresh to settle rows the lists left in question (see [verifyRunStatuses]). */
         private const val MAX_VERIFIED_RUNS = 12
+        /** How long a pass's first result waits for the rest before it is published anyway (see [PublishBatch]). */
+        private const val PUBLISH_BATCH_MS = 500L
         /** A row without a run-level status is only worth a record read while its activity is this recent. */
         private const val VERIFY_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000L
         /** A row that reads finished but was active this recently may still be going; its record settles it. */

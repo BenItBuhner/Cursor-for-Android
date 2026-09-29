@@ -75,6 +75,7 @@ import com.cursorforandroid.data.auth.CursorLoginEndpoints
 import com.cursorforandroid.data.auth.SessionTokenProvider
 import com.cursorforandroid.data.demo.DemoBackendFactory
 import com.cursorforandroid.data.demo.DemoData
+import com.cursorforandroid.data.demo.DemoPerfSeeds
 import com.cursorforandroid.data.demo.DemoMcpConnectorApi
 import com.cursorforandroid.data.demo.DemoPullRequests
 import com.cursorforandroid.data.demo.DemoReview
@@ -324,8 +325,10 @@ class AppGraph(
     }
     private val realBackend = real ?: CursorBackend(isDemo = false, parts = realParts)
     /** Seeded when the demo is entered, so a launch into a real account never pays for the dataset. */
-    private val perfSeeds = BuildConfig.DEBUG && com.cursorforandroid.data.demo.DemoPerfSeeds.enabled(app.cacheDir)
-    private val demoParts = lazy { DemoBackendFactory.create(perfSeeds = perfSeeds) }
+    private val perfSeeds = BuildConfig.DEBUG && DemoPerfSeeds.enabled(app.cacheDir)
+    private val scaleFleet = if (BuildConfig.DEBUG) DemoPerfSeeds.scaleFleet(app.cacheDir) else null
+    private val scaleDataset = scaleFleet?.let(DemoPerfSeeds::scaleDataset)
+    private val demoParts = lazy { DemoBackendFactory.create(perfSeeds = perfSeeds, scaleFleet = scaleFleet) }
 
     init {
         // A debug build measuring the transcript on a device: the `perf:` block after each presentation, in logcat.
@@ -627,8 +630,8 @@ class AppGraph(
             prefs,
             attachments,
             caches.agents,
-            demoSources = DemoData.sources,
-            demoComposers = DemoData.composers,
+            demoSources = scaleDataset?.sources ?: DemoData.sources,
+            demoComposers = scaleDataset?.composers ?: DemoData.composers,
             account = accountAgents,
             capabilities = capabilities,
             stats = refreshStats,
