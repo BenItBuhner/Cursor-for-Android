@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -109,6 +110,7 @@ class QueueTransitionsFilmTest {
 
     private companion object {
         const val Anchor = "Fix the double disk read, then profile again."
+        const val Delivered = "Also check the release build, not just debug"
     }
 
     private val queue get() = graph.followUps.state(agentId).value.queue
@@ -177,7 +179,7 @@ class QueueTransitionsFilmTest {
         }
         check(changed()) { "$name: the change never came" }
         var n = 0
-        val log = StringBuilder("frame,stackTop,stackHeight,anchorTop\n")
+        val log = StringBuilder("frame,stackTop,stackHeight,anchorTop,workedTop,bubbles\n")
         fun write(frame: Pair<Bitmap, String>) {
             log.append(n).append(',').append(frame.second).append('\n')
             File(out, "f_%04d.png".format(n++)).outputStream().use { frame.first.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -193,7 +195,9 @@ class QueueTransitionsFilmTest {
     private fun where(): String {
         val stack = compose.onAllNodes(hasTestTag(QueueStackTag), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()?.boundsInWindow
         val anchor = compose.onAllNodes(hasText(Anchor), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()?.boundsInWindow
-        return "${stack?.top},${stack?.height},${anchor?.top}"
+        val bubble = compose.onAllNodes(hasText(Delivered) and !hasAnyAncestor(hasTestTag(QueueStackTag)), useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInWindow }
+        val worked = compose.onAllNodes(hasText("Worked", substring = true), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()?.boundsInWindow
+        return "${stack?.top},${stack?.height},${anchor?.top},${worked?.top},${bubble.joinToString("|") { "${it.top}/${it.height}" }}"
     }
 
     /** Mid-turn, the composer's send lands on the queue card as the chat's first queued message. */
@@ -207,7 +211,7 @@ class QueueTransitionsFilmTest {
     /** The run ends; the next turn takes the queued message, which flies from its card into its bubble. */
     @Test
     fun queueToTranscript() {
-        graph.followUps.enqueue(agentId, "Also check the release build, not just debug")
+        graph.followUps.enqueue(agentId, Delivered)
         graph.followUps.enqueue(agentId, "Then write up what changed for the release notes")
         open { compose.onAllNodes(hasTestTag(QueueStackTag), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         val gate = CompletableDeferred<Unit>()
