@@ -78,7 +78,9 @@ fun projectPanelItems(
 @Composable
 private fun projectBodyItems(graph: AppGraph, projectId: String, onOpenAgent: (String) -> Unit, onNotify: (String) -> Unit): LazyListScope.() -> Unit {
     val viewModel: ProjectViewModel = viewModel(key = "project-panel-$projectId", factory = ProjectViewModel.Factory(graph, projectId))
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    // Read only in the returned rows and the open sheets: this composable returns a value, so a read here would
+    // recompose the panel around it on every publication.
+    val panel = viewModel.panel.collectAsStateWithLifecycle()
     val local by graph.prefs.localAgentState.collectAsStateWithLifecycle(initialValue = LocalAgentState())
     val busy by viewModel.isBusy.collectAsStateWithLifecycle()
     val toast by viewModel.toastMessage.collectAsStateWithLifecycle()
@@ -117,12 +119,12 @@ private fun projectBodyItems(graph: AppGraph, projectId: String, onOpenAgent: (S
     // The sheets are windows of their own, so they sit here beside the list rather than in a row that can scroll away.
     when (val open = sheet) {
         null -> Unit
-        ProjectSheet.NewWorker -> NewWorkerSheet(root = state.root, onLaunch = { prompt, name -> viewModel.createWorker(prompt, name, repoUrl = null, baseBranch = null) }, onDismiss = { sheet = null })
+        ProjectSheet.NewWorker -> NewWorkerSheet(root = panel.value.view.root, onLaunch = { prompt, name -> viewModel.createWorker(prompt, name, repoUrl = null, baseBranch = null) }, onDismiss = { sheet = null })
         ProjectSheet.Adopt -> {
             val adoptable by graph.rememberAgentsPick(viewModel) { viewModel.adoptable(it) }
             AdoptSheet(candidates = adoptable, onPick = viewModel::adopt, onDismiss = { sheet = null })
         }
-        ProjectSheet.Appearance -> AppearanceSheet(current = state.root?.projectAppearance, onPick = viewModel::updateAppearance, onDismiss = { sheet = null })
+        ProjectSheet.Appearance -> AppearanceSheet(current = panel.value.view.root?.projectAppearance, onPick = viewModel::updateAppearance, onDismiss = { sheet = null })
         ProjectSheet.EditProject -> ProjectEditorHost(graph, ProjectEditorTarget.Edit(projectId), onOpenAgent = onOpenAgent, onDismiss = { sheet = null })
         is ProjectSheet.Steer -> SteerSheet(workerName = open.name, onSteer = { text -> viewModel.steer(open.agentId, text) }, onDismiss = { sheet = null })
         is ProjectSheet.Move -> {
@@ -138,7 +140,7 @@ private fun projectBodyItems(graph: AppGraph, projectId: String, onOpenAgent: (S
             value = AppClock.now()
         }
     }
-    return { projectSection(state, local, busy, actions, nowMillis = now, clock = clock) }
+    return { panel.value.let { projectSection(it.view, local, busy, actions, nowMillis = now, clock = clock, rows = it.rows) } }
 }
 
 /**
