@@ -311,30 +311,21 @@ object SubagentRows {
      * from reaching back into what is shown.
      */
     private fun plain(markdown: String): String? {
-        if (markdown.length > PLAIN_HEAD) {
-            val head = markdown.substring(0, PLAIN_HEAD)
-            if ('[' !in head) {
-                val text = plainOf(head)
-                if (text != null && text.length >= REPLY_CHARS + PLAIN_MARGIN) return text.take(REPLY_CHARS)
-            }
-        }
-        return plainOf(markdown)
+        val head = markdown.takeIf { it.length > PLAIN_HEAD }?.substring(0, PLAIN_HEAD)?.takeIf { '[' !in it }
+        val text = head?.let(::stripped)?.takeIf { it.length >= REPLY_CHARS + PLAIN_MARGIN } ?: stripped(markdown)
+        return text.takeIf { it.isNotEmpty() }?.take(REPLY_CHARS)
     }
 
-    private fun plainOf(markdown: String): String? {
-        val text = markdown
-            .replace(MARKDOWN_LINK, "$1")
-            .replace(MARKDOWN_MARKS, "")
-            .replace(WHITESPACE, " ")
-            .trim()
-        if (text.isEmpty()) return null
-        return if (text.length <= REPLY_CHARS) text else text.take(REPLY_CHARS)
-    }
+    private fun stripped(markdown: String): String = markdown
+        .replace(MARKDOWN_LINK, "$1")
+        .replace(MARKDOWN_MARKS, "")
+        .replace(WHITESPACE, " ")
+        .trim()
 
     private val MARKDOWN_LINK = Regex("\\[([^\\]]*)]\\([^)]*\\)")
     private val MARKDOWN_MARKS = Regex("(^|\\s)#{1,6}\\s|[*_`>~]|^\\s*[-+]\\s", RegexOption.MULTILINE)
     private val WHITESPACE = Regex("\\s+")
-    private const val PLAIN_HEAD = 512
+    private const val PLAIN_HEAD = 160
     private const val PLAIN_MARGIN = 20
 
     // -- the model's label --------------------------------------------------------------------------------------
