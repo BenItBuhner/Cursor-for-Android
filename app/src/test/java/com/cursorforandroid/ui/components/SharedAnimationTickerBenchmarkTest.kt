@@ -135,6 +135,7 @@ class SharedAnimationTickerBenchmarkTest {
         }
         shown.value = false
         compose.waitForIdle()
+        measure(1) // let the frame already requested by the last reader return and observe the detach
         val detached = measure(10)
 
         println("SCALE glyphs rows=$ROWS idle {$idle} scrolling {$scrolling} detached {$detached}")

@@ -34,11 +34,15 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.FloatState
+import androidx.compose.runtime.IntState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.LongState
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.MotionDurationScale
@@ -421,8 +425,6 @@ fun Dot(color: Color, size: Dp = CursorDimens.unreadDot, modifier: Modifier = Mo
     Box(modifier.size(size).background(color, CircleShape))
 }
 
-private data class SharedAnimationFrame(val millis: Long = Long.MIN_VALUE, val durationScale: Float = 1f)
-
 /** Test-only observation point for the number of frame-clock resumptions used by the shared indicators. */
 internal object SharedAnimationTickerTestHooks {
     @Volatile
@@ -440,8 +442,12 @@ internal object SharedAnimationTickerTestHooks {
 @Stable
 private class SharedAnimationTicker {
     private val readers = MutableStateFlow(0)
-    private val mutableFrame = mutableStateOf(SharedAnimationFrame())
-    val frame: State<SharedAnimationFrame> get() = mutableFrame
+    private val mutableMillis = mutableLongStateOf(Long.MIN_VALUE)
+    private val mutableRunningStep = mutableIntStateOf(0)
+    private val mutableDurationScale = mutableFloatStateOf(1f)
+    val millis: LongState get() = mutableMillis
+    val runningStep: IntState get() = mutableRunningStep
+    val durationScale: FloatState get() = mutableDurationScale
 
     fun attach() {
         readers.update { it + 1 }
@@ -464,10 +470,9 @@ private class SharedAnimationTicker {
                 while (currentCoroutineContext().isActive) {
                     withInfiniteAnimationFrameMillis { millis ->
                         SharedAnimationTickerTestHooks.frame()
-                        mutableFrame.value = SharedAnimationFrame(
-                            millis = millis,
-                            durationScale = motionDurationScale?.scaleFactor ?: 1f,
-                        )
+                        mutableMillis.longValue = millis
+                        mutableRunningStep.intValue = ((millis / RUNNING_STEP_MS) % RUNNING_FRAMES.size).toInt()
+                        mutableDurationScale.floatValue = motionDurationScale?.scaleFactor ?: 1f
                     }
                 }
             }
@@ -511,8 +516,7 @@ private fun sharedAnimationTicker(): SharedAnimationTicker {
 fun RunningGlyph(modifier: Modifier = Modifier, color: Color = CursorTheme.colors.iconSecondary, size: Dp = 16.dp) {
     val ticker = sharedAnimationTicker()
     Canvas(modifier.size(size)) {
-        val millis = ticker.frame.value.millis
-        val step = if (millis == Long.MIN_VALUE) 0 else ((millis / RUNNING_STEP_MS) % RUNNING_FRAMES.size).toInt()
+        val step = ticker.runningStep.intValue
         val box = this.size.minDimension
         val pitch = box * RUNNING_PITCH
         val radius = box * RUNNING_DOT_RADIUS
@@ -586,7 +590,7 @@ fun ShimmerText(
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
                 drawContent()
-                val millis = ticker.frame.value.millis
+                val millis = ticker.millis.longValue
                 val phase = if (millis == Long.MIN_VALUE) 0f else (millis % SHIMMER_PERIOD_MS) / SHIMMER_PERIOD_MS.toFloat()
                 // The band is wider than the text and its peak travels from off the left edge to off the right, so
                 // every loop starts and ends with the caption fully at rest and the falloff is soft mid-word.
@@ -614,8 +618,7 @@ fun SpinnerRing(modifier: Modifier = Modifier, color: Color = CursorTheme.colors
     val phase = remember { SpinnerPhase() }
     Box(
         modifier.size(size).drawBehind {
-            val frame = ticker.frame.value
-            val angle = phase.angle(frame)
+            val angle = phase.angle(ticker.millis.longValue, ticker.durationScale.floatValue)
             val stroke = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
             drawArc(color.copy(alpha = 0.25f), 0f, 360f, false, style = stroke)
             drawArc(color, angle, 90f, false, style = stroke)
@@ -628,14 +631,14 @@ private class SpinnerPhase {
     private var startedAt = Long.MIN_VALUE
     private var durationScale = 1f
 
-    fun angle(frame: SharedAnimationFrame): Float {
-        if (frame.millis == Long.MIN_VALUE) return 0f
-        if (startedAt == Long.MIN_VALUE || durationScale != frame.durationScale) {
-            startedAt = frame.millis
-            durationScale = frame.durationScale
+    fun angle(millis: Long, scale: Float): Float {
+        if (millis == Long.MIN_VALUE) return 0f
+        if (startedAt == Long.MIN_VALUE || durationScale != scale) {
+            startedAt = millis
+            durationScale = scale
         }
         if (durationScale == 0f) return 0f
-        val playTime = (frame.millis - startedAt) / durationScale
+        val playTime = (millis - startedAt) / durationScale
         return (playTime % SPINNER_PERIOD_MS) / SPINNER_PERIOD_MS * 360f
     }
 }
