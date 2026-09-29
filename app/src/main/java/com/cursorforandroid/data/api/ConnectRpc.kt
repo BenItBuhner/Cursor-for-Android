@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -167,6 +168,9 @@ class ApiThrottle(
     blobsInFlight: Int = BLOBS_IN_FLIGHT,
     /** The longest a control, blob or media call keeps its permit (see [Gate]). */
     controlHoldMs: Long = CONTROL_HOLD_MS,
+    /** Where the pause is kept, under [host]: shared with the app's other clients (see [HostPause]). */
+    private val pauses: HostPause = HostPause(now),
+    private val host: String = DEFAULT_HOST,
 ) {
     /**
      * Where a call waits for its permit: [CONTROL], the account's lists, queues and writes, a few at a time; [BLOBS],
@@ -226,32 +230,29 @@ class ApiThrottle(
         Lane.STATE to Gate(STATES_IN_FLIGHT, STATE_HOLD_MS),
         Lane.STATE_ON_SCREEN to Gate(STATES_IN_FLIGHT, STATE_HOLD_MS),
     )
-    @Volatile private var pausedUntilMillis = 0L
     private val refusals = java.util.concurrent.atomic.AtomicInteger()
 
     /** Refusals (429) heard so far, for the diagnostics. */
     val refusalCount: Int get() = refusals.get()
 
     /** Until when every call waits, or null when none does. */
-    fun pausedUntil(): Long? = pausedUntilMillis.takeIf { it > now() }
+    fun pausedUntil(): Long? = pauses.until(host)
 
     /** The server asked for a pause: every call from here on waits it out first. */
-    fun pause(millis: Long) {
-        val until = now() + millis.coerceIn(MIN_PAUSE_MS, MAX_PAUSE_MS)
-        if (until > pausedUntilMillis) pausedUntilMillis = until
-    }
+    fun pause(millis: Long) = pauses.pause(host, millis.coerceIn(MIN_PAUSE_MS, MAX_PAUSE_MS))
 
     /**
      * [block] under a permit, once the pause (if any) has passed; a 429 pauses every caller and is retried once —
      * unless [retryRefusals] is off: a caller with another way to what it asked for (the transcript, which the
      * documented endpoints can also give) hears the refusal at once rather than waiting the pause out for a second
-     * try, and the pause still stands for everyone.
+     * try, and the pause still stands for everyone. A pause longer than [MAX_RETRY_WAIT_MS] is not waited out for the
+     * second try either: the caller hears the wait the server named (`retryAfterMillis`) and decides.
      */
     suspend fun <T> call(retryRefusals: Boolean = true, lane: Lane = Lane.CONTROL, block: suspend () -> T): T {
         var attempt = 0
         while (true) {
             attempt++
-            val wait = pausedUntilMillis - now()
+            val wait = pauses.remainingMs(host)
             if (wait > 0) delay(wait)
             try {
                 return gates.getValue(lane).run(block)
@@ -259,7 +260,7 @@ class ApiThrottle(
                 if (!e.isRateLimited) throw e
                 refusals.incrementAndGet()
                 pause(e.retryAfterMillis ?: DEFAULT_PAUSE_MS)
-                if (!retryRefusals || attempt >= MAX_ATTEMPTS) throw e
+                if (!retryRefusals || attempt >= MAX_ATTEMPTS || pauses.remainingMs(host) > MAX_RETRY_WAIT_MS) throw e
             }
         }
     }
@@ -300,7 +301,11 @@ class ApiThrottle(
         const val ON_THE_WIRE = DEFAULT_MAX_IN_FLIGHT + BLOBS_IN_FLIGHT + WATCHES_IN_FLIGHT + MEDIA_IN_FLIGHT + 2 * STATES_IN_FLIGHT
         const val DEFAULT_PAUSE_MS = 1_500L
         const val MIN_PAUSE_MS = 250L
-        const val MAX_PAUSE_MS = 15_000L
+        const val MAX_PAUSE_MS = HostPause.MAX_MS
+        /** The longest pause the refused call itself waits out for its second try. */
+        const val MAX_RETRY_WAIT_MS = 15_000L
+        /** The account service's host, where the pause is kept when no other is named. */
+        val DEFAULT_HOST: String = com.cursorforandroid.data.auth.CursorLoginEndpoints.API_URL.toHttpUrl().host
         private const val MAX_ATTEMPTS = 2
     }
 }

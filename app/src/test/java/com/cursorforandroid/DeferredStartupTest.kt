@@ -6,6 +6,7 @@ import android.app.job.JobScheduler
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.update.UpdateJobService
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
@@ -17,6 +18,7 @@ import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
+import java.time.Duration
 
 /** The wiring that reaches out to the system waits for the app to be on screen instead of joining the launch. */
 @RunWith(AndroidJUnit4::class)
@@ -58,6 +60,30 @@ class DeferredStartupTest {
 
         assertThat(channels).isNotEmpty()
         assertThat(UpdateJobService.isScheduled(app)).isTrue()
+    }
+
+    @Test
+    fun `the shell's first frames build neither the updater, the release notes nor the image loader's client`() {
+        DeferredStartup.settleMs = 60_000
+        val graph = app.appGraph
+        runBlocking { graph.prefs.setDemoMode(true) }
+        activity = Robolectric.buildActivity(MainActivity::class.java).setup()
+        idleUntil { graph.session.state.value is SessionState.SignedIn && "media" in graph.builtParts() }
+
+        // The shell is up and its image loader provided; the updater and the release notes wait for the deferred startup.
+        assertThat(graph.builtParts()).containsNoneOf("releases", "updates", "whatsNew", "storeFiles")
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(61))
+        idleUntil { graph.builtParts().containsAll(listOf("releases", "updates")) }
+    }
+
+    private fun idleUntil(condition: () -> Boolean) {
+        val deadline = System.nanoTime() + 20_000_000_000L
+        while (!condition()) {
+            check(System.nanoTime() < deadline) { "never settled; built: ${app.appGraph.builtParts()}" }
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(5)
+        }
     }
 
     private fun idle() {
