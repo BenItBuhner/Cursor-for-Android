@@ -4,9 +4,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -64,22 +69,21 @@ class SteerInQueueTest {
     private fun stackHeight(): Float = compose.onNodeWithTag(QueueStackTag).fetchSemanticsNode().boundsInRoot.height
 
     @Test
-    fun `a card being steered says so in place of its glyphs, then says it was steered`() {
+    fun `a card being steered is being sent like a held retry - glyphs dimmed - and says so under its line, then says it was steered`() {
         queue = listOf(waiting.copy(isSending = true, steer = SteerPhase.STEERING))
         stack()
         compose.mainClock.autoAdvance = false
         advance(500)
         compose.onNodeWithText(QueueCardWords.STEERING).assertExists()
-        compose.onNodeWithContentDescription("Steering").assertExists()
-        compose.onAllNodesWithContentDescription(QueueGlyphs.STEER).assertCountEquals(0)
+        compose.onNodeWithTag(QueueGlyphs.ON_ITS_WAY_TAG).assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, QueueGlyphs.ON_ITS_WAY))
         compose.onAllNodesWithContentDescription("Sending").assertCountEquals(0)
         compose.onNodeWithContentDescription("Queued follow-up 1 of 1, steering into this turn").assertExists()
 
         queue = listOf(waiting.copy(isSending = true, steer = SteerPhase.STEERED, steerFollowupId = "fu-1"))
         advance(500)
         compose.onNodeWithText(QueueCardWords.STEERED).assertExists()
-        compose.onNodeWithContentDescription("Steered").assertExists()
-        compose.onAllNodesWithContentDescription(QueueGlyphs.STEER).assertCountEquals(0)
+        compose.onNodeWithTag(QueueGlyphs.ON_ITS_WAY_TAG).assertExists()
+        compose.onAllNodesWithText(QueueCardWords.STEERING).assertCountEquals(0)
     }
 
     @Test
@@ -88,6 +92,7 @@ class SteerInQueueTest {
         stack()
         compose.onNodeWithTag(QueueSteerErrorTag).assertExists()
         compose.onNodeWithText("Couldn't steer: rejected.").assertExists()
+        compose.onAllNodesWithTag(QueueGlyphs.ON_ITS_WAY_TAG).assertCountEquals(0)
         compose.onNodeWithContentDescription(QueueGlyphs.STEER).performClick()
         assertThat(steered).containsExactly("q-1")
     }

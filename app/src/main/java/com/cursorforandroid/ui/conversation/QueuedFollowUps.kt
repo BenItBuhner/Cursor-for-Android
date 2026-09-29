@@ -39,6 +39,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,11 +93,13 @@ import com.cursorforandroid.ui.components.onContextClick
  * as a list of what is about to be said, not as a stack of forms. While a turn is under way ([steers]) the up arrow
  * steers the message into that turn — never stopping it; with nothing running it sends the message next. A message
  * that could not be sent shows a warning where its tiles would be and the reason under the message, in red; the up
- * arrow then retries it. One on its way out shows a ring instead of the glyphs.
+ * arrow then retries it. One on its way out shows a ring instead of the glyphs; a held one whose retry is out keeps
+ * its glyphs, dimmed, until the server answers.
  *
- * A message steered into the running turn stays on its card until the transcript shows it: "Steering…" under the
- * line with a ring while the account takes it, then "Steered" with a check, the line dimmed throughout. A steer
- * that did not go through leaves the card as it was, the reason under the line in red, and the up arrow tries again.
+ * A message steered into the running turn is on its way the same way: its glyphs dim, and it stays on its card
+ * until the transcript shows it — "Steering…" under the line with a ring while the account takes it, then
+ * "Steered" with a check, the line dimmed throughout. A steer that did not go through leaves the card as it was,
+ * the reason under the line in red, and the up arrow tries again.
  *
  * With [flights], each row is an end of the send's flight (see `SendMotion`): a message sent while the agent is busy
  * lands in its row from the composer, and a row the run takes lifts off the card into its bubble.
@@ -212,7 +215,7 @@ private fun QueuedFollowUpRow(
                 Text(note, style = type.small, color = colors.red, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (steer != null) {
-                Text(QueueCardWords.steerLabel(steer), style = type.small, color = colors.textQuaternary, maxLines = 1, modifier = Modifier.testTag(QueueSteerLabelTag))
+                SteerLabel(steer)
             } else {
                 item.steerError?.let { reason ->
                     Text(reason, style = type.small, color = colors.red, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag(QueueSteerErrorTag))
@@ -221,35 +224,45 @@ private fun QueuedFollowUpRow(
             if (item.isHeld) HeldNote(item)
         }
         Spacer(Modifier.width(8.dp))
-        val trailing = when {
-            steer == SteerPhase.STEERED -> Trailing.Steered
-            steer == SteerPhase.STEERING -> Trailing.Steering
-            sending -> Trailing.Sending
-            else -> Trailing.Glyphs
-        }
-        Crossfade(trailing, animationSpec = tween(SteerLabelMillis), label = "queued-trailing") { shown ->
-            when (shown) {
-                Trailing.Sending, Trailing.Steering -> Box(
-                    Modifier.size(Glyph + 10.dp).semantics { contentDescription = if (shown == Trailing.Steering) "Steering" else "Sending" },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    SpinnerRing(size = 11.dp)
-                }
-                Trailing.Steered -> Box(Modifier.size(Glyph + 10.dp).semantics { contentDescription = "Steered" }, contentAlignment = Alignment.Center) {
-                    Icon(CursorIcons.Check, null, tint = colors.iconTertiary, modifier = Modifier.size(Glyph))
-                }
-                Trailing.Glyphs -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    GlyphButton(CursorIcons.Trash, "Remove queued follow-up", colors.iconTertiary, onRemove)
-                    GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", colors.iconTertiary, onEdit)
-                    GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers, retry = item.warning != null), colors.iconPrimary, onSteer)
-                }
+        if (sending) {
+            Box(Modifier.size(Glyph + 10.dp).semantics { contentDescription = "Sending" }, contentAlignment = Alignment.Center) {
+                SpinnerRing(size = 11.dp)
+            }
+        } else {
+            // A message on its way — a held message's retry out, or a steer the account has not yet shown in the
+            // transcript — keeps its glyphs, dimmed, for as long as that lasts: its request cannot be called back.
+            val onItsWay = item.isOnItsWay
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = if (onItsWay) Modifier.testTag(QueueGlyphs.ON_ITS_WAY_TAG).semantics { stateDescription = QueueGlyphs.ON_ITS_WAY } else Modifier,
+            ) {
+                val quiet = if (onItsWay) colors.iconQuaternary else colors.iconTertiary
+                GlyphButton(CursorIcons.Trash, "Remove queued follow-up", quiet, onRemove)
+                GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", quiet, onEdit)
+                GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers, retry = item.warning != null), if (onItsWay) colors.iconQuaternary else colors.iconPrimary, onSteer)
             }
         }
     }
 }
 
-/** What stands at a device card's end: its glyphs, or what is happening to it in their place. */
-private enum class Trailing { Glyphs, Sending, Steering, Steered }
+/** A steered card's line under the message: a ring while the account takes it, a check once it has. */
+@Composable
+private fun SteerLabel(phase: SteerPhase) {
+    val colors = CursorTheme.colors
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag(QueueSteerLabelTag)) {
+        Crossfade(phase, animationSpec = tween(SteerLabelMillis), label = "queued-steer-mark") { shown ->
+            Box(Modifier.size(SteerMark), contentAlignment = Alignment.Center) {
+                when (shown) {
+                    SteerPhase.STEERING -> SpinnerRing(size = SteerMark)
+                    SteerPhase.STEERED -> Icon(CursorIcons.Check, null, tint = colors.iconTertiary, modifier = Modifier.size(SteerMark))
+                }
+            }
+        }
+        Spacer(Modifier.width(5.dp))
+        Text(QueueCardWords.steerLabel(phase), style = CursorTheme.typography.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
 
 /** What a device card says of itself, to the eye and to a screen reader. */
 internal object QueueCardWords {
@@ -593,6 +606,9 @@ object QueueGlyphs {
     const val SEND = "Send now"
     /** The message could not be sent: the tap tries again. */
     const val RETRY = "Retry sending"
+    /** The glyphs' state while the message's request is out (a held message's retry, a steer): dimmed, and a tap is refused. */
+    const val ON_ITS_WAY = "Being sent"
+    const val ON_ITS_WAY_TAG = "queued-glyphs-on-its-way"
 
     fun upArrow(steers: Boolean, retry: Boolean = false): String = when {
         steers -> STEER
@@ -617,8 +633,9 @@ private fun Modifier.faceOf(face: QueueCardFace): Modifier =
 private val RowHeight = 40.dp
 private val Tile = 18.dp
 private val Glyph = 14.dp
-/** A card's steer label and its end's glyphs change over this long. */
+/** A card's steer label comes in, and its mark turns from ring to check, over this long. */
 private const val SteerLabelMillis = 180
+private val SteerMark = 9.dp
 const val QueueSteerLabelTag = "queued-steer"
 const val QueueSteerErrorTag = "queued-steer-error"
 private const val TileThumbnailPx = 256

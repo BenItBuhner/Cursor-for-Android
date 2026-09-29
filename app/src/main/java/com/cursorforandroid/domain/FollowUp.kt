@@ -146,6 +146,12 @@ data class QueuedFollowUp(
     /** The message is waiting on a server that keeps calling the agent busy (see [heldSinceMillis]); its card says so, steadily, attempts included. */
     val isHeld: Boolean get() = heldSinceMillis != null && warning == null
 
+    /**
+     * Its request is out — a first send, a held message's retry, or a steer ([steer] claims the message as sending
+     * until the transcript shows it) — so it can be neither removed, edited nor sent again until the server answers.
+     */
+    val isOnItsWay: Boolean get() = isSending || isSteered
+
     companion object {
         /** What an image-only follow-up says in its prompt, the same as when the composer sends one directly. */
         const val IMAGE_ONLY_TEXT = "See the attached image."

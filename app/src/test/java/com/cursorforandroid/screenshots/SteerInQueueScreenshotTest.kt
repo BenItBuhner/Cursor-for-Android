@@ -50,8 +50,8 @@ import java.io.File
 
 /**
  * Steering a queued message into the turn under way, frame by frame, over a transcript and the composer: the card
- * waiting with its up arrow; "Steering…" with a ring while the account takes it; "Steered" with a check until the
- * transcript shows it; then — the bubble in the transcript — the card fading and folding away, nothing jumping; and
+ * waiting with its up arrow; its glyphs dimmed as being sent, like a held retry's, and "Steering…" with a ring
+ * under the line while the account takes it; "Steered" with a check until the transcript shows it; then — the bubble in the transcript — the card fading and folding away, nothing jumping; and
  * the two ways a steer comes back to its card: the account refusing it, and no account to steer through. Then a deck
  * with its front card steering, and the light theme. Same device qualifiers as [QueueStripScreenshotTest].
  */
