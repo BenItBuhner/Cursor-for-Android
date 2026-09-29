@@ -69,9 +69,9 @@ class SharedAnimationTickerFrameTest {
         val strip = Bitmap.createBitmap(frames.first().width * FRAME_COUNT, frames.first().height, Bitmap.Config.ARGB_8888)
         val stripCanvas = Canvas(strip)
         frames.forEachIndexed { index, bitmap -> stripCanvas.drawBitmap(bitmap, (index * bitmap.width).toFloat(), 0f, null) }
-        val output = System.getProperty(OUTPUT_PROPERTY)?.let(::File)
+        val output = System.getenv(OUTPUT_ENV)?.let(::File)
             ?: File(System.getProperty("user.dir"), "build/outputs/scale/shared-animation-glyph-strip.png")
-        output.parentFile.mkdirs()
+        output.parentFile?.mkdirs()
         FileOutputStream(output).use { strip.compress(Bitmap.CompressFormat.PNG, 100, it) }
         println("SCALE glyph frames=${hashes.joinToString(",")} strip=${output.absolutePath}")
     }
@@ -79,6 +79,6 @@ class SharedAnimationTickerFrameTest {
     private companion object {
         const val FRAME_COUNT = 8
         const val STEP_MS = 175L
-        const val OUTPUT_PROPERTY = "scale.animationStrip"
+        const val OUTPUT_ENV = "SCALE_ANIMATION_STRIP"
     }
 }
