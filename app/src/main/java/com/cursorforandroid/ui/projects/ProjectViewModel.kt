@@ -16,13 +16,22 @@ import com.cursorforandroid.domain.ContextEntry
 import com.cursorforandroid.domain.FileFormat
 import com.cursorforandroid.domain.MediaKind
 import com.cursorforandroid.domain.MediaRef
+import com.cursorforandroid.domain.LocalAgentState
 import com.cursorforandroid.domain.ProjectAppearance
+import com.cursorforandroid.ui.agents.AgentsViewModel
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -31,6 +40,9 @@ import kotlinx.coroutines.launch
  * or an archive — the copy of its bytes kept on the device ([keptPath]), which the sheet hands to another app.
  */
 data class OpenContextFile(val entry: ContextEntry, val text: String, val keptPath: String? = null, val format: FileFormat? = null)
+
+/** What the Project's panel section draws: the view, and its primaries' rows built from it (see [ProjectViewModel.panel]). */
+internal data class ProjectPanel(val view: ProjectViewState, val rows: ProjectRows)
 
 /**
  * One Project's view: what the repository derives from the agent list and the account, and the coordinator's
@@ -43,8 +55,23 @@ class ProjectViewModel(private val graph: AppGraph, val projectId: String) : Vie
     private val busy = MutableStateFlow(false)
     private val openFile = MutableStateFlow<OpenContextFile?>(null)
 
-    val state: StateFlow<ProjectViewState> = graph.projects.view(projectId)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ProjectViewState(projectId, root = graph.agents.agent(projectId)))
+    private val rows = ProjectRowsBuilder()
+
+    /**
+     * The Project's view and its primaries' rows, both built off the main thread and each time from the list, the device's
+     * own state and the minute; the first frame has them as they stand.
+     */
+    internal val panel: StateFlow<ProjectPanel> = combine(graph.projects.view(projectId), graph.prefs.localAgentState.onStart { emit(LocalAgentState()) }, minutes()) { view, local, _ ->
+        ProjectPanel(view, rows.build(view, local, AppClock.now()))
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), graph.projects.viewNow(projectId).let { ProjectPanel(it, rows.build(it, LocalAgentState(), AppClock.now())) })
+
+    /** The Project's view as the panel last had it. */
+    val state: ProjectViewState get() = panel.value.view
+
+    /** Rows built rather than kept from the build before, for the scale benchmark. */
+    internal val rowsBuilt: Long get() = rows.rowsBuilt
 
     /** Extended mode is on: what the header and the sections say about the actions they offer. */
     val extendedMode: StateFlow<Boolean> = graph.extendedMode.enabled
@@ -79,12 +106,12 @@ class ProjectViewModel(private val graph: AppGraph, val projectId: String) : Vie
     fun showMessage(text: String) { message.value = text }
 
     fun createWorker(prompt: String, name: String?, repoUrl: String?, baseBranch: String?) = act {
-        val root = state.value.root
+        val root = state.root
         graph.projects.createWorker(projectId, WorkerLaunch(prompt = prompt.trim(), name = name?.trim()?.takeIf { it.isNotEmpty() }, repoUrl = repoUrl ?: root?.repoUrl, baseBranch = baseBranch ?: root?.startingRef))
             .map { "Started a new primary." }
     }
 
-    fun adopt(agentId: String) = act { graph.projects.adopt(projectId, agentId).map { "Adopted into ${state.value.name}." } }
+    fun adopt(agentId: String) = act { graph.projects.adopt(projectId, agentId).map { "Adopted into ${state.name}." } }
 
     fun release(agentId: String) = act { graph.projects.release(projectId, agentId).map { "Released from the Project." } }
 
@@ -105,7 +132,7 @@ class ProjectViewModel(private val graph: AppGraph, val projectId: String) : Vie
 
     /** Up one directory of the context, or back to the root. */
     fun contextUp() {
-        val current = (state.value.context as? ContextState.Loaded)?.context?.relativePath.orEmpty()
+        val current = (state.context as? ContextState.Loaded)?.context?.relativePath.orEmpty()
         loadContext(current.trimEnd('/').substringBeforeLast('/', ""))
     }
 
@@ -140,6 +167,14 @@ class ProjectViewModel(private val graph: AppGraph, val projectId: String) : Vie
 
     /** The clock the rows format their ages against. */
     fun now(): Long = AppClock.now()
+
+    /** A beat a minute, so a snooze that has lifted shows without waiting for the list to move. */
+    private fun minutes(): Flow<Unit> = flow {
+        while (true) {
+            emit(Unit)
+            delay(AgentsViewModel.CLOCK_TICK_MS)
+        }
+    }
 
     class Factory(private val graph: AppGraph, private val projectId: String) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
