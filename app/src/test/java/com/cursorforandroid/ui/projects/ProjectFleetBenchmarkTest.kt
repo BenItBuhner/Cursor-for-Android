@@ -27,7 +27,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
-import com.cursorforandroid.audit.RecomposeCounter
+import com.cursorforandroid.util.RecomposeCounter
 import com.cursorforandroid.data.FakeCursorApi
 import com.cursorforandroid.data.FakeRunStreamer
 import com.cursorforandroid.data.local.SecureKeyStore
@@ -96,8 +96,7 @@ class ProjectFleetBenchmarkTest {
     @After
     fun tearDown() {
         AppClock.nowMillis = System::currentTimeMillis
-        RecomposeCounter.on = false
-        RecomposeCounter.reset()
+        RecomposeCounter.uninstall()
     }
 
     private class Recompositions : CompositionObserver, RecomposeScopeObserver {
