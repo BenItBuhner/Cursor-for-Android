@@ -100,6 +100,12 @@ data class AgentListState(
     val hasLoaded: Boolean = false,
     /** True while the list is the one restored from disk and no fetch has completed yet this session. */
     val isFromCache: Boolean = false,
+    /**
+     * A fetch has ended this session, landed or failed: whatever is shown is as current as this launch could make it.
+     * A silent fetch that fails over the disk copy leaves [isFromCache] set and no [error], so this is what says it
+     * was tried.
+     */
+    val fetchEnded: Boolean = false,
     val error: String? = null,
     /** The server has agents older than the ones loaded: the next page is a scroll to the end of the list away (see [AgentRepository.loadMore]). */
     val hasMore: Boolean = false,
@@ -1561,7 +1567,7 @@ class AgentRepository(
                 (if (verdict.gone.isEmpty()) s else s.copy(agents = s.agents.filterNot { it.id in verdict.gone }))
                     .let { if (backend.isDemo) it.withSources(demoSources).withAccountSnapshots(demoComposers) else it }
                     // A page that failed before this refresh is moot: the window and its cursors are re-read here.
-                    .copy(isRefreshing = false, hasLoaded = true, isFromCache = false, error = null, hasMore = if (keepWindow) nextCursor != null || truncated else truncated, loadMoreError = null)
+                    .copy(isRefreshing = false, hasLoaded = true, isFromCache = false, fetchEnded = true, error = null, hasMore = if (keepWindow) nextCursor != null || truncated else truncated, loadMoreError = null)
             }
             if (!silent) stats.spinnerReleased()
             // Under the same lock as the publication: a completed fetch is the cue the account's pins are synced
@@ -1598,7 +1604,7 @@ class AgentRepository(
             if (t is CancellationException) throw t
             publish { s ->
                 val keepQuiet = silent && s.agents.isNotEmpty()
-                s.copy(isRefreshing = false, hasLoaded = true, error = if (keepQuiet) s.error else t.userMessage())
+                s.copy(isRefreshing = false, hasLoaded = true, fetchEnded = true, error = if (keepQuiet) s.error else t.userMessage())
             }
         } finally {
             pending.end(work)

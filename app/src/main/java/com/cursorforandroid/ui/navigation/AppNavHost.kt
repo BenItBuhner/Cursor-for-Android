@@ -38,7 +38,7 @@ import com.cursorforandroid.data.repo.NewChatDrafts
 import com.cursorforandroid.domain.AgentListOrganizer
 import com.cursorforandroid.domain.AgentRow
 import com.cursorforandroid.domain.CursorUser
-import com.cursorforandroid.domain.NewChatHome
+import com.cursorforandroid.domain.NewChatHomeChoice
 import com.cursorforandroid.domain.TranscriptHit
 import com.cursorforandroid.domain.UpdateState
 import com.cursorforandroid.notifications.NotificationPermissionPrompt
@@ -58,6 +58,7 @@ import com.cursorforandroid.share.ShareTarget
 import com.cursorforandroid.ui.components.SpinnerRing
 import com.cursorforandroid.ui.components.hitTestBoundary
 import com.cursorforandroid.ui.home.HomeScreen
+import com.cursorforandroid.ui.home.rememberNewChatHome
 import com.cursorforandroid.ui.media.MediaViewerHost
 import com.cursorforandroid.ui.media.rememberMediaViewerState
 import com.cursorforandroid.ui.settings.ExtendedModeUpgradeNotice
@@ -455,8 +456,10 @@ private fun AppShell(
     // has been read the shell assumes the default, which only ever hides what the setting would allow.
     val extendedMode by graph.extendedMode.enabled.collectAsStateWithLifecycle(initialValue = false)
     val extendedNoticePending by graph.extendedMode.noticePending.collectAsStateWithLifecycle(initialValue = false)
-    // Null until read, so a pane set to Projects never shows the recents for a frame first.
-    val newChatHome by graph.prefs.newChatHome.collectAsStateWithLifecycle(initialValue = null)
+    // Null until read, so a pane set to Projects never shows the recents for a frame first; the switch is read again
+    // as nullable so the New Chat page's automatic pick waits on it rather than taking the shell's assumed "off".
+    val newChatHomeChoice by graph.prefs.newChatHomeChoice.collectAsStateWithLifecycle(initialValue = null)
+    val extendedModeRead by graph.extendedMode.enabled.collectAsStateWithLifecycle(initialValue = null)
     if (extendedNoticePending && !isDemo) {
         ExtendedModeUpgradeNotice(
             onOpenSettings = {
@@ -570,7 +573,8 @@ private fun AppShell(
                         // The chat fades in over the pane, its prompt and composer carrying on from this one's.
                         onLaunchOpen = { id -> stack.gliding { openAgent(id) } },
                         rowActions = pane.rowActions,
-                        home = pane.newChatHome,
+                        // Picked here, inside the page's own entry, so each opening of the page picks afresh.
+                        home = rememberNewChatHome(pane.newChatHomeChoice, pane.projectsKnown, pane.listState, account = pane.user.email),
                         projectsAvailable = pane.projectsAvailable,
                         onNewProject = pane.onNewProject,
                         onOpenSettings = ::openSettings,
@@ -618,8 +622,9 @@ private fun AppShell(
         onOpenAgent = rowActions.onOpen,
         rowActions = rowActions,
         backEnabled = !drawerState.isOpen,
-        newChatHome = newChatHome,
+        newChatHomeChoice = newChatHomeChoice,
         projectsAvailable = isDemo || extendedMode,
+        projectsKnown = if (isDemo) true else extendedModeRead,
         onNewProject = if (isDemo || extendedMode) ({ projectEditor = ProjectEditorTarget.Create }) else null,
         onReorderProjects = { ids -> agentsViewModel.setProjectOrder(ids) },
         composerFocus = shortcuts.composerFocus,
@@ -854,10 +859,12 @@ private data class DetailPane(
     val rowActions: AgentRowActions,
     /** False while the drawer is over the pane: the gesture is the drawer's to close, not the stack's to pop. */
     val backEnabled: Boolean,
-    /** Settings › New chat page; null until the preference has been read. */
-    val newChatHome: NewChatHome?,
+    /** Settings › New chat page as chosen, or nothing chosen; null until the preference has been read. */
+    val newChatHomeChoice: NewChatHomeChoice?,
     /** Projects exist to pin: Extended mode is on, or this is the demo. */
     val projectsAvailable: Boolean,
+    /** [projectsAvailable], null until Extended mode's switch has been read. */
+    val projectsKnown: Boolean?,
     val onNewProject: (() -> Unit)?,
     /** The Projects as arranged on the New Chat page, first to last. */
     val onReorderProjects: (List<String>) -> Unit,
