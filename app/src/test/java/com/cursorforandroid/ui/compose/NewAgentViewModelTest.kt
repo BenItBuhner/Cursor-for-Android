@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.api.CursorApi
 import com.cursorforandroid.data.api.CursorApiException
+import com.cursorforandroid.data.api.CursorJson
 import com.cursorforandroid.data.api.dto.CreateAgentRequestDto
 import com.cursorforandroid.data.api.dto.CreateAgentResponseDto
 import com.cursorforandroid.data.api.dto.ListModelsResponseDto
@@ -623,7 +624,7 @@ class NewAgentViewModelTest {
     fun `plan mode and multitask are one slot, whichever way round they are set`() {
         val vm = loaded()
         vm.setPrompt("/multitask fan the suites out")
-        vm.setPlanMode(true)
+        vm.setModePill(ModePills.Pill.Plan)
         // Asking for a plan takes the command out of the prompt.
         assertThat(vm.state.value.planMode).isTrue()
         assertThat(vm.state.value.prompt).isEqualTo("fan the suites out")
@@ -635,7 +636,7 @@ class NewAgentViewModelTest {
 
         // Shared-in text carrying the command does the same; text without it leaves a plan alone.
         vm.setPrompt("")
-        vm.setPlanMode(true)
+        vm.setModePill(ModePills.Pill.Plan)
         vm.applyShare("plain text", emptyList())
         assertThat(vm.state.value.planMode).isTrue()
         vm.applyShare("/multitask more", emptyList())
@@ -700,6 +701,16 @@ class NewAgentViewModelTest {
         assertThat(loaded().state.value.ref).isEmpty()
     }
 
+    /** Auto-create PR is gone from the app: a launch never asks for a pull request, leaving it to the API's default of off. */
+    @Test
+    fun `a launch never asks for a pull request`() = runBlocking {
+        loaded().launchAndWait()
+        awaitUntil { created.isNotEmpty() }
+        val body = CursorJson.encodeToString(CreateAgentRequestDto.serializer(), created.single())
+        assertThat(body).doesNotContain("autoCreatePR")
+        assertThat(body).doesNotContain("auto_create_pr")
+    }
+
     @Test
     fun `a never-launched composer starts from the repository's default branch, not from main`() {
         val vm = loaded()
@@ -721,7 +732,7 @@ class NewAgentViewModelTest {
 
     /**
      * The composer as the phone leaves it: a repository and branch on a team pool, a model with its variant, plan
-     * mode, the PR switch, a line and an image. Written as the app leaves the screen.
+     * mode, a line and an image. Written as the app leaves the screen.
      */
     private fun writeEverything(vm: NewAgentViewModel, bytes: ByteArray) {
         vm.selectDevice(DeviceTarget.pool("gpu"))
@@ -729,8 +740,7 @@ class NewAgentViewModelTest {
         vm.setRef("cursor/cli-exploration-9c1d")
         val grok = vm.state.value.models.first { it.id == "cursor-grok-4.6" }
         vm.selectModel(grok, grok.variantWithParams(mapOf("effort" to "medium", "fast" to "false")))
-        vm.setPlanMode(true)
-        vm.setAutoCreatePr(true)
+        vm.setModePill(ModePills.Pill.Plan)
         vm.setPrompt("Half a thought")
         vm.addAttachments(listOf(PendingAttachment("picked-1", PromptImage(bytes, "image/png"), null)))
     }
@@ -745,7 +755,6 @@ class NewAgentViewModelTest {
         assertThat(selectedModel?.id).isEqualTo("cursor-grok-4.6")
         assertThat(selectedVariant?.params?.associate { it.id to it.value }).containsExactly("effort", "medium", "fast", "false")
         assertThat(planMode).isTrue()
-        assertThat(autoCreatePr).isTrue()
     }
 
     /**
@@ -782,7 +791,6 @@ class NewAgentViewModelTest {
                 ref = "cursor/cli-exploration-9c1d",
                 modelId = "cursor-grok-4.6",
                 modelParams = state.selectedVariant!!.params,
-                autoCreatePr = true,
                 planMode = true,
                 env = DeviceTarget.pool("gpu"),
             ),

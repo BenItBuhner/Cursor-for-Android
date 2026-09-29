@@ -13,12 +13,12 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
-import com.cursorforandroid.audit.RecomposeCounter
 import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.ui.agents.AgentRowActions
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.cursorforandroid.util.AppClock
+import com.cursorforandroid.util.RecomposeCounter
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -53,8 +53,7 @@ class HomeTypingRecompositionTest {
 
     @After
     fun tearDown() {
-        RecomposeCounter.on = false
-        RecomposeCounter.reset()
+        RecomposeCounter.uninstall()
         runBlocking { graph.drafts.clear() }
         AppClock.nowMillis = System::currentTimeMillis
     }
