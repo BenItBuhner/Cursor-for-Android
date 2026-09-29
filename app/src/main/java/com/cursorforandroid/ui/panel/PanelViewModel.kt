@@ -629,6 +629,9 @@ class PanelViewModel(private val graph: AppGraph, val agentId: String) : ViewMod
      */
     fun loadContext(force: Boolean = false) = contextReads.load(force)
 
+    /** Reads the Context again in place, the roots listed afresh: the Project's coordinator has moved (see [ContextReads.refresh]). */
+    fun refreshContext() = contextReads.refresh(moved = true)
+
     /** Opens or closes a folder of the tree; an opened folder not yet listed is listed. */
     fun toggleFolder(store: AgentStoreRef, path: String) = contextReads.toggleFolder(store, path)
 
