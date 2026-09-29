@@ -109,17 +109,26 @@ class NetworkFanoutScaleBenchmarkTest {
         val enabled = MutableStateFlow(keepLive)
         val sync = liveSync(rig, enabled, foreground)
         val probe = EmissionProbe(rig)
-        var firstContentMs = 0L
+        var firstRowMs = 0L
+        var refreshCompleteMs = 0L
 
         val result = measure("cold_idle_keep_${if (keepLive) "on" else "off"}", fixture, rig, probe) {
             val started = System.nanoTime()
-            rig.agents.refresh(depth = RefreshDepth.Full)
+            val refresh = rig.scope.async { rig.agents.refresh(depth = RefreshDepth.Full) }
             rig.awaitUntil(60_000) { rig.agents.state.value.agents.isNotEmpty() }
-            firstContentMs = (System.nanoTime() - started) / 1_000_000
+            firstRowMs = (System.nanoTime() - started) / 1_000_000
+            refresh.await()
+            refreshCompleteMs = (System.nanoTime() - started) / 1_000_000
             loadAll(rig)
             if (keepLive) rig.awaitUntil(60_000) { sync.heldIds.value.isNotEmpty() }
             tickMinute(fixture, rig)
-        }.copy(extras = mapOf("firstContentMs" to firstContentMs.toString(), "rows" to rig.agents.state.value.agents.size.toString()))
+        }.copy(
+            extras = mapOf(
+                "firstRowMs" to firstRowMs.toString(),
+                "refreshCompleteMs" to refreshCompleteMs.toString(),
+                "rows" to rig.agents.state.value.agents.size.toString(),
+            ),
+        )
 
         result.print()
         assertGuards(result, fixture.fleet, background = false)
