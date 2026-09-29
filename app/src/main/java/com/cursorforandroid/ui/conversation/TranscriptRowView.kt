@@ -74,7 +74,7 @@ internal fun StretchView(stretch: TranscriptRow.Stretch, modifier: Modifier = Mo
     var toggled by rememberSaveable(stretch.key) { mutableStateOf(false) }
     val expanded = openStretches?.isOpen(stretch.key) ?: toggled
     val coordinator = LocalTranscriptControls.current.coordinatorMode
-    val subagents = subagentStates(stretch)
+    val subagents = subagentStates(stretch, followLive = expanded)
     val working = subagents.mapNotNull { (entry, state) -> state.look.takeIf { SubagentRows.isWorking(entry.subagent!!, it, state.child, stretch.live) } }
     val summary = if (working.isEmpty()) stretch.summary else remember(stretch, working, coordinator) { StretchSummary.of(stretch, working, coordinator) }
     CompositionLocalProvider(LocalSubagentStates provides subagents.associate { (entry, state) -> entry.call.callId to state }) {
@@ -97,10 +97,10 @@ internal fun StretchView(stretch: TranscriptRow.Stretch, modifier: Modifier = Mo
     }
 }
 
-/** Where each subagent of [stretch] stands, in order, followed once here whether or not the stretch is open. */
+/** Where each subagent of [stretch] stands, in order. Live streams run only while [followLive] (the stretch is open). */
 @Composable
-private fun subagentStates(stretch: TranscriptRow.Stretch): List<Pair<TranscriptRow.Entry.Call, SubagentState>> =
-    stretch.subagents.map { entry -> key(entry.key) { entry to rememberSubagentState(entry.call, entry.subagent!!) } }
+private fun subagentStates(stretch: TranscriptRow.Stretch, followLive: Boolean): List<Pair<TranscriptRow.Entry.Call, SubagentState>> =
+    stretch.subagents.map { entry -> key(entry.key) { entry to rememberSubagentState(entry.call, entry.subagent!!, followLive) } }
 
 /** One entry of an open stretch, as Cursor lists a step. */
 @Composable

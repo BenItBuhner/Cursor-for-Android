@@ -39,11 +39,14 @@ class SubagentActivityTest {
         val row = MutableStateFlow<Agent?>(agent(RunStatus.RUNNING))
         val stream = MutableStateFlow(SubagentActivity.Run(emptyList(), finished = false, status = RunStatus.RUNNING))
         val followed = mutableListOf<String>()
+        val streams = SubagentStreamGate(maxStreams = 8)
+        streams.track("bc-w1")
         val activity = SubagentActivity(
             row = { row },
             load = { error("the list holds it") },
             run = { _, runId -> followed += runId; stream },
             models = MutableStateFlow(LiveModelCatalog.models),
+            streams = streams,
         )
         val seen = mutableListOf<SubagentChild?>()
         val job = launch { activity.of("bc-w1").collect { seen += it } }
@@ -80,6 +83,7 @@ class SubagentActivityTest {
             load = { loads++; agent(RunStatus.ERROR) },
             run = { _, _ -> error("a finished run is not streamed") },
             models = MutableStateFlow(emptyList<ModelOption>()),
+            streams = SubagentStreamGate(),
         )
         val seen = mutableListOf<SubagentChild?>()
         val job = launch { activity.of("bc-w1").collect { seen += it } }

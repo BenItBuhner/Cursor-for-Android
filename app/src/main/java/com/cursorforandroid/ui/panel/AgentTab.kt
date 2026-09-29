@@ -41,6 +41,7 @@ import com.cursorforandroid.ui.components.LocalMarkdownMedia
 import com.cursorforandroid.ui.components.MarkdownMediaContext
 import com.cursorforandroid.ui.components.ShimmerText
 import com.cursorforandroid.ui.components.scrollEdgeFade
+import com.cursorforandroid.ui.conversation.LocalSubagentStreamGate
 import com.cursorforandroid.ui.conversation.LocalTranscriptControls
 import com.cursorforandroid.ui.conversation.OlderTurnsRow
 import com.cursorforandroid.ui.conversation.PresentedTranscript
@@ -200,7 +201,11 @@ private fun AgentTranscript(graph: AppGraph, agentId: String, agent: Agent?, act
         }
         return
     }
-    CompositionLocalProvider(LocalMarkdownMedia provides media, LocalTranscriptControls provides controls) {
+    CompositionLocalProvider(
+        LocalMarkdownMedia provides media,
+        LocalTranscriptControls provides controls,
+        LocalSubagentStreamGate provides graph.subagentStreams,
+    ) {
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 state = listState,

@@ -36,15 +36,19 @@ class SubagentActivity(
     /** The live snapshots of one run of a chat. */
     private val run: (agentId: String, runId: String) -> Flow<Run>,
     private val models: StateFlow<List<ModelOption>>,
+    private val streams: SubagentStreamGate,
 ) {
     /** What a run's stream has said so far: its items, and whether it has seen the run end and how. */
     data class Run(val items: List<TimelineItem>, val finished: Boolean, val status: RunStatus)
 
-    constructor(agents: AgentRepository, hub: LiveRunHub, models: StateFlow<List<ModelOption>>) : this(
+    constructor(agents: AgentRepository, hub: LiveRunHub, models: StateFlow<List<ModelOption>>, streams: SubagentStreamGate) : this(
         row = { id -> agents.state.map { state -> state.agents.firstOrNull { it.id == id } } },
         load = { id -> agents.loadDetail(id).getOrNull() },
-        run = { agentId, runId -> hub.snapshots(agentId, runId).map { Run(it.items, it.finished, it.status) } },
+        run = { agentId, runId ->
+            hub.snapshots(agentId, runId, watched = streams.watched(agentId)).map { Run(it.items, it.finished, it.status) }
+        },
         models = models,
+        streams = streams,
     )
 
     /** The child [agentId] as its row and its live run say it, as it moves; null until anything is known of it. */
@@ -65,9 +69,15 @@ class SubagentActivity(
                 if (runId == null) {
                     flowOf(null)
                 } else {
-                    run(agentId, runId)
-                        .map<Run, SubagentChild?> { SubagentRows.withRun(SubagentChild(), it.items, it.finished, it.status) }
-                        .onStart { emit(null) }
+                    streams.watched(agentId).flatMapLatest { granted ->
+                        if (!granted) {
+                            flowOf(null)
+                        } else {
+                            run(agentId, runId)
+                                .map<Run, SubagentChild?> { SubagentRows.withRun(SubagentChild(), it.items, it.finished, it.status) }
+                                .onStart { emit(null) }
+                        }
+                    }
                 }
             }
             .distinctUntilChanged()

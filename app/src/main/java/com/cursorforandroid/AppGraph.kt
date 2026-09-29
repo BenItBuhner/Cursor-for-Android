@@ -96,6 +96,7 @@ import com.cursorforandroid.data.media.MediaLoader
 import com.cursorforandroid.data.repo.AgentFileRepository
 import com.cursorforandroid.data.repo.AgentRepository
 import com.cursorforandroid.data.repo.SubagentActivity
+import com.cursorforandroid.data.repo.SubagentStreamGate
 import com.cursorforandroid.data.repo.TranscriptSearchIndex
 import com.cursorforandroid.data.repo.ArtifactRepository
 import com.cursorforandroid.data.repo.AttachmentUploads
@@ -750,8 +751,12 @@ class AppGraph(
     }
     val liveRuns: LiveRunHub get() = lazyLiveRuns.value
 
+    /** Which cloud subagent runs the transcript may follow live at once (capped; see [SubagentStreamGate]). */
+    private val lazySubagentStreams = lazy { SubagentStreamGate() }
+    val subagentStreams: SubagentStreamGate get() = lazySubagentStreams.value
+
     /** Where each cloud subagent a transcript's rows stand for is, live, off the list and the hub's shared streams. */
-    private val lazySubagentActivity = lazy { SubagentActivity(agents, liveRuns, catalog.models) }
+    private val lazySubagentActivity = lazy { SubagentActivity(agents, liveRuns, catalog.models, subagentStreams) }
     val subagentActivity: SubagentActivity get() = lazySubagentActivity.value
 
     private val lazyConversations = lazy {

@@ -639,6 +639,7 @@ fun ConversationScreen(
                 LocalMarkdownMedia provides markdownMedia,
                 LocalAgentLinkStatuses provides agentLinkStatuses,
                 LocalTranscriptControls provides transcriptControls,
+                LocalSubagentStreamGate provides graph.subagentStreams,
                 LocalDisclosureTaps provides transcriptScroll,
                 LocalOpenStretches provides openStretches,
                 LocalSentFades provides sentFades,

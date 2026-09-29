@@ -178,14 +178,16 @@ internal val LocalSubagentStates = compositionLocalOf<Map<String, SubagentState>
  * row, else how a notice after the call said its child ended (a background task's call returns before its child does).
  */
 @Composable
-internal fun rememberSubagentState(call: ToolCall, subagent: SubagentCall): SubagentState {
+internal fun rememberSubagentState(call: ToolCall, subagent: SubagentCall, followLive: Boolean = true): SubagentState {
     LocalSubagentStates.current[call.callId]?.let { return it }
     val controls = LocalTranscriptControls.current
     val agentId = subagent.agentId
     val latest = controls.subagents.isLatest(call, subagent)
+    val wantsStream = followLive && latest && agentId != null && subagent.isCloudAgent
+    TrackSubagentStream(agentId, wantsStream)
     val agent = agentId?.takeIf { subagent.isCloudAgent }?.let(controls.agentById)
-    val activity = remember(agentId, latest, controls.subagentActivity) {
-        if (latest && agentId != null && subagent.isCloudAgent) controls.subagentActivity(agentId) else flowOf(null)
+    val activity = remember(agentId, latest, wantsStream, controls.subagentActivity) {
+        if (wantsStream) controls.subagentActivity(agentId!!) else flowOf(null)
     }
     val live by activity.collectAsState(null)
     val child = live ?: controls.subagentRuns[call.callId] ?: agent?.let { SubagentRows.childOf(it, controls.models) }
