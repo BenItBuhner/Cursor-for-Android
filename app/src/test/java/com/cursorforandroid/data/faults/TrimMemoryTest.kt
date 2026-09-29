@@ -18,7 +18,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import android.os.Looper
 import java.lang.ref.WeakReference
 import java.time.Instant
 
@@ -66,9 +68,10 @@ class TrimMemoryTest {
     /** Until every referent has been collected, asking the collector again; fails naming how many are still reachable. */
     private fun awaitCollected(refs: List<WeakReference<*>>, timeoutMs: Long = 10_000L) {
         val until = System.nanoTime() + timeoutMs * 1_000_000
+        val looper = Looper.getMainLooper()
         while (refs.any { it.get() != null } && System.nanoTime() < until) {
             System.gc()
-            Thread.sleep(20)
+            shadowOf(looper).idle()
         }
         assertWithMessage("activity groups of trimmed chats still reachable").that(refs.count { it.get() != null }).isEqualTo(0)
     }
