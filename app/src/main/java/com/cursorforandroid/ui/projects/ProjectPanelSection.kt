@@ -24,8 +24,10 @@ import com.cursorforandroid.ui.agents.AgentsViewModel
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.panel.sectionRow
 import com.cursorforandroid.util.AppClock
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 
 /**
@@ -46,8 +48,8 @@ fun projectPanelItems(
     onNotify: (String) -> Unit,
 ): LazyListScope.() -> Unit {
     val chat by graph.rememberAgentsPick(agentId) { list ->
-        val agent = list.agents.firstOrNull { it.id == agentId }
-        agent to agent?.parent?.let { p -> list.agents.firstOrNull { it.id == p.id } }
+        val agent = list.agent(agentId)
+        agent to agent?.parent?.let { p -> list.agent(p.id) }
     }
     val (agent, root) = chat
     if (agent != null && agent.looksLikeProject) return projectBodyItems(graph, agentId, onOpenAgent, onNotify)
@@ -149,6 +151,6 @@ private fun projectBodyItems(graph: AppGraph, projectId: String, onOpenAgent: (S
  */
 @Composable
 private fun <T> AppGraph.rememberAgentsPick(vararg keys: Any?, pick: (AgentListState) -> T): State<T> {
-    val picked = remember(this, *keys) { agents.state.map(pick).distinctUntilChanged() }
+    val picked = remember(this, *keys) { agents.state.map(pick).distinctUntilChanged().flowOn(Dispatchers.Default) }
     return picked.collectAsStateWithLifecycle(initialValue = remember(picked) { pick(agents.state.value) })
 }

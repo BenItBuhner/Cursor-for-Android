@@ -830,7 +830,7 @@ class FollowUpRepository(
      * is actually streaming the run — a row a poll behind says idle then, and the chat knows better.
      */
     private fun isIdle(agentId: String): Flow<Boolean> = combine(
-        agents.state.map { s -> s.agents.firstOrNull { it.id == agentId } }.distinctUntilChanged(),
+        agents.row(agentId),
         conversations.state(agentId),
         agents.runningScan,
     ) { row, chat, scan -> gate(row, chat, scan).idle }.distinctUntilChanged()
@@ -865,8 +865,8 @@ class FollowUpRepository(
         )
 
     /** The run to follow while something is queued: the row's, while it is running. Never a prompt's local placeholder. */
-    private fun runToFollow(agentId: String): Flow<String?> = agents.state
-        .map { s -> s.agents.firstOrNull { it.id == agentId }?.takeIf { it.isRunning }?.latestRunId?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) } }
+    private fun runToFollow(agentId: String): Flow<String?> = agents.row(agentId)
+        .map { row -> row?.takeIf { it.isRunning }?.latestRunId?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) } }
         .distinctUntilChanged()
 
     /** Called under the entry's monitor. */
