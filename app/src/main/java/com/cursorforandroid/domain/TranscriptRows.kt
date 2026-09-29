@@ -41,7 +41,7 @@ sealed interface TranscriptRow {
      * their own, and the most recent are what the reader came for.
      */
     data class Events(val rows: List<TranscriptRow>, val startsOpen: Boolean = false) : TranscriptRow {
-        override val key: String get() = "events:${rows.first().key}"
+        override val key: String by lazy(LazyThreadSafetyMode.PUBLICATION) { "events:${rows.first().key}" }
 
         val events: List<Event> get() = rows.filterIsInstance<Event>()
 
@@ -86,7 +86,8 @@ sealed interface TranscriptRow {
      */
     data class Stretch(val entries: List<Entry>, val live: Boolean = false) : TranscriptRow {
         // By its first step's own key: an event it opens with keeps it when the next event folds the two into a group.
-        override val key: String get() = "stretch:${entries.first().let { first -> (first as? Entry.Events)?.group?.rows?.first()?.key ?: first.key }}"
+        // Kept once built: the list and the open stretches read it for every row on every publication.
+        override val key: String by lazy(LazyThreadSafetyMode.PUBLICATION) { "stretch:${entries.first().let { first -> (first as? Entry.Events)?.group?.rows?.first()?.key ?: first.key }}" }
 
         /**
          * The one entry a stretch of one step is drawn as, or null for a stretch worth a summary. A failed run with

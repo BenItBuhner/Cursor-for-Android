@@ -72,7 +72,6 @@ import com.cursorforandroid.domain.AssistantMessage
 import com.cursorforandroid.domain.CarriedFile
 import com.cursorforandroid.domain.FileOpenRequest
 import com.cursorforandroid.domain.NoticeCard
-import com.cursorforandroid.domain.StretchSteps
 import com.cursorforandroid.domain.TranscriptRow
 import com.cursorforandroid.domain.DesktopEligibility
 import com.cursorforandroid.domain.EnvType
@@ -359,7 +358,7 @@ fun ConversationScreen(
     val items = presentedTranscript.items
     // A sent message's bubble comes up from its sending fade on the screen's clock, over the server's copy of it too.
     val sentFades = rememberSentFades(agentId)
-    sentFades.look(items)
+    sentFades.look(presentedTranscript.userMessages)
     val isActive = conversation.runStatus?.isActive == true || conversation.isStreaming
     LaunchedEffect(isActive) { if (!isActive) stopConfirmation.dismissFor(agentId) }
     ChatHaptics(agentId, conversation.runStatus, outgoing)
@@ -373,7 +372,7 @@ fun ConversationScreen(
     val openStretches = rememberOpenStretches(agentId)
     val stepCache = remember(agentId) { arrayOf<Map<String, TranscriptRow.Step>>(emptyMap()) }
     val listedRows by remember(rows, openStretches) {
-        derivedStateOf { StretchSteps.list(rows, openStretches::of, stepCache[0]).also { stepCache[0] = it.steps }.rows }
+        derivedStateOf { openStretches.listed(rows, stepCache[0]).also { stepCache[0] = it.steps }.rows }
     }
     // A live stretch says "Working" itself; the caption below the list is for a run with nothing on screen yet, and
     // for a connection being re-established, which only it can say.
@@ -730,7 +729,7 @@ fun ConversationScreen(
                 if (accountQueue) controls.queue.forEach { put(it.id, it.previewText) }
             }
         }
-        val transcriptMessageIds = remember(items) { items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id } }
+        val transcriptMessageIds = remember(presentedTranscript.userMessages) { presentedTranscript.userMessages.mapTo(HashSet()) { it.id } }
         QueueDeliveries(
             flights = queueFlights,
             rows = queuedRows,
