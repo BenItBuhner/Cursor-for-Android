@@ -1,5 +1,6 @@
 package com.cursorforandroid.data.repo
 
+import androidx.annotation.VisibleForTesting
 import com.cursorforandroid.crash.Breadcrumbs
 import com.cursorforandroid.data.api.AgentStoreApi
 import com.cursorforandroid.data.api.ConnectRpcException
@@ -41,6 +42,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -599,13 +601,31 @@ class ProjectRepository(
 
     // ---- the Project view -------------------------------------------------------------------------------------------
 
-    /** The Project as its view shows it, kept current from the agent list and the account's reads. */
-    fun view(projectId: String): Flow<ProjectViewState> = combine(agents.state, extrasOf(projectId), unavailableParents) { list, extra, unavailable ->
+    /**
+     * The Project as its view shows it, kept current from the agent list and the account's reads. Derived off the main
+     * thread: the list publishes many times a second while a Project's workers stream, and a view of a hundred members
+     * is not rebuilt on the frame's thread for each.
+     */
+    fun view(projectId: String): Flow<ProjectViewState> =
+        combine(agents.state, extrasOf(projectId), unavailableParents) { list, extra, unavailable -> derive(projectId, list, extra, unavailable) }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
+
+    /** [view]'s state as it stands now, for a view's first frame. */
+    fun viewNow(projectId: String): ProjectViewState = derive(projectId, agents.state.value, extrasOf(projectId).value, unavailableParents.value)
+
+    /** Told how long each derivation of a view took, on the thread it ran on; for the scale benchmark. */
+    @VisibleForTesting
+    internal var onViewDerived: ((nanos: Long) -> Unit)? = null
+
+    private fun derive(projectId: String, list: AgentListState, extra: Extras, unavailable: Map<String, String>): ProjectViewState {
+        val probe = onViewDerived
+        val startedAt = if (probe != null) System.nanoTime() else 0L
         val root = list.agents.firstOrNull { it.id == projectId }
-        val members = list.agents.filter { it.parent?.id == projectId }
+        val members = list.childrenOf[projectId].orEmpty()
         // Workers the account named but the list has not shown yet stand in with what the membership says.
         val listedWorkerIds = members.mapTo(HashSet()) { it.id }
-        ProjectViewState(
+        return ProjectViewState(
             projectId = projectId,
             root = root,
             rootUnavailable = if (root == null) unavailable[projectId] else null,
@@ -618,7 +638,7 @@ class ProjectRepository(
             lineageNotice = extra.lineageNotice,
             context = extra.context,
             actionsAvailable = extra.actionsAvailable,
-        )
+        ).also { probe?.invoke(System.nanoTime() - startedAt) }
     }
 
     /** A worker the account named but the list has not shown yet: its id, until the row arrives. */

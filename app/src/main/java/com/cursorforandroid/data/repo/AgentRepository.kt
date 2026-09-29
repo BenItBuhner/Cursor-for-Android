@@ -115,6 +115,19 @@ data class AgentListState(
 ) {
     /** The rows the lists draw: [agents] less the ones [awaitingPlacement] holds back. */
     val shownAgents: List<Agent> by lazy { if (awaitingPlacement.isEmpty()) agents else agents.filterNot { it.id in awaitingPlacement } }
+
+    /**
+     * The rows of [agents] by the parent they name, each parent's in the list's order: a Project's members without a
+     * pass over every row, built once per publication however many views read it.
+     */
+    val childrenOf: Map<String, List<Agent>> by lazy {
+        val byParent = HashMap<String, MutableList<Agent>>()
+        for (agent in agents) {
+            val parent = agent.parent ?: continue
+            byParent.getOrPut(parent.id) { ArrayList() }.add(agent)
+        }
+        byParent
+    }
 }
 
 /**
