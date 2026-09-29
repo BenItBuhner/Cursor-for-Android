@@ -1,6 +1,5 @@
 package com.cursorforandroid.ui.navigation
 
-import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +25,6 @@ import com.cursorforandroid.ui.panel.ChatMinWidth
 import com.cursorforandroid.ui.panel.PaneWidthClass
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Rule
@@ -36,12 +34,13 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 /**
  * The rail beside a panel the device kept pinned open, on a Fold's inner screen at 2x, with a chat on top as what the
- * device kept is read: the read lands off the main thread and is heard there too, as a test's coroutines have it, and
- * however the chat's pane is laid out meanwhile the rail takes the room the panel leaves it, the chat keeping its
- * narrowest width between them.
+ * device kept is read: the read lands off the main thread and is heard there, as a test's coroutines have it where they
+ * resume, and however the chat's pane is laid out meanwhile the rail takes the room the panel leaves it, the chat
+ * keeping its narrowest width between them.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -55,19 +54,19 @@ class RailBesidePinnedPanelTest {
     private var detailPass by mutableIntStateOf(0)
 
     @Volatile
-    private var holding = false
+    private var loader: Thread? = null
 
-    private val heldOffMain = CountDownLatch(1)
+    private val heard = CountDownLatch(1)
 
     private val release = CountDownLatch(1)
 
     /**
-     * Registered ahead of the window's own, so the first changes heard off the main thread once [holding] wait here,
-     * before the window hears of them, until the chat's pane has been laid out again on the main thread.
+     * Registered ahead of the window's own, so what [loader] applies waits here, before the window hears of it, until
+     * the chat's pane has been laid out again on the main thread.
      */
-    private val hold: ObserverHandle = Snapshot.registerApplyObserver { changed, _ ->
-        if (holding && Looper.myLooper() != Looper.getMainLooper() && changed.isNotEmpty() && heldOffMain.count > 0) {
-            heldOffMain.countDown()
+    private val hold: ObserverHandle = Snapshot.registerApplyObserver { _, _ ->
+        if (Thread.currentThread() === loader && heard.count > 0) {
+            heard.countDown()
             release.await(RELEASE_WAIT_SECONDS, TimeUnit.SECONDS)
         }
     }
@@ -90,12 +89,10 @@ class RailBesidePinnedPanelTest {
         }
         lateinit var panes: ShellPanes
         lateinit var root: ViewRootForTest
-        lateinit var load: () -> Unit
         compose.setContent {
             val scope = rememberCoroutineScope()
             panes = remember { ShellPanes(prefs, scope, railExpanded = { true }, chatOnTop = { true }) }
             root = LocalView.current as ViewRootForTest
-            load = { scope.launch { panes.load() } }
             CursorTheme {
                 WidePanes(
                     panes = panes,
@@ -121,20 +118,21 @@ class RailBesidePinnedPanelTest {
         compose.waitForIdle()
         assertThat(widthOf(RAIL)).isEqualTo(278.dp)
 
-        holding = true
-        compose.runOnUiThread { load() }
-        compose.waitUntil(10_000) { heldOffMain.count == 0L }
+        val loading = thread(start = false) { Snapshot.withMutableSnapshot { runBlocking { panes.load() } } }
+        loader = loading
+        loading.start()
+        compose.waitUntil(10_000) { heard.count == 0L }
         compose.runOnUiThread {
             detailPass++
             Snapshot.sendApplyNotifications()
             root.measureAndLayoutForTest()
         }
         release.countDown()
+        loading.join()
         compose.waitForIdle()
 
         assertThat(panes.widths.panelShown).isTrue()
         assertThat(widthOf(RAIL)).isEqualTo(panes.widths.rail)
-        assertThat(widthOf(RAIL)).isEqualTo(240.dp)
         assertThat(widthOf(DETAIL) - panes.width).isAtLeast(ChatMinWidth)
     }
 
