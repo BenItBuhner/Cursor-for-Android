@@ -138,7 +138,6 @@ class PreferencesStore(
         val lastModelAt = longPreferencesKey("last_model_at")
         val lastEnvType = stringPreferencesKey("last_env_type")
         val lastEnvName = stringPreferencesKey("last_env_name")
-        val autoCreatePr = booleanPreferencesKey("auto_create_pr")
         val liveNotifications = booleanPreferencesKey("live_notifications")
         val countProjectAgentsInLive = booleanPreferencesKey("live_count_project_agents")
         val notifyProjectCoordinators = booleanPreferencesKey("notify_project_coordinators")
@@ -194,6 +193,8 @@ class PreferencesStore(
             booleanPreferencesKey("voice_input"),
             // The panel's width in dp, from before it was kept as a share of the window.
             intPreferencesKey("panel_width_dp"),
+            // The last launch's auto-create PR switch; launches no longer ask for a pull request.
+            booleanPreferencesKey("auto_create_pr"),
         )
     }
 
@@ -638,7 +639,6 @@ class PreferencesStore(
         /** Model launched with last time; null is an older "no model" choice once [modelChosen] is set. */
         val modelId: String?,
         val modelParams: Map<String, String>,
-        val autoCreatePr: Boolean,
         /** False until a launch has recorded a model choice, so a null [modelId] can be told apart from "never asked". */
         val modelChosen: Boolean,
         /** Where the last launch ran; [DeviceTarget.Cloud] until a launch has recorded a device. */
@@ -653,7 +653,7 @@ class PreferencesStore(
     )
 
     val composerDefaults: Flow<ComposerDefaults> = data.changedIn(
-        Keys.lastRepo, Keys.lastRef, Keys.lastModel, Keys.lastModelParams, Keys.autoCreatePr, Keys.lastEnvType, Keys.lastEnvName,
+        Keys.lastRepo, Keys.lastRef, Keys.lastModel, Keys.lastModelParams, Keys.lastEnvType, Keys.lastEnvName,
         Keys.lastCloudRepo, Keys.lastModelAt,
     ).map { p ->
         ComposerDefaults(
@@ -661,7 +661,6 @@ class PreferencesStore(
             ref = p[Keys.lastRef],
             modelId = p[Keys.lastModel]?.ifEmpty { null },
             modelParams = p[Keys.lastModelParams]?.let { decodeStringMap(it) } ?: emptyMap(),
-            autoCreatePr = p[Keys.autoCreatePr] ?: false,
             modelChosen = p.contains(Keys.lastModel),
             env = storedDevice(p[Keys.lastEnvType], p[Keys.lastEnvName]),
             cloudRepoUrl = p[Keys.lastCloudRepo],
@@ -836,7 +835,6 @@ class PreferencesStore(
         ref: String?,
         modelId: String?,
         params: Map<String, String>,
-        autoCreatePr: Boolean,
         env: DeviceTarget = DeviceTarget.Cloud,
         nowMillis: Long = AppClock.now(),
     ) =
@@ -850,7 +848,6 @@ class PreferencesStore(
             p[Keys.lastModel] = modelId ?: ""
             p[Keys.lastModelParams] = encodeStringMap(params)
             p[Keys.lastModelAt] = nowMillis
-            p[Keys.autoCreatePr] = autoCreatePr
             p[Keys.lastEnvType] = env.type.name
             if (env.name == null) p.remove(Keys.lastEnvName) else p[Keys.lastEnvName] = env.name
         }

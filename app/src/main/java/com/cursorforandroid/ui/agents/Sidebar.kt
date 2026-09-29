@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -39,6 +40,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -166,6 +169,13 @@ fun Sidebar(
     searchRequests: Int = 0,
     /** Ctrl is held on a hardware keyboard: the first ten chat rows show the digit that opens them. */
     showShortcutNumbers: Boolean = false,
+    /** The chats whose nested chats are listed, where the shell keeps them (see `ShellShortcuts.railRows`); null, the sidebar's own. */
+    expansion: MutableState<List<String>>? = null,
+    /**
+     * False while the rows are to land where they belong without sliding, fading in or out: the frame a shut drawer
+     * catches up in with what changed behind the screen.
+     */
+    animateRows: Boolean = true,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
@@ -177,7 +187,8 @@ fun Sidebar(
     var query by rememberSaveable { mutableStateOf("") }
     // Chats whose nested chats — a Project's workers, side chats, subagents — are listed beneath them. Closed until
     // opened: a Project can have dozens of workers, and the row's count says they are there.
-    var expandedParents by rememberSaveable { mutableStateOf(listOf<String>()) }
+    val ownExpansion = rememberSaveable { mutableStateOf(listOf<String>()) }
+    var expandedParents by expansion ?: ownExpansion
     val focusRequester = remember { FocusRequester() }
 
     fun setSearchQuery(value: String) {
@@ -253,9 +264,12 @@ fun Sidebar(
                 snapshotFlow { listState.layoutInfo.let { info -> (info.visibleItemsInfo.lastOrNull()?.index ?: -1) to info.totalItemsCount } }
                     .collect { (lastVisible, total) -> if (total > 0 && lastVisible >= total - MoreAgentsPrefetchRows) callbacks.onLoadMore() }
             }
-            val groups = sidebarGroups(state, query, expandedParents, selectedAgentId, shortLists)
-            val numbered = SidebarGroup.numbered(groups)
-            val shortcutNumbers = SidebarGroup.shortcutNumbers(numbered)
+            // Derived, for the long groups listed in full are read from [shortLists] as the groups are worked out.
+            val groups by remember(state, query, expandedParents, selectedAgentId, shortLists) {
+                derivedStateOf { sidebarGroups(state, query, expandedParents, selectedAgentId, shortLists) }
+            }
+            val numbered = remember(groups) { SidebarGroup.numbered(groups) }
+            val shortcutNumbers = remember(numbered) { SidebarGroup.shortcutNumbers(numbered) }
             LaunchedEffect(numbered) { callbacks.onShortcutRows(numbered) }
             LazyColumn(Modifier.fillMaxSize().scrollEdgeFade(listState), state = listState, contentPadding = PaddingValues(top = 2.dp, bottom = 12.dp)) {
                 // The drafts lead the list, above every group, each a chat that has not been sent yet.
@@ -265,7 +279,7 @@ fun Sidebar(
                         prefs = state.prefs,
                         onOpen = callbacks.onOpenDraft,
                         onDelete = callbacks.onDeleteDraft,
-                        modifier = Modifier.animateItem().padding(vertical = CursorDimens.sidebarRowGap / 2),
+                        modifier = rowMotion(animateRows).padding(vertical = CursorDimens.sidebarRowGap / 2),
                         nowMillis = state.nowMillis,
                     )
                 }
@@ -322,7 +336,7 @@ fun Sidebar(
                                 selected = id == selectedAgentId,
                                 prefs = state.prefs,
                                 actions = callbacks.rowActions,
-                                modifier = Modifier.animateItem().padding(vertical = CursorDimens.sidebarRowGap / 2),
+                                modifier = rowMotion(animateRows).padding(vertical = CursorDimens.sidebarRowGap / 2),
                                 nowMillis = state.nowMillis,
                                 depth = depth,
                                 shortcutNumber = if (showShortcutNumbers) shortcutNumbers[id] else null,
@@ -342,7 +356,7 @@ fun Sidebar(
                                     hidden = cut.hidden,
                                     hasUnread = section.rows.any { it.agent.id !in shownIds && it.isUnread },
                                     onClick = { if (listedInFull) shortLists.collapse(section.key) else shortLists.expand(section.key) },
-                                    modifier = Modifier.animateItem().padding(vertical = CursorDimens.sidebarRowGap / 2),
+                                    modifier = rowMotion(animateRows).padding(vertical = CursorDimens.sidebarRowGap / 2),
                                 )
                             }
                         }
@@ -462,6 +476,10 @@ internal fun sidebarGroups(
     }
     SidebarGroup(section, expanded, expandedIds, cut, shortLists.isExpanded(section.key))
 }
+
+/** How the sidebar's rows come, go and move: animated, or where [animate] is false put straight where they belong. */
+private fun LazyItemScope.rowMotion(animate: Boolean): Modifier =
+    if (animate) Modifier.animateItem() else Modifier.animateItem(fadeInSpec = null, placementSpec = null, fadeOutSpec = null)
 
 /** The lead of a draft row's key in the sidebar's list: never read as an agent's (see `onVisibleRows`). */
 private const val DRAFT_KEY_PREFIX = "draft:"
