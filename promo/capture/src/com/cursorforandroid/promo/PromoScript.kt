@@ -16,12 +16,16 @@ class PromoText(val key: String, val pieces: List<Pair<String, Int>>) {
     val tokens: Int get() = pieces.sumOf { it.second }
 }
 
-class PromoEdit(val path: String, val diff: String, val added: Int, val removed: Int)
+/** One file's change: an edit of the run (with the [tokens] its added lines hold), or a file of the pull request. */
+class PromoEdit(val path: String, val diff: String, val added: Int, val removed: Int, val tokens: Int = 0)
 
-/** promo/capture/generated/script.json, as scripts/prepare.py wrote it. */
-class PromoScript(val texts: Map<String, PromoText>, val edits: Map<String, PromoEdit>) {
+/**
+ * promo/capture/generated/script.json, as scripts/prepare.py wrote it: the run's texts, its edits by key (`path`, or
+ * `path#name` for a file's later edits) and the pull request's files, each file's whole change.
+ */
+class PromoScript(val texts: Map<String, PromoText>, val edits: Map<String, PromoEdit>, val pullRequest: List<PromoEdit>) {
     fun text(key: String): PromoText = checkNotNull(texts[key]) { "No text $key in script.json" }
-    fun edit(path: String): PromoEdit = checkNotNull(edits[path]) { "No edit $path in script.json" }
+    fun edit(key: String): PromoEdit = checkNotNull(edits[key]) { "No edit $key in script.json" }
 
     companion object {
         fun load(root: File = Promo.root): PromoScript {
@@ -32,11 +36,18 @@ class PromoScript(val texts: Map<String, PromoText>, val edits: Map<String, Prom
                     pair[0].jsonPrimitive.content to pair[1].jsonPrimitive.int
                 })
             }
-            val edits = json.getValue("edits").jsonObject.mapValues { (path, value) ->
+            val edits = json.getValue("edits").jsonObject.mapValues { (_, value) ->
+                val o = value.jsonObject
+                PromoEdit(
+                    o.getValue("path").jsonPrimitive.content, o.getValue("diff").jsonPrimitive.content,
+                    o.getValue("added").jsonPrimitive.int, o.getValue("removed").jsonPrimitive.int, o.getValue("tokens").jsonPrimitive.int,
+                )
+            }
+            val pullRequest = json.getValue("pr").jsonObject.map { (path, value) ->
                 val o = value.jsonObject
                 PromoEdit(path, o.getValue("diff").jsonPrimitive.content, o.getValue("added").jsonPrimitive.int, o.getValue("removed").jsonPrimitive.int)
             }
-            return PromoScript(texts, edits)
+            return PromoScript(texts, edits, pullRequest)
         }
     }
 }

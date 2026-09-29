@@ -3,7 +3,7 @@
 #
 #   promo/capture/run.sh <test> [preview] [frames]
 #
-#   test     a test of LaunchVideoCapture: hero, desktop, probe, renderCheck
+#   test     a test of LaunchVideoCapture: probe, phone, foldable, tablet, renderCheck
 #   preview  keep every Nth frame as a PNG and encode nothing (0, the default, films the take)
 #   frames   stop the take after this many frames
 #

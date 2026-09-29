@@ -1,22 +1,18 @@
 {
  "texts": {
   "hero.prompt": {
-   "tokens": 8,
+   "tokens": 6,
    "pieces": [
     [
      "Add",
      1
     ],
     [
-     " a",
+     " dark",
      1
     ],
     [
-     " usage",
-     1
-    ],
-    [
-     " meter",
+     " mode",
      1
     ],
     [
@@ -28,188 +24,52 @@
      1
     ],
     [
-     " account",
-     1
-    ],
-    [
-     " page",
+     " dashboard",
      1
     ]
    ]
   },
   "hero.think": {
-   "tokens": 75,
+   "tokens": 34,
    "pieces": [
     [
      "The",
      1
     ],
     [
-     " account",
+     " dashboard",
      1
     ],
     [
-     " page",
+     "'s",
      1
     ],
     [
-     " should",
+     " colors",
      1
     ],
     [
-     " show",
+     " are",
      1
     ],
     [
-     " how",
+     " hard",
      1
     ],
     [
-     " much",
+     "-coded",
      1
     ],
     [
-     " of",
+     " in",
      1
     ],
     [
-     " the",
+     " theme",
      1
     ],
     [
-     " plan",
-     1
-    ],
-    [
-     " this",
-     1
-    ],
-    [
-     " cycle",
-     1
-    ],
-    [
-     " has",
-     1
-    ],
-    [
-     " used",
-     1
-    ],
-    [
-     ".",
-     1
-    ],
-    [
-     " PR",
-     1
-    ],
-    [
-     " #",
-     1
-    ],
-    [
-     "215",
-     1
-    ],
-    [
-     " already",
-     1
-    ],
-    [
-     " rolls",
-     1
-    ],
-    [
-     " usage",
-     1
-    ],
-    [
-     " events",
-     1
-    ],
-    [
-     " up",
-     1
-    ],
-    [
-     " into",
-     1
-    ],
-    [
-     " usage",
-     1
-    ],
-    [
-     "Daily",
-     1
-    ],
-    [
-     ",",
-     1
-    ],
-    [
-     " so",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " meter",
-     1
-    ],
-    [
-     " can",
-     1
-    ],
-    [
-     " read",
-     1
-    ],
-    [
-     " those",
-     1
-    ],
-    [
-     " aggregates",
-     1
-    ],
-    [
-     " instead",
-     1
-    ],
-    [
-     " of",
-     1
-    ],
-    [
-     " summ",
-     1
-    ],
-    [
-     "ing",
-     1
-    ],
-    [
-     " raw",
-     1
-    ],
-    [
-     " events",
-     1
-    ],
-    [
-     " on",
-     1
-    ],
-    [
-     " every",
-     1
-    ],
-    [
-     " load",
+     ".css",
      1
     ],
     [
@@ -221,15 +81,47 @@
      1
     ],
     [
-     " check",
+     " turn",
      1
     ],
     [
-     " the",
+     " them",
      1
     ],
     [
-     " schema",
+     " into",
+     1
+    ],
+    [
+     " CSS",
+     1
+    ],
+    [
+     " variables",
+     1
+    ],
+    [
+     ",",
+     1
+    ],
+    [
+     " add",
+     1
+    ],
+    [
+     " a",
+     1
+    ],
+    [
+     " dark",
+     1
+    ],
+    [
+     " set",
+     1
+    ],
+    [
+     ",",
      1
     ],
     [
@@ -237,31 +129,7 @@
      1
     ],
     [
-     " the",
-     1
-    ],
-    [
-     " account",
-     1
-    ],
-    [
-     " route",
-     1
-    ],
-    [
-     " first",
-     1
-    ],
-    [
-     ",",
-     1
-    ],
-    [
-     " then",
-     1
-    ],
-    [
-     " split",
+     " give",
      1
     ],
     [
@@ -269,59 +137,23 @@
      1
     ],
     [
-     " work",
+     " header",
      1
     ],
     [
-     ":",
+     " a",
      1
     ],
     [
-     " one",
+     " toggle",
      1
     ],
     [
-     " sub",
+     " that",
      1
     ],
     [
-     "agent",
-     1
-    ],
-    [
-     " maps",
-     1
-    ],
-    [
-     " where",
-     1
-    ],
-    [
-     " usage",
-     1
-    ],
-    [
-     " is",
-     1
-    ],
-    [
-     " surfaced",
-     1
-    ],
-    [
-     " today",
-     1
-    ],
-    [
-     ",",
-     1
-    ],
-    [
-     " another",
-     1
-    ],
-    [
-     " builds",
+     " remembers",
      1
     ],
     [
@@ -329,11 +161,7 @@
      1
     ],
     [
-     " meter",
-     1
-    ],
-    [
-     " component",
+     " choice",
      1
     ],
     [
@@ -343,50 +171,34 @@
    ]
   },
   "hero.intro": {
-   "tokens": 46,
+   "tokens": 21,
    "pieces": [
     [
-     "The",
+     "I'll",
      1
     ],
     [
-     " daily",
+     " move",
      1
     ],
     [
-     " aggregates",
+     " the",
      1
     ],
     [
-     " from",
+     " colors",
      1
     ],
     [
-     " #",
+     " into",
      1
     ],
     [
-     "215",
+     " theme",
      1
     ],
     [
-     " are",
-     1
-    ],
-    [
-     " exactly",
-     1
-    ],
-    [
-     " what",
-     1
-    ],
-    [
-     " this",
-     1
-    ],
-    [
-     " needs",
+     " tokens",
      1
     ],
     [
@@ -394,265 +206,7 @@
      1
     ],
     [
-     " so",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " meter",
-     1
-    ],
-    [
-     " will",
-     1
-    ],
-    [
-     " read",
-     1
-    ],
-    [
-     " `",
-     1
-    ],
-    [
-     "usage",
-     1
-    ],
-    [
-     "Daily",
-     1
-    ],
-    [
-     "`",
-     1
-    ],
-    [
-     " directly",
-     1
-    ],
-    [
-     ".",
-     1
-    ],
-    [
-     " Spl",
-     1
-    ],
-    [
-     "itting",
-     1
-    ],
-    [
-     " it",
-     1
-    ],
-    [
-     " in",
-     1
-    ],
-    [
-     " two",
-     1
-    ],
-    [
-     ":",
-     1
-    ],
-    [
-     " one",
-     1
-    ],
-    [
-     " sub",
-     1
-    ],
-    [
-     "agent",
-     1
-    ],
-    [
-     " maps",
-     1
-    ],
-    [
-     " where",
-     1
-    ],
-    [
-     " usage",
-     1
-    ],
-    [
-     " already",
-     1
-    ],
-    [
-     " shows",
-     1
-    ],
-    [
-     " up",
-     1
-    ],
-    [
-     ",",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " other",
-     1
-    ],
-    [
-     " builds",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " meter",
-     1
-    ],
-    [
-     " itself",
-     1
-    ],
-    [
-     ".",
-     1
-    ]
-   ]
-  },
-  "hero.think2": {
-   "tokens": 28,
-   "pieces": [
-    [
-     "Both",
-     1
-    ],
-    [
-     " sub",
-     1
-    ],
-    [
-     "agents",
-     1
-    ],
-    [
-     " are",
-     1
-    ],
-    [
-     " done",
-     1
-    ],
-    [
-     ".",
-     1
-    ],
-    [
-     " The",
-     1
-    ],
-    [
-     " meter",
-     1
-    ],
-    [
-     " sits",
-     1
-    ],
-    [
-     " under",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " plan",
-     1
-    ],
-    [
-     " card",
-     1
-    ],
-    [
-     " and",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " query",
-     1
-    ],
-    [
-     " stays",
-     1
-    ],
-    [
-     " server",
-     1
-    ],
-    [
-     "-side",
-     1
-    ],
-    [
-     ",",
-     1
-    ],
-    [
-     " so",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " page",
-     1
-    ],
-    [
-     " never",
-     1
-    ],
-    [
-     " sees",
-     1
-    ],
-    [
-     " raw",
-     1
-    ],
-    [
-     " events",
-     1
-    ],
-    [
-     ".",
-     1
-    ]
-   ]
-  },
-  "hero.final": {
-   "tokens": 115,
-   "pieces": [
-    [
-     "Added",
+     " add",
      1
     ],
     [
@@ -660,231 +214,11 @@
      1
     ],
     [
-     " usage",
+     " dark",
      1
     ],
     [
-     " meter",
-     1
-    ],
-    [
-     " to",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " account",
-     1
-    ],
-    [
-     " page",
-     1
-    ],
-    [
-     ".\n\n",
-     1
-    ],
-    [
-     "-",
-     1
-    ],
-    [
-     " **",
-     1
-    ],
-    [
-     "`",
-     1
-    ],
-    [
-     "current",
-     1
-    ],
-    [
-     "Cycle",
-     1
-    ],
-    [
-     "Usage",
-     1
-    ],
-    [
-     "`",
-     1
-    ],
-    [
-     "**",
-     1
-    ],
-    [
-     " in",
-     1
-    ],
-    [
-     " `",
-     1
-    ],
-    [
-     "conv",
-     1
-    ],
-    [
-     "ex",
-     1
-    ],
-    [
-     "/",
-     1
-    ],
-    [
-     "usage",
-     1
-    ],
-    [
-     ".ts",
-     1
-    ],
-    [
-     "`",
-     1
-    ],
-    [
-     " reads",
-     1
-    ],
-    [
-     " this",
-     1
-    ],
-    [
-     " cycle",
-     1
-    ],
-    [
-     "'s",
-     1
-    ],
-    [
-     " rows",
-     1
-    ],
-    [
-     " from",
-     1
-    ],
-    [
-     " `",
-     1
-    ],
-    [
-     "usage",
-     1
-    ],
-    [
-     "Daily",
-     1
-    ],
-    [
-     "`,",
-     1
-    ],
-    [
-     " so",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " page",
-     1
-    ],
-    [
-     " never",
-     1
-    ],
-    [
-     " sums",
-     1
-    ],
-    [
-     " raw",
-     1
-    ],
-    [
-     " events",
-     1
-    ],
-    [
-     ".\n",
-     1
-    ],
-    [
-     "-",
-     1
-    ],
-    [
-     " **",
-     1
-    ],
-    [
-     "`",
-     1
-    ],
-    [
-     "Usage",
-     1
-    ],
-    [
-     "Meter",
-     1
-    ],
-    [
-     "`",
-     1
-    ],
-    [
-     "**",
-     1
-    ],
-    [
-     " shows",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " minutes",
-     1
-    ],
-    [
-     " used",
-     1
-    ],
-    [
-     " against",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " plan",
-     1
-    ],
-    [
-     "'s",
-     1
-    ],
-    [
-     " limit",
+     " palette",
      1
     ],
     [
@@ -892,35 +226,23 @@
      1
     ],
     [
-     " amber",
-     1
-    ],
-    [
-     " from",
-     1
-    ],
-    [
-     " ",
-     1
-    ],
-    [
-     "80",
-     1
-    ],
-    [
-     "%",
-     1
-    ],
-    [
      " and",
      1
     ],
     [
-     " red",
+     " put",
      1
     ],
     [
-     " at",
+     " a",
+     1
+    ],
+    [
+     " toggle",
+     1
+    ],
+    [
+     " in",
      1
     ],
     [
@@ -928,15 +250,69 @@
      1
     ],
     [
-     " cap",
+     " header",
      1
     ],
     [
-     ".\n",
+     ".",
+     1
+    ]
+   ]
+  },
+  "hero.steer.prompt": {
+   "tokens": 5,
+   "pieces": [
+    [
+     "Follow",
      1
     ],
     [
-     "-",
+     " the",
+     1
+    ],
+    [
+     " system",
+     1
+    ],
+    [
+     " theme",
+     1
+    ],
+    [
+     " too",
+     1
+    ]
+   ]
+  },
+  "hero.steer": {
+   "tokens": 30,
+   "pieces": [
+    [
+     "They",
+     1
+    ],
+    [
+     " want",
+     1
+    ],
+    [
+     " the",
+     1
+    ],
+    [
+     " OS",
+     1
+    ],
+    [
+     " setting",
+     1
+    ],
+    [
+     " respected",
+     1
+    ],
+    [
+     ".",
      1
     ],
     [
@@ -944,35 +320,51 @@
      1
     ],
     [
-     " account",
+     " hook",
      1
     ],
     [
-     " route",
+     " can",
      1
     ],
     [
-     " renders",
+     " start",
      1
     ],
     [
-     " it",
+     " from",
      1
     ],
     [
-     " under",
+     " prefers",
      1
     ],
     [
-     " the",
+     "-color",
      1
     ],
     [
-     " plan",
+     "-s",
      1
     ],
     [
-     " card",
+     "cheme",
+     1
+    ],
+    [
+     " and",
+     1
+    ],
+    [
+     " follow",
+     1
+    ],
+    [
+     " its",
+     1
+    ],
+    [
+     " changes",
      1
     ],
     [
@@ -984,265 +376,31 @@
      1
     ],
     [
-     " its",
-     1
-    ],
-    [
-     " strings",
-     1
-    ],
-    [
-     " in",
-     1
-    ],
-    [
-     " `",
-     1
-    ],
-    [
-     "en",
-     1
-    ],
-    [
-     ".json",
-     1
-    ],
-    [
-     "`.\n\n",
-     1
-    ],
-    [
-     "`",
-     1
-    ],
-    [
-     "npm",
-     1
-    ],
-    [
-     " test",
-     1
-    ],
-    [
-     " --",
-     1
-    ],
-    [
-     " usage",
-     1
-    ],
-    [
-     "`",
-     1
-    ],
-    [
-     " passes",
-     1
-    ],
-    [
-     " (",
-     1
-    ],
-    [
-     "14",
-     1
-    ],
-    [
-     " tests",
-     1
-    ],
-    [
-     ").",
-     1
-    ],
-    [
-     " P",
-     1
-    ],
-    [
-     "ushed",
-     1
-    ],
-    [
-     " to",
-     1
-    ],
-    [
-     " `",
-     1
-    ],
-    [
-     "cursor",
-     1
-    ],
-    [
-     "/",
-     1
-    ],
-    [
-     "usage",
-     1
-    ],
-    [
-     "-meter",
-     1
-    ],
-    [
-     "-",
-     1
-    ],
-    [
-     "4",
-     1
-    ],
-    [
-     "b",
-     1
-    ],
-    [
-     "1",
-     1
-    ],
-    [
-     "e",
-     1
-    ],
-    [
-     "`.",
-     1
-    ]
-   ]
-  },
-  "pr.prompt": {
-   "tokens": 4,
-   "pieces": [
-    [
-     "Then",
-     1
-    ],
-    [
-     " open",
-     1
-    ],
-    [
-     " a",
-     1
-    ],
-    [
-     " PR",
-     1
-    ]
-   ]
-  },
-  "pr.think": {
-   "tokens": 28,
-   "pieces": [
-    [
-     "The",
-     1
-    ],
-    [
-     " branch",
-     1
-    ],
-    [
-     " is",
-     1
-    ],
-    [
-     " pushed",
-     1
-    ],
-    [
-     " and",
-     1
-    ],
-    [
      " the",
      1
     ],
     [
-     " tests",
+     " toggle",
      1
     ],
     [
-     " pass",
+     "'s",
      1
     ],
     [
-     ",",
+     " saved",
      1
     ],
     [
-     " so",
+     " choice",
      1
     ],
     [
-     " this",
+     " taking",
      1
     ],
     [
-     " is",
-     1
-    ],
-    [
-     " only",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " PR",
-     1
-    ],
-    [
-     ":",
-     1
-    ],
-    [
-     " a",
-     1
-    ],
-    [
-     " title",
-     1
-    ],
-    [
-     " from",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " change",
-     1
-    ],
-    [
-     " and",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " summary",
-     1
-    ],
-    [
-     " as",
-     1
-    ],
-    [
-     " its",
-     1
-    ],
-    [
-     " body",
+     " priority",
      1
     ],
     [
@@ -1251,11 +409,180 @@
     ]
    ]
   },
-  "pr.final": {
-   "tokens": 52,
+  "hero.adapt": {
+   "tokens": 17,
    "pieces": [
     [
-     "Opened",
+     "Got",
+     1
+    ],
+    [
+     " it",
+     1
+    ],
+    [
+     ".",
+     1
+    ],
+    [
+     " Dark",
+     1
+    ],
+    [
+     " mode",
+     1
+    ],
+    [
+     " will",
+     1
+    ],
+    [
+     " follow",
+     1
+    ],
+    [
+     " the",
+     1
+    ],
+    [
+     " system",
+     1
+    ],
+    [
+     " setting",
+     1
+    ],
+    [
+     ",",
+     1
+    ],
+    [
+     " and",
+     1
+    ],
+    [
+     " the",
+     1
+    ],
+    [
+     " toggle",
+     1
+    ],
+    [
+     " overrides",
+     1
+    ],
+    [
+     " it",
+     1
+    ],
+    [
+     ".",
+     1
+    ]
+   ]
+  },
+  "hero.final": {
+   "tokens": 45,
+   "pieces": [
+    [
+     "Dark",
+     1
+    ],
+    [
+     " mode",
+     1
+    ],
+    [
+     " is",
+     1
+    ],
+    [
+     " in",
+     1
+    ],
+    [
+     ".",
+     1
+    ],
+    [
+     " It",
+     1
+    ],
+    [
+     " follows",
+     1
+    ],
+    [
+     " the",
+     1
+    ],
+    [
+     " system",
+     1
+    ],
+    [
+     " theme",
+     1
+    ],
+    [
+     ",",
+     1
+    ],
+    [
+     " and",
+     1
+    ],
+    [
+     " the",
+     1
+    ],
+    [
+     " header",
+     1
+    ],
+    [
+     " toggle",
+     1
+    ],
+    [
+     " overrides",
+     1
+    ],
+    [
+     " it",
+     1
+    ],
+    [
+     ".\n\n",
+     1
+    ],
+    [
+     "Tests",
+     1
+    ],
+    [
+     " and",
+     1
+    ],
+    [
+     " checks",
+     1
+    ],
+    [
+     " pass",
+     1
+    ],
+    [
+     ".",
+     1
+    ],
+    [
+     " Open",
+     1
+    ],
+    [
+     "ed",
      1
     ],
     [
@@ -1335,131 +662,7 @@
      1
     ],
     [
-     "),",
-     1
-    ],
-    [
-     " **",
-     1
-    ],
-    [
-     "Usage",
-     1
-    ],
-    [
-     " meter",
-     1
-    ],
-    [
-     " on",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " account",
-     1
-    ],
-    [
-     " page",
-     1
-    ],
-    [
-     "**,",
-     1
-    ],
-    [
-     " against",
-     1
-    ],
-    [
-     " `",
-     1
-    ],
-    [
-     "main",
-     1
-    ],
-    [
-     "`.",
-     1
-    ],
-    [
-     " It",
-     1
-    ],
-    [
-     " is",
-     1
-    ],
-    [
-     " small",
-     1
-    ],
-    [
-     " and",
-     1
-    ],
-    [
-     " self",
-     1
-    ],
-    [
-     "-contained",
-     1
-    ],
-    [
-     ":",
-     1
-    ],
-    [
-     " one",
-     1
-    ],
-    [
-     " query",
-     1
-    ],
-    [
-     ",",
-     1
-    ],
-    [
-     " one",
-     1
-    ],
-    [
-     " component",
-     1
-    ],
-    [
-     ",",
-     1
-    ],
-    [
-     " the",
-     1
-    ],
-    [
-     " route",
-     1
-    ],
-    [
-     " and",
-     1
-    ],
-    [
-     " its",
-     1
-    ],
-    [
-     " strings",
-     1
-    ],
-    [
-     ".",
+     ").",
      1
     ]
    ]
@@ -1576,25 +779,62 @@
   }
  },
  "edits": {
-  "convex/usage.ts": {
-   "diff": "@@ -1,5 +1,7 @@\n import { v } from \"convex/values\";\n-import { internalMutation } from \"./_generated/server\";\n+import { internalMutation, query } from \"./_generated/server\";\n+import { requireAccount } from \"./auth\";\n+import { cycleStart } from \"./billing\";\n \n export const recordUsage = internalMutation({\n   args: { accountId: v.id(\"accounts\"), kind: v.string(), amount: v.number() },\n@@ -14,3 +16,20 @@\n     return null;\n   },\n });\n+\n+/** This billing cycle's transcription minutes, read from the daily aggregates rather than the raw events. */\n+export const currentCycleUsage = query({\n+  args: {},\n+  returns: v.object({ used: v.number(), limit: v.number(), resetsAt: v.number() }),\n+  handler: async (ctx) => {\n+    const account = await requireAccount(ctx);\n+    const days = await ctx.db\n+      .query(\"usageDaily\")\n+      .withIndex(\"by_account_and_day\", (q) =>\n+        q.eq(\"accountId\", account._id).gte(\"day\", cycleStart(account.billing)),\n+      )\n+      .collect();\n+    const used = days.reduce((sum, day) => sum + day.transcriptionMinutes, 0);\n+    return { used, limit: account.billing.minutesIncluded, resetsAt: account.billing.cycleEndsAt };\n+  },\n+});",
-   "added": 20,
-   "removed": 1
+  "src/styles/theme.css": {
+   "path": "src/styles/theme.css",
+   "diff": "@@ -1,16 +1,32 @@\n+:root {\n+  --bg: #ffffff;\n+  --fg: #111827;\n+  --card: #f3f4f6;\n+  --border: #e5e7eb;\n+  --muted: #6b7280;\n+}\n+\n+[data-theme=\"dark\"] {\n+  --bg: #0b0d12;\n+  --fg: #e5e7eb;\n+  --card: #151922;\n+  --border: #262b36;\n+  --muted: #9ca3af;\n+}\n+\n body {\n   margin: 0;\n   font-family: system-ui, sans-serif;\n-  background: #ffffff;\n-  color: #111827;\n+  background: var(--bg);\n+  color: var(--fg);\n }\n \n .card {\n-  background: #f3f4f6;\n-  border: 1px solid #e5e7eb;\n+  background: var(--card);\n+  border: 1px solid var(--border);\n   border-radius: 12px;\n }\n \n .muted {\n-  color: #6b7280;\n+  color: var(--muted);\n }",
+   "added": 21,
+   "removed": 5,
+   "tokens": 150
   },
-  "src/components/UsageMeter.tsx": {
-   "diff": "@@ -0,0 +1,36 @@\n+import { useQuery } from \"convex/react\";\n+import { api } from \"../../convex/_generated/api\";\n+import { useI18n } from \"../i18n\";\n+\n+const WARN_AT = 0.8;\n+\n+export function UsageMeter() {\n+  const usage = useQuery(api.usage.currentCycleUsage);\n+  const t = useI18n();\n+  if (!usage) return <div className=\"usage-meter usage-meter--loading\" />;\n+\n+  const ratio = usage.limit > 0 ? Math.min(usage.used / usage.limit, 1) : 0;\n+  const tone = ratio >= 1 ? \"over\" : ratio >= WARN_AT ? \"warn\" : \"ok\";\n+\n+  return (\n+    <section className={`usage-meter usage-meter--${tone}`} aria-label={t(\"usage.title\")}>\n+      <header>\n+        <h3>{t(\"usage.title\")}</h3>\n+        <span>{t(\"usage.resets\", { date: new Date(usage.resetsAt) })}</span>\n+      </header>\n+      <div\n+        className=\"usage-meter__bar\"\n+        role=\"meter\"\n+        aria-valuemin={0}\n+        aria-valuemax={usage.limit}\n+        aria-valuenow={usage.used}\n+      >\n+        <div className=\"usage-meter__fill\" style={{ width: `${ratio * 100}%` }} />\n+      </div>\n+      <p>\n+        {t(\"usage.minutes\", { used: Math.round(usage.used), limit: usage.limit })}\n+        {tone === \"over\" && <strong> {t(\"usage.over\")}</strong>}\n+      </p>\n+    </section>\n+  );\n+}",
-   "added": 36,
+  "src/hooks/useTheme.ts": {
+   "path": "src/hooks/useTheme.ts",
+   "diff": "@@ -0,0 +1,18 @@\n+import { useEffect, useState } from \"react\";\n+\n+export type Theme = \"light\" | \"dark\";\n+\n+const saved = (): Theme =>\n+  localStorage.theme === \"dark\" ? \"dark\" : \"light\";\n+\n+export function useTheme() {\n+  const [theme, setTheme] = useState(saved);\n+\n+  useEffect(() => {\n+    const root = document.documentElement;\n+    root.dataset.theme = theme;\n+    localStorage.theme = theme;\n+  }, [theme]);\n+\n+  return [theme, setTheme] as const;\n+}",
+   "added": 18,
+   "removed": 0,
+   "tokens": 109
+  },
+  "src/components/ThemeToggle.tsx": {
+   "path": "src/components/ThemeToggle.tsx",
+   "diff": "@@ -0,0 +1,18 @@\n+import { Moon, Sun } from \"lucide-react\";\n+import { useTheme } from \"../hooks/useTheme\";\n+\n+export function ThemeToggle() {\n+  const [theme, setTheme] = useTheme();\n+  const dark = theme === \"dark\";\n+\n+  return (\n+    <button\n+      className=\"icon-button\"\n+      aria-label=\"Toggle dark mode\"\n+      aria-pressed={dark}\n+      onClick={() => setTheme(dark ? \"light\" : \"dark\")}\n+    >\n+      {dark ? <Sun size={16} /> : <Moon size={16} />}\n+    </button>\n+  );\n+}",
+   "added": 18,
+   "removed": 0,
+   "tokens": 124
+  },
+  "src/components/Header.tsx": {
+   "path": "src/components/Header.tsx",
+   "diff": "@@ -1,5 +1,6 @@\n import { Logo } from \"./Logo\";\n import { SearchBox } from \"./SearchBox\";\n+import { ThemeToggle } from \"./ThemeToggle\";\n import { UserMenu } from \"./UserMenu\";\n \n export function Header() {\n@@ -7,6 +8,7 @@\n     <header className=\"header\">\n       <Logo />\n       <SearchBox />\n+      <ThemeToggle />\n       <UserMenu />\n     </header>\n   );",
+   "added": 2,
+   "removed": 0,
+   "tokens": 15
+  },
+  "src/hooks/useTheme.ts#system": {
+   "path": "src/hooks/useTheme.ts",
+   "diff": "@@ -2,17 +2,34 @@\n \n export type Theme = \"light\" | \"dark\";\n \n-const saved = (): Theme =>\n-  localStorage.theme === \"dark\" ? \"dark\" : \"light\";\n+const query = \"(prefers-color-scheme: dark)\";\n+\n+const system = (): Theme =>\n+  matchMedia(query).matches ? \"dark\" : \"light\";\n+\n+const saved = (): Theme | null => {\n+  const t = localStorage.theme;\n+  return t === \"dark\" || t === \"light\" ? t : null;\n+};\n \n export function useTheme() {\n-  const [theme, setTheme] = useState(saved);\n+  const [choice, setChoice] = useState(saved);\n+  const [os, setOs] = useState(system);\n+  const theme = choice ?? os;\n+\n+  useEffect(() => {\n+    const media = matchMedia(query);\n+    const follow = () => setOs(system());\n+    media.addEventListener(\"change\", follow);\n+    return () =>\n+      media.removeEventListener(\"change\", follow);\n+  }, []);\n \n   useEffect(() => {\n     const root = document.documentElement;\n     root.dataset.theme = theme;\n-    localStorage.theme = theme;\n-  }, [theme]);\n+    if (choice) localStorage.theme = choice;\n+  }, [theme, choice]);\n \n-  return [theme, setTheme] as const;\n+  return [theme, setChoice] as const;\n }",
+   "added": 23,
+   "removed": 6,
+   "tokens": 183
+  }
+ },
+ "pr": {
+  "src/styles/theme.css": {
+   "diff": "@@ -1,16 +1,32 @@\n+:root {\n+  --bg: #ffffff;\n+  --fg: #111827;\n+  --card: #f3f4f6;\n+  --border: #e5e7eb;\n+  --muted: #6b7280;\n+}\n+\n+[data-theme=\"dark\"] {\n+  --bg: #0b0d12;\n+  --fg: #e5e7eb;\n+  --card: #151922;\n+  --border: #262b36;\n+  --muted: #9ca3af;\n+}\n+\n body {\n   margin: 0;\n   font-family: system-ui, sans-serif;\n-  background: #ffffff;\n-  color: #111827;\n+  background: var(--bg);\n+  color: var(--fg);\n }\n \n .card {\n-  background: #f3f4f6;\n-  border: 1px solid #e5e7eb;\n+  background: var(--card);\n+  border: 1px solid var(--border);\n   border-radius: 12px;\n }\n \n .muted {\n-  color: #6b7280;\n+  color: var(--muted);\n }",
+   "added": 21,
+   "removed": 5
+  },
+  "src/hooks/useTheme.ts": {
+   "diff": "@@ -0,0 +1,35 @@\n+import { useEffect, useState } from \"react\";\n+\n+export type Theme = \"light\" | \"dark\";\n+\n+const query = \"(prefers-color-scheme: dark)\";\n+\n+const system = (): Theme =>\n+  matchMedia(query).matches ? \"dark\" : \"light\";\n+\n+const saved = (): Theme | null => {\n+  const t = localStorage.theme;\n+  return t === \"dark\" || t === \"light\" ? t : null;\n+};\n+\n+export function useTheme() {\n+  const [choice, setChoice] = useState(saved);\n+  const [os, setOs] = useState(system);\n+  const theme = choice ?? os;\n+\n+  useEffect(() => {\n+    const media = matchMedia(query);\n+    const follow = () => setOs(system());\n+    media.addEventListener(\"change\", follow);\n+    return () =>\n+      media.removeEventListener(\"change\", follow);\n+  }, []);\n+\n+  useEffect(() => {\n+    const root = document.documentElement;\n+    root.dataset.theme = theme;\n+    if (choice) localStorage.theme = choice;\n+  }, [theme, choice]);\n+\n+  return [theme, setChoice] as const;\n+}",
+   "added": 35,
    "removed": 0
   },
-  "src/routes/account.tsx": {
-   "diff": "@@ -2,6 +2,7 @@\n import { api } from \"../../convex/_generated/api\";\n import { EngineList } from \"../components/EngineList\";\n import { PlanCard } from \"../components/PlanCard\";\n+import { UsageMeter } from \"../components/UsageMeter\";\n \n export function AccountPage() {\n   const account = useQuery(api.accounts.current);\n@@ -11,9 +12,7 @@\n     <main className=\"account\">\n       <h1>{account.name}</h1>\n       <PlanCard plan={account.plan} />\n-      <p className=\"account__hint\">\n-        Usage appears here once your first engine is paired.\n-      </p>\n+      <UsageMeter />\n       <EngineList engines={account.engines} />\n     </main>\n   );",
-   "added": 2,
-   "removed": 3
+  "src/components/ThemeToggle.tsx": {
+   "diff": "@@ -0,0 +1,18 @@\n+import { Moon, Sun } from \"lucide-react\";\n+import { useTheme } from \"../hooks/useTheme\";\n+\n+export function ThemeToggle() {\n+  const [theme, setTheme] = useTheme();\n+  const dark = theme === \"dark\";\n+\n+  return (\n+    <button\n+      className=\"icon-button\"\n+      aria-label=\"Toggle dark mode\"\n+      aria-pressed={dark}\n+      onClick={() => setTheme(dark ? \"light\" : \"dark\")}\n+    >\n+      {dark ? <Sun size={16} /> : <Moon size={16} />}\n+    </button>\n+  );\n+}",
+   "added": 18,
+   "removed": 0
   },
-  "src/i18n/en.json": {
-   "diff": "@@ -1,5 +1,9 @@\n {\n   \"account.title\": \"Account\",\n   \"account.plan\": \"Plan\",\n-  \"engines.title\": \"Engines\"\n+  \"engines.title\": \"Engines\",\n+  \"usage.title\": \"Usage this cycle\",\n+  \"usage.minutes\": \"{used} of {limit} transcription minutes\",\n+  \"usage.resets\": \"Resets {date, date, medium}\",\n+  \"usage.over\": \"Over your plan's limit\"\n }",
-   "added": 5,
-   "removed": 1
+  "src/components/Header.tsx": {
+   "diff": "@@ -1,5 +1,6 @@\n import { Logo } from \"./Logo\";\n import { SearchBox } from \"./SearchBox\";\n+import { ThemeToggle } from \"./ThemeToggle\";\n import { UserMenu } from \"./UserMenu\";\n \n export function Header() {\n@@ -7,6 +8,7 @@\n     <header className=\"header\">\n       <Logo />\n       <SearchBox />\n+      <ThemeToggle />\n       <UserMenu />\n     </header>\n   );",
+   "added": 2,
+   "removed": 0
   }
  }
 }

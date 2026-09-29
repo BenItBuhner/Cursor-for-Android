@@ -6,9 +6,10 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
-import android.view.KeyEvent
 import android.view.PixelCopy
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
@@ -25,8 +26,15 @@ import com.cursorforandroid.data.demo.DemoStore
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.data.repo.CursorBackend
 import com.cursorforandroid.data.repo.ReviewRepository
-import com.cursorforandroid.ui.shortcuts.PaletteTags
+import com.cursorforandroid.data.repo.SessionManager
+import com.cursorforandroid.data.repo.SessionState
+import com.cursorforandroid.domain.CursorUser
+import com.cursorforandroid.ui.conversation.QueueGlyphs
 import com.cursorforandroid.util.AppClock
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
@@ -44,20 +52,22 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
 
-/** [Screen.FoldCover] and [Screen.Desktop] as `@Config` needs them, as constants; [stage] checks they still agree. */
-private const val FOLD_COVER = "w411dp-h797dp-port-night-420dpi"
-private const val DESKTOP = "w1920dp-h1032dp-land-night-mdpi-keysexposed-qwerty"
+/** [Screen.Phone], [Screen.Foldable] and [Screen.Tablet] as `@Config` needs them, as constants; [stage] checks they still agree. */
+private const val PHONE = "w411dp-h923dp-port-night-420dpi"
+private const val FOLDABLE = "w791dp-h820dp-port-night-420dpi"
+private const val TABLET = "w1280dp-h800dp-land-night-320dpi"
 
 /**
- * The launch video's footage: the app itself, on the demo account with the capture's scripted backend behind it,
- * driven a frame at a time by a [Director] and filmed to `promo/capture/out`. Each test is one continuous take on
- * one window, which may fold, unfold and grow under it as a device's does; the video is cut from the takes.
+ * The launch video's footage: the app itself, signed in to the capture's account with its scripted backend behind
+ * it, driven a frame at a time by a [Director] and filmed to `promo/capture/out`. Each device's take is one
+ * continuous take of the same run (see [take]), each step at the same moment of the capture's clock, so the video
+ * can cut between the devices and set them side by side at any moment of it.
  *
  * Run through `promo/capture/run.sh <test>`: the harness is not part of the app's build.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = FOLD_COVER)
+@Config(sdk = [35], qualifiers = PHONE)
 class LaunchVideoCapture {
 
     @get:Rule
@@ -67,6 +77,8 @@ class LaunchVideoCapture {
     private var controller: ActivityController<MainActivity>? = null
     private var sink: FrameSink? = null
     private var director: Director? = null
+    private lateinit var graph: AppGraph
+    private lateinit var streamer: PromoRunStreamer
 
     private val clock = AppClock.nowMillis
     private val settle = DeferredStartup.settleMs
@@ -75,7 +87,9 @@ class LaunchVideoCapture {
 
     @Before
     fun stage() {
-        check(Screen.FoldCover.qualifiers == FOLD_COVER && Screen.Desktop.qualifiers == DESKTOP) { "The @Config qualifiers no longer match the screens" }
+        check(Screen.Phone.qualifiers == PHONE && Screen.Foldable.qualifiers == FOLDABLE && Screen.Tablet.qualifiers == TABLET) {
+            "The @Config qualifiers no longer match the screens"
+        }
         TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
         Locale.setDefault(Locale.US)
         VirtualTime.reset()
@@ -99,21 +113,37 @@ class LaunchVideoCapture {
     }
 
     /**
-     * The app launched on [screen] as someone who has been using it: the demo account, the Cesium repository and the
-     * model chosen in the composer, nothing new to read, the notification question already answered.
+     * The app launched on [screen] as someone who has been using it for a while: their week of chats on the Cesium
+     * repository, two of them pinned, and the repository and model chosen in the composer; nothing new to read, the
+     * notification question answered. The account is the demo's, which the app runs as it runs any other, under the
+     * capture's name for its owner rather than the demo's.
      */
     private fun launch(screen: Screen, name: String): Director {
-        val store = DemoStore()
+        val store = DemoStore(PromoSeeds.seeds)
         val script = PromoScript.load()
-        val backend = CursorBackend(PromoCursorApi(store), PromoRunStreamer(store, script), isDemo = true)
-        val graph = AppGraph(app, SecureKeyStore(app) { app.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, demo = backend)
+        val steering = PromoSteering(store)
+        val review = PromoReview(script)
+        streamer = PromoRunStreamer(store, script, steering, review)
+        val backend = CursorBackend(PromoCursorApi(store), streamer, isDemo = true)
+        graph = AppGraph(app, SecureKeyStore(app) { app.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, demo = backend)
         CursorApp::class.java.getDeclaredField("graph").apply { isAccessible = true }.set(app, graph)
-        ReviewRepository::class.java.getDeclaredField("demo").apply { isAccessible = true }.set(graph.reviews, PromoReview(script))
+        ReviewRepository::class.java.getDeclaredField("demo").apply { isAccessible = true }.set(graph.reviews, review)
+        PromoSeeds.install(graph)
+        steering.install(graph.followUps)
+        steering.queueRead = { agentId -> graph.conversations.noteAccountQueue(agentId, emptyList()) }
+        steering.placed = { agentId -> graph.followUps.state(agentId).value.queue.isEmpty() }
         runBlocking {
-            graph.prefs.setComposerDefaults(repoUrl = CESIUM_REPO, ref = "main", modelId = "composer-2.5", params = mapOf("fast" to "true"), autoCreatePr = false)
+            graph.prefs.setComposerDefaults(repoUrl = CESIUM_REPO, ref = "main", modelId = "composer-2.5", params = mapOf("fast" to "true"))
             graph.prefs.setWhatsNewReadVersion(graph.appVersion)
             graph.prefs.setNotificationPermissionAsked()
+            // Before the demo is entered, which pins its own showcase chats only while nothing is pinned.
+            graph.prefs.pinIfNonePinned(PromoSeeds.pinned)
             graph.session.enterDemo()
+            // The same demo backend under it, which is what the app asks about; only the account's owner is someone else.
+            @Suppress("UNCHECKED_CAST")
+            val session = SessionManager::class.java.getDeclaredField("_state").apply { isAccessible = true }.get(graph.session) as MutableStateFlow<SessionState>
+            session.value = SessionState.SignedIn(USER, isDemo = false)
+            graph.onboarding.load()
         }
         val launched = Robolectric.buildActivity(MainActivity::class.java).setup().also { controller = it }
         compose.waitUntil(30_000) { compose.onAllNodes(hasText(HOME_PLACEHOLDER, substring = true)).fetchSemanticsNodes().isNotEmpty() }
@@ -129,191 +159,183 @@ class LaunchVideoCapture {
         PacingLog.check()
     }
 
-    /** A short take through everything the real ones lean on, with the screen's semantics and a still at each step. */
+    /** The phone's take at half size, with the screen's semantics and a still at each step, going on past a step that finds nothing to do. */
     @Test
     fun probe() {
-        val d = launch(Screen.FoldCover, "probe")
-        try {
-            d.segment("probe", 0.5f, largest = Screen.Tablet)
-            d.hold(0.5)
-            d.dump("probe-home")
-            d.still("probe-home", 0.5f)
-            d.tap(d.node(hasText("Composer 2.5") and hasClickAction()), label = "model")
-            d.hold(1.2)
-            d.dump("probe-models")
-            d.still("probe-models", 0.5f)
-            d.back()
-            d.hold(0.8)
-            val field = d.node(hasSetTextAction())
-            d.tap(field, label = "composer")
-            d.hold(0.3)
-            d.type(field, HERO_PROMPT)
-            d.hold(0.4)
-            d.dump("probe-typed")
-            d.still("probe-typed", 0.5f)
-            d.tap(d.node(hasTestTag("composer-main")), label = "send")
-            d.until("the chat", 10.0) { d.exists(hasTestTag("chat-header")) }
-            d.hold(4.0)
-            d.dump("probe-running")
-            d.still("probe-running", 0.5f)
-            val followUp = d.node(hasSetTextAction() and hasAnyAncestor(hasTestTag("follow-up-composer")))
-            d.tap(followUp, label = "follow-up")
-            d.hold(0.3)
-            d.type(followUp, QUEUED_PROMPT)
-            d.hold(0.3)
-            d.tap(d.node(hasTestTag("composer-main")), label = "queue")
-            d.hold(1.0)
-            d.dump("probe-queued")
-            d.still("probe-queued", 0.5f)
-            d.tap(d.node(hasContentDescription("Open panel")), label = "panel")
-            d.hold(1.0)
-            d.dump("probe-sheet")
-            d.still("probe-sheet", 0.5f)
-            d.mark("unfold")
-            d.window(Screen.FoldInner)
-            d.hold(1.0)
-            d.dump("probe-inner")
-            d.still("probe-inner", 0.5f)
-            val steps = 40
-            for (i in 1..steps) {
-                d.window(Screen.FoldInner.toward(Screen.Tablet, i / steps.toFloat()))
-                d.frame()
-            }
-            d.hold(3.0)
-            d.dump("probe-tablet")
-            d.still("probe-tablet", 0.5f)
-        } catch (_: EnoughFrames) {
-            d.still("probe-last", 0.5f)
-        }
+        val d = launch(Screen.Phone, "probe")
+        d.segment("probe", 0.5f)
+        Take(d, "probe", probing = true).play()
         finish("probe")
     }
 
-    /**
-     * Take A, the video's spine, on one window from start to end. On the Fold's cover screen: the model sheet, the task
-     * typed and sent, its tools and subagents opened to watch, a follow-up queued behind the turn and the details
-     * opened. Then the unfold, the details pinned beside the chat, and the window growing to the tablet's, where the
-     * edits land in the panel, the tests run, the answer streams and the queued follow-up opens the PR.
-     */
+    /** Pixel 9: the video's spine. */
     @Test
-    fun hero() {
-        val d = launch(Screen.FoldCover, "hero")
-        try {
-            d.segment("phone", 0.75f)
-            d.hold(1.2)
-            d.tap(d.node(hasText("Composer 2.5") and hasClickAction()), label = "model")
-            d.hold(2.2)
-            d.tapAt(540f, 440f, label = "dismiss")
-            d.hold(0.8)
-            val field = d.node(hasSetTextAction())
-            d.tap(field, label = "composer")
-            d.hold(0.35)
-            d.type(field, HERO_PROMPT)
-            d.hold(0.6)
-            d.tap(d.node(hasTestTag("composer-main")), label = "send")
-            d.until("the chat", 10.0) { d.exists(hasTestTag("chat-header")) }
-            // The home list's and the panel's "Working" are the chat's, not the stretch of tools this opens.
-            val tools = hasText("Working") and hasAnyAncestor(hasTestTag("stretch"))
-            d.until("the tools", 12.0) { d.exists(tools) }
-            d.hold(0.45)
-            d.tap(d.node(tools), label = "tools")
-            val agents = hasText("2 agents") and hasAnyAncestor(hasTestTag("stretch"))
-            d.until("the subagents", 15.0) { d.exists(agents) }
-            d.hold(0.7)
-            d.tap(d.node(agents), label = "subagents")
-            d.hold(1.6)
-            val followUp = d.node(hasSetTextAction() and hasAnyAncestor(hasTestTag("follow-up-composer")))
-            d.tap(followUp, label = "follow-up")
-            d.hold(0.35)
-            d.type(followUp, QUEUED_PROMPT)
-            d.hold(0.45)
-            d.tap(d.node(hasTestTag("composer-main")), label = "queue")
-            d.hold(1.4)
-            d.tap(d.node(hasContentDescription("Open panel")), label = "panel")
-            d.hold(1.3)
-            d.dump("hero-phone-end")
+    fun phone() {
+        val d = launch(Screen.Phone, "phone")
+        d.segment("phone", 1f)
+        Take(d, "phone").play()
+        finish("phone")
+    }
 
-            d.window(Screen.FoldInner)
-            // Finer than the video shows it whole: the cut pushes in on the panel and the answer.
-            d.segment("large", 0.75f, largest = Screen.Tablet)
-            d.mark("unfold")
-            d.hold(2.6)
-            d.dump("hero-inner")
-            d.mark("grow")
-            val steps = 42
-            for (i in 1..steps) {
-                val t = i / steps.toFloat()
-                d.window(Screen.FoldInner.toward(Screen.Tablet, t * t * (3 - 2 * t)))
-                d.frame()
-            }
-            d.mark("tablet")
-            d.hold(0.7)
-            // Opening the stretches pinned the transcript where they opened; the turn goes on below it.
-            d.tap(d.node(hasContentDescription("Scroll to latest")), label = "latest")
-            d.until("the answer", 40.0) { d.exists(said("Added a usage meter")) }
-            d.dump("hero-answer")
-            d.until("the pull request", 20.0) { d.exists(said("Opened")) }
-            d.hold(3.5)
-            d.dump("hero-end")
-            d.still("hero-end", 0.5f)
-        } catch (_: EnoughFrames) {
-            d.still("hero-last", 0.5f)
-        }
-        finish("hero")
+    /** Pixel 9 Pro Fold, open: the chat with its details pinned beside it. */
+    @Test
+    @Config(qualifiers = FOLDABLE)
+    fun foldable() {
+        val d = launch(Screen.Foldable, "foldable")
+        d.segment("foldable", 0.75f)
+        Take(d, "foldable").play()
+        finish("foldable")
+    }
+
+    /** Pixel Tablet on its side: the sidebar, the chat and its details. */
+    @Test
+    @Config(qualifiers = TABLET)
+    fun tablet() {
+        val d = launch(Screen.Tablet, "tablet")
+        d.segment("tablet", 0.75f)
+        Take(d, "tablet").play()
+        finish("tablet")
     }
 
     /**
-     * Take B, on a desktop-mode window with a hardware keyboard, from the keys alone: Ctrl held numbers the sidebar's
-     * rows, Ctrl+1 opens the Project at the top, Ctrl+Shift+B its panel, Ctrl+K finds one of its workers by name and
-     * Enter opens it, and Ctrl+Tab goes back to the Project.
+     * One take of the run on [d]'s screen, each step at the same moment after the send on every device: the task typed
+     * into the home screen's composer and sent; the stretch of edits opened as they land, and the first one's diff; a
+     * follow-up typed while the agent works, queued behind the turn and steered into it, the transcript caught up to
+     * see it land; and once the run has opened its pull request and answered, the pull request's section of the
+     * details. A wide window pins the details beside the chat as soon as it opens, where the edits come in as they
+     * are made; a phone opens them at the end. With [probing], every step is looked at (semantics, a still and the
+     * moment it came, in the log), and one that finds nothing to do is noted and passed over.
      */
-    @Test
-    @Config(qualifiers = DESKTOP)
-    fun desktop() {
-        val d = launch(Screen.Desktop, "desktop")
-        try {
-            // A desktop window's mdpi text is small on a monitor seen whole; the cut pushes in on the palette.
-            d.segment("desktop", 1.5f)
-            d.hold(1.4)
-            d.dump("desktop-home")
-            d.ctrlDown()
-            d.mark("numbers")
-            d.hold(1.6)
-            d.dump("desktop-numbers")
-            d.press(KeyEvent.KEYCODE_1, ctrl = true, label = "project")
-            d.hold(0.25)
-            d.ctrlUp()
-            d.until("the Project", 10.0) { d.exists(hasTestTag("chat-header") and hasContentDescription(PROJECT)) }
-            d.hold(1.8)
-            d.dump("desktop-project")
-            d.chord(KeyEvent.KEYCODE_B, shift = true, label = "panel")
-            d.until("the panel", 5.0) { d.exists(hasTestTag("conversation-panel")) }
-            d.hold(2.6)
-            d.dump("desktop-panel")
-            d.chord(KeyEvent.KEYCODE_K, label = "search")
-            d.until("the palette", 5.0) { d.exists(hasTestTag(PaletteTags.FIELD)) }
-            d.hold(0.6)
-            d.type(d.node(hasTestTag(PaletteTags.FIELD)), "webhook")
-            d.until("the worker", 10.0) { d.exists(hasTestTag(PaletteTags.result(0)) and hasText(WORKER, substring = true)) }
-            d.hold(1.2)
-            d.dump("desktop-search")
-            d.press(KeyEvent.KEYCODE_ENTER, label = "open")
-            d.until("the worker's chat", 10.0) { d.exists(hasTestTag("chat-header") and hasContentDescription(WORKER)) }
-            d.hold(2.2)
-            d.dump("desktop-worker")
-            d.ctrlDown()
-            d.frames(3)
-            d.press(KeyEvent.KEYCODE_TAB, ctrl = true, label = "switch")
-            d.hold(1.1)
-            d.dump("desktop-switcher")
-            d.ctrlUp()
-            d.until("the Project again", 10.0) { d.exists(hasTestTag("chat-header") and hasContentDescription(PROJECT)) }
-            d.hold(2.0)
-            d.dump("desktop-end")
-            d.still("desktop-end", 0.5f)
-        } catch (_: EnoughFrames) {
-            d.still("desktop-last", 0.5f)
+    private inner class Take(private val d: Director, private val name: String, private val probing: Boolean = false) {
+        private var sent = 0L
+        private val wide = d.screen.widthDp >= WIDE_DP
+
+        fun play() {
+            try {
+                d.hold(1.0)
+                look("home")
+                val field = hasSetTextAction()
+                tap("composer", field)
+                d.hold(0.3)
+                d.type(d.node(field), HERO_PROMPT)
+                d.hold(0.45)
+                look("typed")
+                tap("send", hasTestTag("composer-main"))
+                sent = VirtualTime.nowMs
+                until("the chat", 10.0) { d.exists(hasTestTag("chat-header")) }
+                if (wide) {
+                    at(PANEL_AT)
+                    tap("panel", hasContentDescription("Open panel"))
+                }
+                at(THINKING_AT)
+                look("thinking")
+
+                at(EDITS_AT)
+                until("the edits", 3.0) { d.exists(WORKING) }
+                look("working")
+                tap("edits", WORKING)
+                at(DIFF_AT)
+                tap("diff", editLine("theme.css"), unmerged = true)
+                at(DIFF_AT + 700)
+                look("diff")
+
+                at(FOLLOW_UP_AT)
+                val followUp = hasSetTextAction() and hasAnyAncestor(hasTestTag("follow-up-composer"))
+                tap("follow-up", followUp)
+                d.hold(0.25)
+                d.type(d.node(followUp), STEER_PROMPT)
+                d.hold(0.25)
+                tap("queue", hasTestTag("composer-main"))
+                at(STEER_AT)
+                look("queued")
+                steer()
+                until("the steer", 3.0) { d.exists(hasText(STEERED, substring = true)) }
+                look("steered")
+                at(LATEST_AT)
+                if (d.exists(LATEST)) tap("latest", LATEST) else if (probing) println("promo: the transcript was following at +${elapsed()}ms")
+                until("the steer's message", 6.0) { d.exists(said(STEER_PROMPT)) && graph.followUps.state(heroAgent()).value.queue.isEmpty() }
+                look("filed")
+                until("the change of plan", 6.0) { d.exists(said(ADAPTED)) }
+                look("adapted")
+
+                until("the answer", 20.0) { d.exists(said(OPENED)) }
+                look("answer")
+                at(SHIP_AT)
+                if (!wide) {
+                    tap("details", hasContentDescription("Open panel"))
+                    at(SHIP_AT + 700)
+                    look("details")
+                }
+                at(PULL_REQUEST_AT)
+                tap("pull request", hasText("Pull request") and hasAnyAncestor(hasTestTag("conversation-panel")))
+                at(PULL_REQUEST_AT + 900)
+                look("pull-request")
+                at(END_AT)
+                look("end")
+            } catch (_: EnoughFrames) {
+                d.still("$name-last", 0.5f)
+            }
         }
-        finish("desktop")
+
+        private fun elapsed() = VirtualTime.nowMs - sent
+
+        private fun heroAgent(): String = checkNotNull(streamer.heroAgent) { "The run has not started" }
+
+        private fun look(step: String) {
+            if (!probing) return
+            println("promo: $step at +${elapsed()}ms")
+            d.dump("$name-$step")
+            d.still("$name-$step", 0.5f)
+        }
+
+        /** Films until [ms] after the send; a probe that is already past it says by how much. */
+        private fun at(ms: Long) {
+            if (probing && elapsed() > ms) {
+                println("promo: already ${elapsed() - ms}ms past +${ms}ms")
+                return
+            }
+            d.at(sent + ms)
+        }
+
+        private fun until(what: String, seconds: Double, condition: () -> Boolean) {
+            try {
+                d.until(what, seconds, condition)
+                if (probing) println("promo: $what at +${elapsed()}ms")
+            } catch (e: IllegalStateException) {
+                if (!probing) throw e
+                println("promo: never saw $what")
+            }
+        }
+
+        private fun tap(what: String, matcher: SemanticsMatcher, unmerged: Boolean = false) {
+            if (!d.exists(matcher, unmerged)) {
+                check(probing) { "Nothing to tap for $what" }
+                println("promo: nothing to tap for $what at +${elapsed()}ms")
+                d.dump("$name-missing-${what.replace(' ', '-')}")
+                return
+            }
+            d.tap(d.node(matcher, unmerged), label = what)
+        }
+
+        /**
+         * The queued card's arrow pressed, and the steer it asks for asked for: the demo has no account to steer
+         * through, so the app does not offer one itself (see [PromoSteering]). Off the test's thread, which films the
+         * frames the steer's steps wait on.
+         */
+        private fun steer() {
+            val arrow = hasContentDescription(QueueGlyphs.STEER)
+            if (!d.exists(arrow)) {
+                check(probing) { "No queued card to steer" }
+                println("promo: no queued card to steer at +${elapsed()}ms")
+                d.dump("$name-missing-steer")
+                return
+            }
+            d.touch(d.node(arrow), label = "steer")
+            val agentId = heroAgent()
+            val followUps = graph.followUps
+            val queued = followUps.state(agentId).value.queue.first()
+            CoroutineScope(Dispatchers.IO).launch { followUps.steerNow(agentId, queued.id) }
+        }
     }
 
     /**
@@ -322,7 +344,7 @@ class LaunchVideoCapture {
      */
     @Test
     fun renderCheck() {
-        val d = launch(Screen.FoldCover, "render-check")
+        val d = launch(Screen.Phone, "render-check")
         d.segment("render-check", 0.5f)
         d.hold(0.2)
         val decor = d.activity.window.decorView
@@ -352,11 +374,37 @@ class LaunchVideoCapture {
     /** [text] said in the chat itself, not in the panel or the sidebar beside it. */
     private fun said(text: String) = hasText(text, substring = true) and hasAnyAncestor(hasTestTag("transcript"))
 
+    /** An edit's line in an open stretch, by its verb: the file's name on it opens the file rather than the diff. */
+    private fun editLine(file: String) = hasText("Edited") and hasAnyAncestor(hasClickAction() and hasAnyDescendant(hasText(file)))
+
     private companion object {
         const val HOME_PLACEHOLDER = "Ask Cursor to build, fix bugs, explore"
-        const val HERO_PROMPT = "Add a usage meter to the account page"
-        const val QUEUED_PROMPT = "Then open a PR"
-        const val PROJECT = "Cesium billing launch"
-        const val WORKER = "Stripe webhook handler"
+        const val HERO_PROMPT = "Add dark mode to the dashboard"
+        const val STEER_PROMPT = "Follow the system theme too"
+        const val STEERED = "Steered"
+        const val ADAPTED = "Got it."
+        const val OPENED = "Opened"
+
+        /** Where the shell lays a window out wide, with the sidebar and the details beside the chat (ShellWindow). */
+        const val WIDE_DP = 600
+
+        val USER = CursorUser(apiKeyName = "Android", email = "alex@example.com", firstName = "Alex", lastName = "Rivera", userId = null)
+
+        /** The stretch the run is working in, rather than the home list's or the panel's "Working". */
+        val WORKING = hasText("Working") and hasAnyAncestor(hasTestTag("stretch"))
+        val LATEST = hasContentDescription("Scroll to latest")
+
+        // Each step's moment, in ms after the send: the run is scripted to the millisecond from there, so these are the
+        // same on every device, and every take shows the same thing at the same moment.
+        const val PANEL_AT = 1_000L
+        const val THINKING_AT = 1_800L
+        const val EDITS_AT = 4_900L
+        const val DIFF_AT = 5_500L
+        const val FOLLOW_UP_AT = 6_300L
+        const val STEER_AT = 8_900L
+        const val LATEST_AT = 9_900L
+        const val SHIP_AT = 23_000L
+        const val PULL_REQUEST_AT = 24_000L
+        const val END_AT = 27_000L
     }
 }

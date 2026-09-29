@@ -46,7 +46,7 @@ import kotlinx.serialization.json.put
 private const val PROMO_SCRIPT = "promo"
 
 const val CESIUM_REPO = "https://github.com/techlitnow/cesium"
-const val HERO_BRANCH = "cursor/usage-meter-4b1e"
+const val HERO_BRANCH = "cursor/dark-mode-5c2a"
 const val HERO_PR = "https://github.com/techlitnow/cesium/pull/221"
 
 /**
@@ -73,12 +73,11 @@ internal class PromoCursorApi(private val store: DemoStore, private val demo: De
             latestRunId = runId,
             repos = body.repos ?: emptyList(),
             workOnCurrentBranch = body.workOnCurrentBranch ?: false,
-            autoCreatePR = body.autoCreatePR,
         )
         val run = RunDto(id = runId, agentId = id, status = "CREATING", createdAt = nowIso, updatedAt = nowIso)
         store.addAgent(
             agent = agent,
-            legacy = V0AgentDto(id, agent.name, "CREATING", repo?.let { V0SourceDto(it.url, it.startingRef) }, V0TargetDto(url = agent.url, autoCreatePr = body.autoCreatePR), null, nowIso),
+            legacy = V0AgentDto(id, agent.name, "CREATING", repo?.let { V0SourceDto(it.url, it.startingRef) }, V0TargetDto(url = agent.url), null, nowIso),
             run = run,
             firstMessage = body.prompt.text,
             script = PROMO_SCRIPT,
@@ -116,8 +115,21 @@ internal class PromoCursorApi(private val store: DemoStore, private val demo: De
  * later, and each connection is told everything said so far, then each event as it is said, as the API replays a run
  * to a stream that names no position. The demo's streamer starts its script again instead, which a few seconds of
  * script never shows.
+ *
+ * The hero run takes a steer at a step boundary, as an agent reads one: what [steering] holds for it once its checks
+ * have run, filed with the conversation and placed in the turn before the run says anything about it.
  */
-internal class PromoRunStreamer(private val store: DemoStore, private val script: PromoScript) : RunStreamer {
+internal class PromoRunStreamer(
+    private val store: DemoStore,
+    private val script: PromoScript,
+    private val steering: PromoSteering,
+    private val review: PromoReview,
+) : RunStreamer {
+
+    /** The chat the hero run plays in, once it has started. */
+    @Volatile
+    var heroAgent: String? = null
+        private set
 
     private class Stopped : Exception(null, null, false, false)
 
@@ -196,11 +208,7 @@ internal class PromoRunStreamer(private val store: DemoStore, private val script
             store.setV0Status(agentId, "RUNNING")
             val prompt = store.prompt(runId)
             val outcome = Scene(recorder, runId).run {
-                when {
-                    prompt.contains("usage meter", ignoreCase = true) -> hero()
-                    prompt.contains("open a PR", ignoreCase = true) -> pullRequest()
-                    else -> anything()
-                }
+                if (prompt.equals(script.text("hero.prompt").text, ignoreCase = true)) hero(agentId) else anything()
             }
             val duration = AppClock.now() - startedAt
             val git = outcome.branch?.let { RunGitDto(listOf(RunGitBranchDto(repoUrl = CESIUM_REPO.removePrefix("https://"), branch = it, prUrl = outcome.prUrl))) }
@@ -287,22 +295,33 @@ internal class PromoRunStreamer(private val store: DemoStore, private val script
 
         private suspend fun read(n: Int, path: String, ms: Long) = call(id("r$n"), "read_file", args("path" to path), ms)
 
-        private suspend fun grep(n: Int, pattern: String, ms: Long) = call(id("g$n"), "grep", args("pattern" to pattern), ms)
-
-        private suspend fun search(n: Int, query: String, ms: Long) = call(id("q$n"), "codebase_search", args("query" to query), ms)
-
         private suspend fun shell(n: Int, command: String, ms: Long, stdout: String) = call(
             id("t$n"), "run_terminal_cmd", args("command" to command), ms,
             buildJsonObject { put("success", buildJsonObject { put("stdout", stdout); put("exitCode", 0) }) },
         )
 
-        /** An edit as the stream carries one: the simplified call with its line counts, and the typed update with the diff. */
-        private suspend fun edit(n: Int, path: String, ms: Long) {
-            val change = script.edit(path)
+        /**
+         * An edit as the stream carries one: the simplified call with its line counts, and the typed update with the
+         * diff. The model writes the edit's added lines while it runs, at the stream's own pace, and the edit takes at
+         * least [ms] in all.
+         */
+        private suspend fun edit(n: Int, key: String, ms: Long) {
+            val change = script.edit(key)
             val callId = id("e$n")
-            val a = args("path" to path)
+            val a = args("path" to change.path)
             emit(RunStreamEvent.ToolCall(SseToolCallDto(callId = callId, name = "edit_file", status = "running", args = a)))
-            pause(ms)
+            var left = change.tokens
+            var burst = 0
+            var spent = 0L
+            while (left > 0) {
+                val tokens = minOf(left, if (burst % 2 == 0) 7 else 8)
+                PacingLog.record(VirtualTime.nowMs, tokens, "edit", key)
+                left -= tokens
+                burst++
+                pause(BURST_MS)
+                spent += BURST_MS
+            }
+            if (spent < ms) pause(ms - spent)
             val counts = buildJsonObject { put("linesAdded", change.added); put("linesRemoved", change.removed) }
             emit(RunStreamEvent.ToolCall(SseToolCallDto(callId = callId, name = "edit_file", status = "completed", args = a, result = buildJsonObject { put("success", counts) })))
             val value = buildJsonObject { put("linesAdded", change.added); put("linesRemoved", change.removed); put("diffString", change.diff) }
@@ -317,60 +336,60 @@ internal class PromoRunStreamer(private val store: DemoStore, private val script
             )
         }
 
-        private fun taskArgs(type: String, description: String, model: String?) =
-            if (model == null) args("subagent_type" to type, "description" to description) else args("subagent_type" to type, "description" to description, "model" to model)
-
-        private suspend fun taskStart(n: Int, type: String, description: String, model: String? = null) =
-            emit(RunStreamEvent.ToolCall(SseToolCallDto(callId = id("s$n"), name = "task", status = "running", args = taskArgs(type, description, model))))
-
-        private suspend fun taskDone(n: Int, type: String, description: String, model: String? = null, durationMs: Long) = emit(
-            RunStreamEvent.ToolCall(
-                SseToolCallDto(
-                    callId = id("s$n"), name = "task", status = "completed", args = taskArgs(type, description, model),
-                    result = buildJsonObject { put("success", buildJsonObject { put("durationMs", durationMs) }) },
-                ),
-            ),
-        )
-
-        suspend fun hero(): Outcome {
-            pause(450)
-            think("hero.think")
-            pause(200)
-            read(1, "convex/schema.ts", 650)
-            read(2, "convex/usageAggregates.ts", 600)
-            grep(1, "usageDaily", 550)
-            search(1, "account page plan limits", 1_150)
-            pause(250)
-            say("hero.intro")
-            pause(250)
-            taskStart(1, "explore", MAP_USAGE)
-            pause(220)
-            taskStart(2, "generalPurpose", BUILD_METER, model = "composer-2.5")
-            pause(5_280)
-            taskDone(1, "explore", MAP_USAGE, durationMs = 5_500)
-            pause(2_700)
-            taskDone(2, "generalPurpose", BUILD_METER, model = "composer-2.5", durationMs = 8_200)
-            pause(300)
-            think("hero.think2")
-            pause(200)
-            edit(1, "convex/usage.ts", 1_300)
-            edit(2, "src/components/UsageMeter.tsx", 1_700)
-            edit(3, "src/routes/account.tsx", 900)
-            edit(4, "src/i18n/en.json", 650)
-            pause(250)
-            shell(1, "npm test -- usage", 6_200, TEST_OUTPUT)
-            pause(350)
-            val final = say("hero.final")
-            return Outcome(final, branch = HERO_BRANCH)
+        /**
+         * The step boundary where the run reads what was steered into it, if anything comes within [STEER_WAIT_MS]:
+         * filed with the conversation, then left until the app has placed it in the turn. False when nothing came.
+         */
+        private suspend fun steered(agentId: String): Boolean {
+            var waited = 0L
+            var text = steering.take(agentId)
+            while (text == null) {
+                if (waited >= STEER_WAIT_MS) return false
+                pause(POLL_MS)
+                waited += POLL_MS
+                text = steering.take(agentId)
+            }
+            steering.deliver(agentId, text)
+            waited = 0L
+            while (!steering.placed(agentId)) {
+                check(waited < STEER_WAIT_MS) { "The steer was never placed in the turn" }
+                pause(POLL_MS)
+                waited += POLL_MS
+            }
+            return true
         }
 
-        suspend fun pullRequest(): Outcome {
+        suspend fun hero(agentId: String): Outcome {
+            heroAgent = agentId
             pause(400)
-            think("pr.think")
+            think("hero.think")
+            pause(150)
+            read(1, "src/styles/theme.css", 450)
+            read(2, "src/components/Header.tsx", 400)
+            pause(150)
+            say("hero.intro")
             pause(200)
-            shell(2, "gh pr create --fill --base main", 2_400, HERO_PR)
-            pause(300)
-            val final = say("pr.final")
+            edit(1, "src/styles/theme.css", 900)
+            edit(2, "src/hooks/useTheme.ts", 900)
+            edit(3, "src/components/ThemeToggle.tsx", 900)
+            edit(4, "src/components/Header.tsx", 500)
+            pause(200)
+            shell(1, "npm run typecheck", 2_400, TYPECHECK_OUTPUT)
+            if (steered(agentId)) {
+                pause(250)
+                think("hero.steer")
+                pause(150)
+                say("hero.adapt")
+                pause(200)
+                edit(5, "src/hooks/useTheme.ts#system", 900)
+            }
+            pause(200)
+            shell(2, "npm test", 2_600, TEST_OUTPUT)
+            shell(3, "gh pr create --fill", 1_600, HERO_PR)
+            review.opened(AppClock.now())
+            shell(4, "gh pr checks 221 --watch", PromoReview.CHECKS_MS + 200, CHECKS_OUTPUT)
+            pause(200)
+            val final = say("hero.final")
             return Outcome(final, branch = HERO_BRANCH, prUrl = HERO_PR)
         }
 
@@ -385,18 +404,29 @@ internal class PromoRunStreamer(private val store: DemoStore, private val script
 
     private companion object {
         const val BURST_MS = 80L
-        const val MAP_USAGE = "Map where usage is shown today"
-        const val BUILD_METER = "Build the UsageMeter component"
+        const val POLL_MS = VirtualTime.FRAME_MS
+        const val STEER_WAIT_MS = 20_000L
+        val TYPECHECK_OUTPUT = """
+            > cesium@0.9.4 typecheck
+            > tsc --noEmit
+        """.trimIndent()
         val TEST_OUTPUT = """
             > cesium@0.9.4 test
-            > vitest run usage
+            > vitest run
 
-             ✓ convex/usage.test.ts (9 tests) 412ms
-             ✓ src/components/UsageMeter.test.tsx (5 tests) 188ms
+             ✓ src/components/Header.test.tsx (3 tests) 41ms
+             ✓ src/pages/Dashboard.test.tsx (7 tests) 126ms
 
              Test Files  2 passed (2)
-                  Tests  14 passed (14)
-               Duration  2.31s
+                  Tests  10 passed (10)
+               Duration  1.08s
+        """.trimIndent()
+        val CHECKS_OUTPUT = """
+            ✓  typecheck  GitHub Actions
+            ✓  test       GitHub Actions
+            ✓  build      GitHub Actions
+
+            All checks were successful
         """.trimIndent()
     }
 }

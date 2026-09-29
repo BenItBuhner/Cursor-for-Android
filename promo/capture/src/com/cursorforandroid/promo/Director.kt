@@ -3,7 +3,6 @@ package com.cursorforandroid.promo
 import android.graphics.Color
 import android.os.Looper
 import android.os.SystemClock
-import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -67,30 +66,15 @@ data class Screen(
             if (keyboard) append("-keysexposed-qwerty")
         }
 
-    /** This screen [t] of the way to [to], for a window changing size a frame at a time; the bars go at the end. */
-    fun toward(to: Screen, t: Float): Screen = copy(
-        name = if (t >= 1f) to.name else "$name>${to.name}",
-        widthDp = (widthDp + (to.widthDp - widthDp) * t).roundToInt(),
-        heightDp = (heightDp + (to.heightDp - heightDp) * t).roundToInt(),
-    ).let { if (t >= 1f) to else it }
-
     companion object {
-        /** Pixel Fold, folded: the 1080x2092 cover screen. */
-        val FoldCover = Screen("fold-cover", 411, 797, 420, statusBarDp = 36, navBarDp = 20)
+        /** Pixel 9: the 1080x2424 screen. */
+        val Phone = Screen("phone", 411, 923, 420, statusBarDp = 40, navBarDp = 24)
 
-        /** Pixel Fold, open: the 2208x1840 inner screen on its side (Roborazzi's `PixelFold`). */
-        val FoldInner = Screen("fold-inner", 841, 701, 420, statusBarDp = 30, navBarDp = 20)
+        /** Pixel 9 Pro Fold, open: the 2076x2152 inner screen, held upright. */
+        val Foldable = Screen("foldable", 791, 820, 420, statusBarDp = 32, navBarDp = 20)
 
-        /**
-         * Pixel Tablet's 1280x800 dp window (Roborazzi's `PixelTablet`), at the Fold's density rather than its own
-         * xhdpi: a density change recreates the activity, and the unfold and the growth into the tablet are one
-         * window changing size. Every dp is where it is on the tablet; only the pixels are finer, and the video scales
-         * them down.
-         */
-        val Tablet = Screen("tablet", 1280, 800, 420, statusBarDp = 30, navBarDp = 20)
-
-        /** A desktop-mode window, Samsung DeX style: a 1080p monitor less its taskbar, with a hardware keyboard. */
-        val Desktop = Screen("desktop", 1920, 1032, 160, statusBarDp = 0, navBarDp = 0, keyboard = true)
+        /** Pixel Tablet: the 2560x1600 screen on its side. */
+        val Tablet = Screen("tablet", 1280, 800, 320, statusBarDp = 28, navBarDp = 20)
     }
 }
 
@@ -122,9 +106,6 @@ class Director(
     private val marks = ArrayList<String>()
     private var finger: Finger? = null
     private var releaseFrames = 0
-
-    /** The hardware keys down, as their caps read, in the order they went down. */
-    private val held = LinkedHashSet<String>()
     private var emitsSeen = VirtualTime.emits
     private var framesThisRun = 0
 
@@ -179,6 +160,15 @@ class Director(
     fun frames(n: Int) = repeat(n) { frame() }
 
     fun hold(seconds: Double) = frames((seconds * 60).roundToInt())
+
+    /**
+     * Films frames until the capture's clock reads [ms], so that takes on different screens do what they do at the
+     * same moment of the same run whatever each did in between.
+     */
+    fun at(ms: Long) {
+        check(VirtualTime.nowMs <= ms) { "Already ${VirtualTime.nowMs - ms}ms past $ms" }
+        while (VirtualTime.nowMs < ms) frame()
+    }
 
     /** Films frames until [condition] holds, failing after [seconds] with the screen's semantics and a still left behind. */
     fun until(what: String, seconds: Double = 15.0, condition: () -> Boolean) {
@@ -323,7 +313,6 @@ class Director(
                 put("down", f.down)
             }
         }
-        if (held.isNotEmpty()) putJsonArray("keys") { held.forEach { add(it) } }
         if (marks.isNotEmpty()) putJsonArray("marks") { marks.forEach { add(it) } }
     }
 
@@ -375,6 +364,22 @@ class Director(
     }
 
     /**
+     * A finger down on [target], held [holdFrames] frames and then cancelled rather than lifted, as a gesture the
+     * system takes over is: the press shows and nothing is clicked. For a control whose action the capture takes itself.
+     */
+    fun touch(target: SemanticsNodeInteraction, holdFrames: Int = 6, label: String? = null) {
+        val (x, y) = center(target.fetchSemanticsNode())
+        label?.let(::mark)
+        finger = Finger(x, y, down = true)
+        releaseFrames = 0
+        delivered { target.performTouchInput { down(center) } }
+        frames(holdFrames)
+        delivered { target.performTouchInput { cancel() } }
+        finger = Finger(x, y, down = false)
+        releaseFrames = RELEASE_FRAMES
+    }
+
+    /**
      * A finger down at ([x], [y]) on the screen, into the topmost window's content there (a sheet's scrim, say, which
      * has no node of its own to aim at), held [holdFrames] frames and lifted.
      */
@@ -405,32 +410,6 @@ class Director(
         }
     }
 
-    /**
-     * A key from a hardware keyboard, handed on as the platform hands it with no keyboard app standing in the way: the
-     * views' pass before the IME (where the shell reads it with a field focused), then the activity. The app ignores
-     * the on-screen keyboard's keys, which the platform's short constructors would make this.
-     */
-    private fun key(action: Int, keyCode: Int, meta: Int) {
-        val now = SystemClock.uptimeMillis()
-        val event = KeyEvent(now, now, action, keyCode, 0, meta, HARDWARE_KEYBOARD, 0, 0, InputDevice.SOURCE_KEYBOARD)
-        val cap = keycap(keyCode)
-        if (action == KeyEvent.ACTION_DOWN) held += cap else held -= cap
-        if (activity.window.decorView.dispatchKeyEventPreIme(event)) return
-        activity.dispatchKeyEvent(event)
-    }
-
-    private fun keycap(keyCode: Int): String = when (keyCode) {
-        KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> "Ctrl"
-        KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> "Shift"
-        KeyEvent.KEYCODE_TAB -> "Tab"
-        KeyEvent.KEYCODE_ENTER -> "Enter"
-        KeyEvent.KEYCODE_ESCAPE -> "Esc"
-        in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> ('A' + (keyCode - KeyEvent.KEYCODE_A)).toString()
-        in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> ('0' + (keyCode - KeyEvent.KEYCODE_0)).toString()
-        // Robolectric has no native key names: `keyCodeToString` gives the bare number.
-        else -> KeyEvent.keyCodeToString(keyCode).removePrefix("KEYCODE_")
-    }
-
     /** The back gesture's key, to whichever window is on top: a sheet's dialog before the activity under it. */
     fun back(holdFrames: Int = 3) {
         val top = fetchRobolectricWindowRoots().last { it.decorView.isAttachedToWindow && it.decorView.visibility == View.VISIBLE }.decorView
@@ -438,30 +417,6 @@ class Director(
         top.dispatchKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK, 0))
         frames(holdFrames)
         top.dispatchKeyEvent(KeyEvent(now, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK, 0))
-    }
-
-    /** Ctrl held down, as a hand holds it for the switcher; [ctrlUp] lets it go. */
-    fun ctrlDown() = key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_CTRL_LEFT, CTRL)
-
-    fun ctrlUp() = key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_CTRL_LEFT, 0)
-
-    /** [keyCode] pressed and let go with the modifiers held, [holdFrames] frames down. */
-    fun press(keyCode: Int, ctrl: Boolean = false, shift: Boolean = false, holdFrames: Int = 4, label: String? = null) {
-        val meta = (if (ctrl) CTRL else 0) or (if (shift) SHIFT else 0)
-        label?.let(::mark)
-        key(KeyEvent.ACTION_DOWN, keyCode, meta)
-        frames(holdFrames)
-        key(KeyEvent.ACTION_UP, keyCode, meta)
-    }
-
-    /** A chord from nothing held: the modifiers down, the key, and all of it let go. */
-    fun chord(keyCode: Int, ctrl: Boolean = true, shift: Boolean = false, label: String? = null) {
-        if (ctrl) ctrlDown()
-        if (shift) key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_SHIFT_LEFT, (if (ctrl) CTRL else 0) or SHIFT)
-        frames(2)
-        press(keyCode, ctrl, shift, label = label)
-        if (shift) key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_SHIFT_LEFT, if (ctrl) CTRL else 0)
-        if (ctrl) ctrlUp()
     }
 
     // ---- Looking -----------------------------------------------------------------------------------------------------
@@ -503,10 +458,6 @@ class Director(
         /** Frames a lifted finger stays in the metadata, for the video to let its touch mark fade. */
         const val RELEASE_FRAMES = 12
         val TYPING_GAPS = intArrayOf(4, 3, 5, 4, 3, 4, 6, 3, 4, 5, 3, 4)
-        /** Any real input device's id: the app tells a physical keyboard's keys from the on-screen one's by it. */
-        const val HARDWARE_KEYBOARD = 7
-        const val CTRL = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
-        const val SHIFT = KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON
         val CLOCK: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern("H:mm")
 
         fun even(value: Float): Int = (value.roundToInt() / 2) * 2
