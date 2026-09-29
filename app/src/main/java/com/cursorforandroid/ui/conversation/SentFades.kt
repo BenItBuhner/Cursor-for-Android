@@ -11,7 +11,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
-import com.cursorforandroid.domain.TimelineItem
 import com.cursorforandroid.domain.UserMessage
 import com.cursorforandroid.ui.components.LocalSendMotion
 import com.cursorforandroid.ui.components.SendMotion
@@ -49,7 +48,7 @@ class SentFades(private val animatorsEnabled: () -> Boolean = ValueAnimator::are
     private val started = Channel<Fade>(Channel.UNLIMITED)
     private var sending: Map<String, String> = emptyMap()
     private var known: Set<String> = emptySet()
-    private var seen: List<TimelineItem>? = null
+    private var seen: List<UserMessage>? = null
 
     /**
      * [message]'s bubble's opacity: its sending look, under its fade, or whole. Read in the bubble's composition, so
@@ -85,13 +84,13 @@ class SentFades(private val animatorsEnabled: () -> Boolean = ValueAnimator::are
     fun fading(id: String): Boolean = id in fades
 
     /**
-     * The transcript as it is shown now. Called in the composition that shows it, before its rows compose, so a bubble
-     * composed in that frame already has its fade; a list looked at before is let be.
+     * The transcript's user messages as they are shown now (see [PresentedTranscript.userMessages]). Called in the
+     * composition that shows them, before its rows compose, so a bubble composed in that frame already has its fade; a
+     * list looked at before is let be.
      */
-    fun look(items: List<TimelineItem>) {
-        if (items === seen) return
-        seen = items
-        val messages = items.filterIsInstance<UserMessage>()
+    fun look(messages: List<UserMessage>) {
+        if (messages === seen) return
+        seen = messages
         val byId = messages.associateBy { it.id }
         // Bubbles new to this look, sent: where a message that left under one id reappears under the server's.
         val fresh = messages.filterTo(ArrayList()) { !it.isPending && it.id !in known }
