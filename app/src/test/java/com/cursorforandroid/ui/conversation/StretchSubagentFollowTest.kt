@@ -13,6 +13,7 @@ import com.cursorforandroid.domain.RunFooter
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.domain.SubagentChild
 import com.cursorforandroid.domain.SubagentRows
+import com.cursorforandroid.domain.SystemNotification
 import com.cursorforandroid.domain.TimelineItem
 import com.cursorforandroid.domain.ToolCall
 import com.cursorforandroid.domain.ToolKind
@@ -57,16 +58,18 @@ class StretchSubagentFollowTest {
     private val listed = ids.associateWith { MutableStateFlow<SubagentChild?>(SubagentChild(SubagentChild.Status.Running)) }
     private val followed = mutableListOf<String>()
 
-    private fun show(coordinatorMode: Boolean) {
+    private fun show(coordinatorMode: Boolean, items: List<TimelineItem> = turn) {
+        val rows = TranscriptRows.of(items, coordinatorMode = coordinatorMode)
         val controls = TranscriptControls(
             coordinatorMode = coordinatorMode,
+            subagents = SubagentRows.index(rows),
             subagentActivity = { id -> followed += id; live.getValue(id) },
             subagentListed = { id -> listed.getValue(id) },
         )
         compose.setContent {
             CursorTheme(mode = ThemeMode.Dark) {
                 CompositionLocalProvider(LocalTranscriptControls provides controls) {
-                    Column { TranscriptRows.of(turn, coordinatorMode = coordinatorMode).forEach { TranscriptRowView(it) } }
+                    Column { rows.forEach { TranscriptRowView(it) } }
                 }
             }
         }
@@ -109,6 +112,14 @@ class StretchSubagentFollowTest {
         assertThat(followed).isEmpty()
         finish("bc-t1")
         compose.waitForIdle()
+        compose.onNodeWithText("5 working").assertIsDisplayed()
+        assertThat(followed).isEmpty()
+    }
+
+    @Test
+    fun `a notice that its child ended outranks a list row a refresh behind`() {
+        val notice = SystemNotification("n1", SystemNotification.Kind.Subagent, "Subagent completed", "Task 3", body = "Done.", raw = "<system_notification/>", agentId = "bc-t3")
+        show(coordinatorMode = false, items = turn + notice)
         compose.onNodeWithText("5 working").assertIsDisplayed()
         assertThat(followed).isEmpty()
     }

@@ -191,8 +191,11 @@ internal fun rememberSubagentState(call: ToolCall, subagent: SubagentCall, live:
         if (latest && agentId != null && subagent.isCloudAgent) source(agentId) else flowOf(null)
     }
     val current by activity.collectAsState(initial)
-    val child = current ?: controls.subagentRuns[call.callId] ?: agent?.let { SubagentRows.childOf(it, controls.models) }
-        ?: controls.subagents.endingOf(call)?.let { SubagentChild(status = it) }
+    val ending = controls.subagents.endingOf(call)
+    val found = current ?: controls.subagentRuns[call.callId] ?: agent?.let { SubagentRows.childOf(it, controls.models) }
+    // A row that still says running is up to a list refresh behind the notice that said the child ended; its stream is not.
+    val child = if (!live && ending != null && found?.status == SubagentChild.Status.Running) found.copy(status = ending, waiting = false)
+        else found ?: ending?.let { SubagentChild(status = it) }
     return SubagentState(child, agent, SubagentRows.look(call, subagent, child, latest))
 }
 
