@@ -285,6 +285,7 @@ fun QueueStack(
         // A leaving card holds the deck's top where it stood, and lets it down with its fold: its own height and the
         // gap over the card under it; but for a card handed over to its bubble, which gives its room up at once.
         var stays = if (n > 0) 1f else 0f
+        var folding = false
         for ((g, id) in gone.withIndex()) {
             val m = motions[id] ?: continue
             val exit = exits.leaving[id]
@@ -292,12 +293,18 @@ fun QueueStack(
             val e = exit?.progress?.value ?: 1f
             if (shown(m.depthNow()) > 0f) top = minOf(top, (m.y?.value ?: 0f) + (ghosts[g].height + gap) * e)
             stays = maxOf(stays, 1f - e)
+            folding = folding || exit != null
         }
         // The cards that stay spring into their places with a touch of overshoot, which would dip the deck's top and
         // the transcript over the dock with it. The deck springs to where the cards will rest instead, never lower
         // than where they are drawn, and without the cards' dip below it; but for a card handed over to its bubble.
+        // While a card folds, the fold alone lets the deck down, and the spring takes over from where it leaves it.
         val handedOver = motions.keys.any { it !in ids && delivered(it) }
-        val floor = (if (handedOver) Animatable(-rest) else deckMotion.height.springTo(-rest, live, scope, heightSpec)).also { deckMotion.height = it }
+        val floor = when {
+            handedOver -> Animatable(-rest)
+            folding -> Animatable(-top)
+            else -> deckMotion.height.springTo(-rest, live, scope, heightSpec)
+        }.also { deckMotion.height = it }
         val deck = maxOf(ceil(-top).toInt(), if (live) floor.value.roundToInt() else 0).coerceAtLeast(0)
         val share = handleShare.value
         val lead = (handle.height * share).roundToInt()
