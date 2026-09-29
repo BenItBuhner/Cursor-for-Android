@@ -749,7 +749,8 @@ class ConversationRepository(
          * the message waited behind — else, by position from the newest; a copy whose count reaches no newer run
          * was delivered into the run under way (the account promoted it): it is filed among that run's rows after
          * the story streamed so far. A message whose run the account named when it took it is that run's prompt: it
-         * is filed there once the run has started ([hasStarted]), the transcript's copy or not.
+         * is filed there once the run has started ([hasStarted]), the transcript's copy or not, or once the
+         * transcript carries its copy, the run started or not.
          */
         fun fileInFrame(fileSteers: Boolean): List<Pair<Awaiting, LocalPrompt>> {
             adoptWanted = false
@@ -767,18 +768,22 @@ class ConversationRepository(
                 val wanted = normalizePrompt(a.staged.text)
                 // The run the account named when it took the message, once this device knows it: the message is that
                 // run's prompt, filed there the moment the run has started — its echo standing in until the transcript
-                // has its copy — and not before, the card being its place while it waits. One the account has let go
+                // has its copy — and not before, bar a transcript carrying that copy already, the card being its place
+                // while it waits. One the account has let go
                 // of before that run started went another way (sent into the turn under way from the card): the
                 // transcript says where, below.
                 val named = a.runId?.let { id -> ordered.firstOrNull { it.id == id } }
                 if (named != null && (a.queuedOnAccount || hasStarted(named.id, a.behindRunId))) {
-                    if (named.id in taken || local.any { it.run.id == named.id && it.steeredAfter == null } || !hasStarted(named.id, a.behindRunId)) continue
+                    // The account writes the prompt into the conversation only on delivery: a transcript holding its
+                    // new copy has it delivered, though this device still follows the turn it waited behind.
+                    val copied = messages.count { it.type == USER_MESSAGE && normalizePrompt(it.text) == wanted } > a.priorTranscriptCopies
+                    if (named.id in taken || local.any { it.run.id == named.id && it.steeredAfter == null } || (!copied && !hasStarted(named.id, a.behindRunId))) continue
                     // The turn it waited behind may have taken it between its steps and answered it (a Project's
                     // coordinator does): the transcript's copy is followed by an answer that turn's own story carries.
                     // Then it is that turn's, drawn above the answer, not ahead of the named run below it all. Only a
                     // frame with the transcript read alongside may say which (see [adoptDelivered]), or one whose
                     // transcript holds the message's copy already: an older one may predate the turn's taking it.
-                    if (!fileSteers && messages.count { it.type == USER_MESSAGE && normalizePrompt(it.text) == wanted } <= a.priorTranscriptCopies) { adoptWanted = true; continue }
+                    if (!fileSteers && !copied) { adoptWanted = true; continue }
                     val intoTurn = takenInto(a.staged.message, wanted, named, minCopies = a.priorTranscriptCopies + 1)
                     if (intoTurn != null) { file(a, intoTurn, wanted, filed); continue }
                     taken += named.id
