@@ -51,6 +51,7 @@ import com.cursorforandroid.util.AppClock
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -272,6 +273,11 @@ class NewAgentViewModel(
     private var agents: List<Agent> = emptyList()
     /** Live workers and pools from the fleet endpoints; merged with [agents] for the device picker. */
     private var liveDevices: List<DeviceOption> = emptyList()
+    /**
+     * The model list's load under way — the first one or a refresh asked for — which a refresh tapped meanwhile
+     * waits on rather than repeats: one spinner, cleared by the load that set it, and one answer, applied once.
+     */
+    private var modelsLoad: Job? = null
     /** The account's branches for each repository asked about this session (see [AppGraph.accountBranches]). */
     private val accountBranches = ConcurrentHashMap<String, List<AccountBranch>>()
 
@@ -344,7 +350,7 @@ class NewAgentViewModel(
                 followRepositories()
             }
             launch {
-                loadModels()
+                loadModelsOnce(force = false).join()
                 followModels()
             }
             launch { loadDevices() }
@@ -933,15 +939,18 @@ class NewAgentViewModel(
         _state.update { it.copy(isLoadingRepos = false) }
     }
 
-    fun refreshModels() = viewModelScope.launch { loadModels(force = true) }
+    fun refreshModels(): Job = loadModelsOnce(force = true)
 
-    fun refreshDevices() = viewModelScope.launch { loadDevices() }
+    private fun loadModelsOnce(force: Boolean): Job =
+        modelsLoad?.takeIf { it.isActive } ?: viewModelScope.launch { loadModels(force) }.also { modelsLoad = it }
 
-    private suspend fun loadDevices() {
+    fun refreshDevices() = viewModelScope.launch { loadDevices(force = true) }
+
+    private suspend fun loadDevices(force: Boolean = false) {
         _state.update { it.copy(isLoadingDevices = true) }
         liveDevices = graph.catalog.devices.value
         _state.update { it.withPickerLists() }
-        liveDevices = graph.catalog.loadDevices().getOrDefault(emptyList())
+        liveDevices = graph.catalog.loadDevices(force).getOrDefault(emptyList())
         _state.update { it.copy(isLoadingDevices = false).withPickerLists() }
     }
 

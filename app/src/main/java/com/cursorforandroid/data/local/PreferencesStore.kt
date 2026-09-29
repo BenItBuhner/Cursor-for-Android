@@ -228,18 +228,25 @@ class PreferencesStore(
         if (!sessionClearFailed) p else p.toMutablePreferences().apply { sessionKeys.forEach { this -= it } }
     }
 
+    /**
+     * [this] only when one of [keys] has changed: what a flow decodes from them (JSON, mostly) is decoded once per
+     * change of its own rather than on every write to the file.
+     */
+    private fun Flow<Preferences>.changedIn(vararg keys: Preferences.Key<*>): Flow<Preferences> =
+        distinctUntilChanged { old, new -> keys.all { old[it] == new[it] } }
+
     // ---- app updates (device-level; deliberately untouched by clearSession) --------------------------------------
 
     /** Check GitHub for new releases in the background, download them on Wi-Fi and install when the app is idle. On by default. */
-    val autoUpdate: Flow<Boolean> = data.map { it[Keys.autoUpdate] ?: true }
+    val autoUpdate: Flow<Boolean> = data.map { it[Keys.autoUpdate] ?: true }.distinctUntilChanged()
 
-    val updateLastCheckedAt: Flow<Long?> = data.map { it[Keys.updateLastCheckedAt] }
+    val updateLastCheckedAt: Flow<Long?> = data.map { it[Keys.updateLastCheckedAt] }.distinctUntilChanged()
 
     /** versionCode of the update whose install session was committed; equal to the running build once it succeeded. */
-    val pendingUpdateVersionCode: Flow<Int?> = data.map { it[Keys.pendingUpdateVersionCode] }
+    val pendingUpdateVersionCode: Flow<Int?> = data.map { it[Keys.pendingUpdateVersionCode] }.distinctUntilChanged()
 
     /** versionCode the "ready to install" notification was last shown for, so it is posted once per release. */
-    val notifiedUpdateVersionCode: Flow<Int?> = data.map { it[Keys.notifiedUpdateVersionCode] }
+    val notifiedUpdateVersionCode: Flow<Int?> = data.map { it[Keys.notifiedUpdateVersionCode] }.distinctUntilChanged()
 
     suspend fun setAutoUpdate(enabled: Boolean) = edit { it[Keys.autoUpdate] = enabled }
 
@@ -256,14 +263,14 @@ class PreferencesStore(
      * build and the boot it was published on, as `WidgetPreviews` writes them. The system keeps two publishes an hour
      * per widget and forgets every preview on a reboot, so this is what says which are due.
      */
-    val widgetPreviewsPublished: Flow<Set<String>> = data.map { it[Keys.widgetPreviewsPublished] ?: emptySet() }
+    val widgetPreviewsPublished: Flow<Set<String>> = data.map { it[Keys.widgetPreviewsPublished] ?: emptySet() }.distinctUntilChanged()
 
     suspend fun setWidgetPreviewsPublished(entries: Set<String>) = edit { it[Keys.widgetPreviewsPublished] = entries }
 
     // ---- crash reports (device-level; a consent, so it outlives the account and is never assumed) ----------------
 
     /** Send anonymous crash reports (crash/CrashReporting.kt). Off until the user turns it on; nothing is sent before. */
-    val crashReports: Flow<Boolean> = data.map { it[Keys.crashReports] ?: false }
+    val crashReports: Flow<Boolean> = data.map { it[Keys.crashReports] ?: false }.distinctUntilChanged()
 
     suspend fun setCrashReports(enabled: Boolean) = edit { it[Keys.crashReports] = enabled }
 
@@ -282,7 +289,7 @@ class PreferencesStore(
      * not a set: the installed version only ever moves on, and the surfaces that lead to the page show while the
      * installed version is not this one — so they come back, by themselves, with the next release installed.
      */
-    val whatsNewReadVersion: Flow<String?> = data.map { it[Keys.whatsNewReadVersion] }
+    val whatsNewReadVersion: Flow<String?> = data.map { it[Keys.whatsNewReadVersion] }.distinctUntilChanged()
 
     suspend fun setWhatsNewReadVersion(versionName: String) = edit { it[Keys.whatsNewReadVersion] = versionName }
 
@@ -292,7 +299,7 @@ class PreferencesStore(
      * Whether a tap that would stop, pause or interrupt a running agent asks first (see `RunStopConfirmation`). On by
      * default, and on for every install that predates the setting: only the user turning it off here writes it off.
      */
-    val confirmStop: Flow<Boolean> = data.map { it[Keys.confirmStop] ?: true }
+    val confirmStop: Flow<Boolean> = data.map { it[Keys.confirmStop] ?: true }.distinctUntilChanged()
 
     suspend fun setConfirmStop(enabled: Boolean) = edit { it[Keys.confirmStop] = enabled }
 
@@ -300,7 +307,7 @@ class PreferencesStore(
      * Whether a queue of more than a couple of follow-ups stands as a deck over the composer (`QueueStack`) rather than
      * as the full list: stacked until the reader opens one, then open in every chat until they stack one again.
      */
-    val queueStacked: Flow<Boolean> = data.map { it[Keys.queueStacked] ?: true }
+    val queueStacked: Flow<Boolean> = data.map { it[Keys.queueStacked] ?: true }.distinctUntilChanged()
 
     suspend fun setQueueStacked(stacked: Boolean) = edit { it[Keys.queueStacked] = stacked }
 
@@ -310,23 +317,23 @@ class PreferencesStore(
      * Whether the app may call Cursor's undocumented `api2` endpoints (see `domain/Capabilities.kt`). Off by default,
      * and off for every install that predates the setting: it is never inferred from what the app used to do.
      */
-    val extendedMode: Flow<Boolean> = data.map { it[Keys.extendedMode] ?: false }
+    val extendedMode: Flow<Boolean> = data.map { it[Keys.extendedMode] ?: false }.distinctUntilChanged()
 
     /** When the user acknowledged what Extended mode involves (epoch millis); null until they have, which is what keeps it off. */
-    val extendedModeAcknowledgedAt: Flow<Long?> = data.map { it[Keys.extendedModeAcknowledgedAt] }
+    val extendedModeAcknowledgedAt: Flow<Long?> = data.map { it[Keys.extendedModeAcknowledgedAt] }.distinctUntilChanged()
 
     /** True once a build with the Extended mode setting has run on this install, so the one-time upgrade steps run once. */
-    val extendedModeIntroduced: Flow<Boolean> = data.map { it[Keys.extendedModeIntroduced] ?: false }
+    val extendedModeIntroduced: Flow<Boolean> = data.map { it[Keys.extendedModeIntroduced] ?: false }.distinctUntilChanged()
 
     /** True while the notice about features that now need Extended mode has yet to be shown to an upgraded install. */
-    val extendedModeNoticePending: Flow<Boolean> = data.map { it[Keys.extendedModeNoticePending] ?: false }
+    val extendedModeNoticePending: Flow<Boolean> = data.map { it[Keys.extendedModeNoticePending] ?: false }.distinctUntilChanged()
 
     /**
      * The transcript engine Extended mode renders with (see `TranscriptEngine`): Beta unless Stable was chosen here —
      * for every install, upgrades included. Only the Settings switch writes it, so an absent key is an install that
      * never chose and follows the default, and a stored `stable` is an explicit opt-out that stays.
      */
-    val transcriptEngine: Flow<TranscriptEngine> = data.map { TranscriptEngine.parse(it[Keys.transcriptEngine]) }
+    val transcriptEngine: Flow<TranscriptEngine> = data.map { TranscriptEngine.parse(it[Keys.transcriptEngine]) }.distinctUntilChanged()
 
     suspend fun setTranscriptEngine(engine: TranscriptEngine) = edit { it[Keys.transcriptEngine] = engine.key }
 
@@ -351,7 +358,7 @@ class PreferencesStore(
      * `data/repo/Onboarding.kt`). Set by a sign-in through the sign-in screen and never by a restored session, so an
      * install that already had an account when the choice arrived is not asked; cleared with the rest of the account.
      */
-    val modeChoicePending: Flow<Boolean> = accountData.map { it[Keys.modeChoicePending] ?: false }
+    val modeChoicePending: Flow<Boolean> = accountData.map { it[Keys.modeChoicePending] ?: false }.distinctUntilChanged()
 
     suspend fun setModeChoicePending(pending: Boolean): Boolean {
         beginSession()
@@ -375,12 +382,12 @@ class PreferencesStore(
     }
 
     /** True once this account's first sync has pushed the pins that were made on this device before syncing existed. */
-    val pinsMigrated: Flow<Boolean> = accountData.map { it[Keys.pinsMigrated] ?: false }
+    val pinsMigrated: Flow<Boolean> = accountData.map { it[Keys.pinsMigrated] ?: false }.distinctUntilChanged()
 
     suspend fun setPinsMigrated(migrated: Boolean) = edit { it[Keys.pinsMigrated] = migrated }
 
     /** agentId -> pinned, for pin changes made here that the server has not acknowledged yet (offline, or a failed call). */
-    val pendingPinChanges: Flow<Map<String, Boolean>> = accountData.map { p -> p[Keys.pendingPins]?.let(::decodePendingPins) ?: emptyMap() }
+    val pendingPinChanges: Flow<Map<String, Boolean>> = accountData.changedIn(Keys.pendingPins).map { p -> p[Keys.pendingPins]?.let(::decodePendingPins) ?: emptyMap() }
 
     /** Records [pinned] as awaiting the server, or forgets the entry when [pinned] is null. */
     suspend fun setPendingPinChange(agentId: String, pinned: Boolean?) = edit { p ->
@@ -403,7 +410,7 @@ class PreferencesStore(
     suspend fun setPinnedIds(agentIds: Set<String>) = edit { it[Keys.pinned] = agentIds }
 
     /** Model ids the user pinned in the picker, most recently pinned first, so they stay at the top of the list. */
-    val pinnedModelIds: Flow<List<String>> = data.map { p ->
+    val pinnedModelIds: Flow<List<String>> = data.changedIn(Keys.pinnedModels).map { p ->
         p[Keys.pinnedModels]?.let { runCatching { CursorJson.decodeFromString(ListSerializer(String.serializer()), it) }.getOrNull() } ?: emptyList()
     }
 
@@ -421,7 +428,7 @@ class PreferencesStore(
      * survives restarts and sign-outs alike, since which groups sit closed is about how this reader reads the list,
      * not about the account.
      */
-    val collapsedSidebarSections: Flow<Set<String>> = data.map { it[Keys.collapsedSidebarSections] ?: emptySet() }
+    val collapsedSidebarSections: Flow<Set<String>> = data.map { it[Keys.collapsedSidebarSections] ?: emptySet() }.distinctUntilChanged()
 
     /** Folds the sidebar group [sectionKey] closed, or opens it again; idempotent, so a repeated tap settles rather than flips. */
     suspend fun setSidebarSectionCollapsed(sectionKey: String, collapsed: Boolean) = edit { p ->
@@ -434,7 +441,7 @@ class PreferencesStore(
      * Whether a long Projects or Pinned group lists only its first five rows until "Show N more" is tapped. On by
      * default; a device preference like the folds, kept across sign-outs. Which rows are listed in full is never kept.
      */
-    val shortenSidebarLists: Flow<Boolean> = data.map { it[Keys.shortenSidebarLists] ?: true }
+    val shortenSidebarLists: Flow<Boolean> = data.map { it[Keys.shortenSidebarLists] ?: true }.distinctUntilChanged()
 
     suspend fun setShortenSidebarLists(enabled: Boolean) = edit { it[Keys.shortenSidebarLists] = enabled }
 
@@ -443,7 +450,7 @@ class PreferencesStore(
      * is written only when it is flipped, so whoever turned it off while it was an experiment keeps it off, and whoever
      * never touched it has it on.
      */
-    val liveSync: Flow<Boolean> = data.map { it[Keys.liveSync] ?: true }
+    val liveSync: Flow<Boolean> = data.map { it[Keys.liveSync] ?: true }.distinctUntilChanged()
 
     suspend fun setLiveSync(enabled: Boolean) = edit { it[Keys.liveSync] = enabled }
 
@@ -497,7 +504,7 @@ class PreferencesStore(
      * its condition clears and comes back (see `NoticeDismissals`). The account's, like its pins and read markers —
      * a closed notice is about the account's chat — so a sign-out takes them with it.
      */
-    val dismissedNotices: Flow<Map<String, Set<String>>> = accountData.map { p ->
+    val dismissedNotices: Flow<Map<String, Set<String>>> = accountData.changedIn(Keys.dismissedNotices).map { p ->
         p[Keys.dismissedNotices]?.let(::decodeDismissedNotices)?.mapValues { it.value.toSet() } ?: emptyMap()
     }
 
@@ -519,7 +526,7 @@ class PreferencesStore(
     }
 
     /** Project / synced skill names the user typed into the "+" menu, most recent first, so they stay one tap away. */
-    val recentSkills: Flow<List<String>> = data.map { p ->
+    val recentSkills: Flow<List<String>> = data.changedIn(Keys.recentSkills).map { p ->
         p[Keys.recentSkills]?.let { runCatching { CursorJson.decodeFromString(ListSerializer(String.serializer()), it) }.getOrNull() } ?: emptyList()
     }
 
@@ -530,10 +537,10 @@ class PreferencesStore(
     }
 
     /** Live notification for running agents (the Android counterpart of iOS Live Activities). On by default. */
-    val liveNotifications: Flow<Boolean> = data.map { it[Keys.liveNotifications] ?: true }
+    val liveNotifications: Flow<Boolean> = data.map { it[Keys.liveNotifications] ?: true }.distinctUntilChanged()
 
     /** True once the POST_NOTIFICATIONS prompt has been shown, so a refusal is not nagged about. */
-    val notificationPermissionAsked: Flow<Boolean> = data.map { it[Keys.notificationPermissionAsked] ?: false }
+    val notificationPermissionAsked: Flow<Boolean> = data.map { it[Keys.notificationPermissionAsked] ?: false }.distinctUntilChanged()
 
     suspend fun setLiveNotifications(enabled: Boolean) = edit { it[Keys.liveNotifications] = enabled }
 
@@ -554,17 +561,20 @@ class PreferencesStore(
 
     val themeMode: Flow<ThemeMode> = data.map { p ->
         p[Keys.theme]?.let { raw -> ThemeMode.entries.firstOrNull { it.name == raw } } ?: ThemeMode.System
-    }
+    }.distinctUntilChanged()
 
     /** True-black surfaces while the resolved theme is dark (Cursor Dark, or Match system at night). Off by default. */
-    val oledBlack: Flow<Boolean> = data.map { it[Keys.oledBlack] ?: false }
+    val oledBlack: Flow<Boolean> = data.map { it[Keys.oledBlack] ?: false }.distinctUntilChanged()
 
-    val listPreferences: Flow<ListPreferences> = data.map { it.listPreferences() }
+    val listPreferences: Flow<ListPreferences> = data.changedIn(Keys.listPrefs).map { it.listPreferences() }
 
     private fun Preferences.listPreferences(): ListPreferences =
         this[Keys.listPrefs]?.let { ListPreferences.decode(CursorJson, it) } ?: ListPreferences()
 
-    val localAgentState: Flow<LocalAgentState> = accountData.map { p ->
+    val localAgentState: Flow<LocalAgentState> = accountData.changedIn(
+        Keys.pinned, Keys.readMarkers, Keys.launchedHere, Keys.snoozedUntil, Keys.snoozedAt, Keys.touchedHere,
+        Keys.unreadOnlyTouchedHere, Keys.demoMode, Keys.projectOrder,
+    ).map { p ->
         LocalAgentState(
             pinnedIds = p[Keys.pinned] ?: emptySet(),
             readMarkers = p[Keys.readMarkers]?.let { decodeMarkers(it) } ?: emptyMap(),
@@ -595,13 +605,13 @@ class PreferencesStore(
      * Settings › "Unread only for chats from this phone" (see `LocalAgentState.unreadOnlyTouchedHere`). On by default;
      * the device's, like the theme: it is about what this phone shows, so a sign-out leaves it as it was.
      */
-    val unreadOnlyTouchedHere: Flow<Boolean> = data.map { it[Keys.unreadOnlyTouchedHere] ?: true }
+    val unreadOnlyTouchedHere: Flow<Boolean> = data.map { it[Keys.unreadOnlyTouchedHere] ?: true }.distinctUntilChanged()
 
     suspend fun setUnreadOnlyTouchedHere(enabled: Boolean) = edit { it[Keys.unreadOnlyTouchedHere] = enabled }
 
-    val demoMode: Flow<Boolean> = accountData.map { it[Keys.demoMode] ?: false }
+    val demoMode: Flow<Boolean> = accountData.map { it[Keys.demoMode] ?: false }.distinctUntilChanged()
 
-    val cachedUser: Flow<CursorUser?> = accountData.map { p ->
+    val cachedUser: Flow<CursorUser?> = accountData.changedIn(Keys.cachedUser).map { p ->
         p[Keys.cachedUser]?.let { runCatching { CursorJson.decodeFromString(CachedUser.serializer(), it) }.getOrNull() }
             ?.let { CursorUser(it.apiKeyName, it.email, it.firstName, it.lastName, it.userId, it.profilePictureUrl) }
     }
@@ -610,7 +620,7 @@ class PreferencesStore(
     val credentialInfo: Flow<CredentialInfo?> = accountData.map { p ->
         val method = p[Keys.signInMethod]?.let { raw -> SignInMethod.entries.firstOrNull { it.name == raw } }
         method?.let { CredentialInfo(it, p[Keys.apiKeyExpiresAt]) }
-    }
+    }.distinctUntilChanged()
 
     data class ComposerDefaults(
         val repoUrl: String?,
@@ -632,7 +642,10 @@ class PreferencesStore(
         val modelChosenAtMillis: Long = 0L,
     )
 
-    val composerDefaults: Flow<ComposerDefaults> = data.map { p ->
+    val composerDefaults: Flow<ComposerDefaults> = data.changedIn(
+        Keys.lastRepo, Keys.lastRef, Keys.lastModel, Keys.lastModelParams, Keys.lastEnvType, Keys.lastEnvName,
+        Keys.lastCloudRepo, Keys.lastModelAt,
+    ).map { p ->
         ComposerDefaults(
             repoUrl = p[Keys.lastRepo],
             ref = p[Keys.lastRef],

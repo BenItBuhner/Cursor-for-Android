@@ -18,14 +18,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorforandroid.data.repo.ContextState
@@ -79,9 +82,10 @@ internal fun LazyListScope.projectSection(
     busy: Boolean,
     actions: ProjectActions,
     nowMillis: Long,
+    clock: State<Long>? = null,
 ) {
     sectionRow("project-summary") {
-        ProjectSummary(state, nowMillis, onEditAppearance = if (state.actionsAvailable) actions.onEditAppearance else null, enabled = !busy)
+        ProjectSummary(state, nowMillis, clock, onEditAppearance = if (state.actionsAvailable) actions.onEditAppearance else null, enabled = !busy)
     }
 
     sectionRow("project-primaries-label") {
@@ -96,7 +100,7 @@ internal fun LazyListScope.projectSection(
         }
     }
     sectionRows(state.workers.distinctBy { it.agent.id }, key = { "project-primary-${it.agent.id}" }, contentType = { "project-primary" }) { worker ->
-        WorkerRow(worker, local, nowMillis, actionsAvailable = state.actionsAvailable, busy = busy, actions = actions)
+        WorkerRow(worker, local, nowMillis, clock, actionsAvailable = state.actionsAvailable, busy = busy, actions = actions)
     }
     state.lineageNotice?.let { notice -> sectionRow("project-lineage-notice") { NoticeRow(notice) } }
     if (state.actionsAvailable) {
@@ -111,7 +115,7 @@ internal fun LazyListScope.projectSection(
     if (state.subagents.isNotEmpty()) {
         sectionRow("project-subagents-label") { SectionLabel("Subagents \u00B7 ${state.subagents.size}") }
         sectionRows(state.subagents.distinctBy { it.id }, key = { "project-subagent-${it.id}" }, contentType = { "project-subagent" }) { sub ->
-            AgentLine(sub, local, nowMillis, subtitle = "Cloud subagent", onOpen = { actions.onOpenAgent(sub) })
+            AgentLine(sub, local, nowMillis, clock, subtitle = "Cloud subagent", onOpen = { actions.onOpenAgent(sub) })
         }
     }
 
@@ -147,7 +151,7 @@ internal class ProjectActions(
  * last moved — and, in Extended mode, the pencil that opens the Project editor (name, icon and colour).
  */
 @Composable
-private fun ProjectSummary(state: ProjectViewState, nowMillis: Long, onEditAppearance: (() -> Unit)?, enabled: Boolean) {
+private fun ProjectSummary(state: ProjectViewState, nowMillis: Long, clock: State<Long>?, onEditAppearance: (() -> Unit)?, enabled: Boolean) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
     val root = state.root
@@ -159,11 +163,12 @@ private fun ProjectSummary(state: ProjectViewState, nowMillis: Long, onEditAppea
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            val detail = buildList {
-                add("${state.workers.size} ${if (state.workers.size == 1) "primary" else "primaries"}")
-                root?.let { add("updated ${TimeFormat.relativeShort(it.listedAtMillis, nowMillis)}") }
+            AgeLine(nowMillis, clock, type.small, colors.textQuaternary) { now ->
+                buildList {
+                    add("${state.workers.size} ${if (state.workers.size == 1) "primary" else "primaries"}")
+                    root?.let { add("updated ${TimeFormat.relativeShort(it.listedAtMillis, now)}") }
+                }.joinToString(" \u00B7 ")
             }
-            Text(detail.joinToString(" \u00B7 "), style = type.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (running > 0 || needsInput > 0) {
                 Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (running > 0) Pill("$running working", tint = colors.textPrimary)
@@ -228,6 +233,7 @@ internal fun WorkerRow(
     worker: ProjectWorker,
     local: LocalAgentState,
     nowMillis: Long,
+    clock: State<Long>?,
     actionsAvailable: Boolean,
     busy: Boolean,
     actions: ProjectActions,
@@ -244,8 +250,7 @@ internal fun WorkerRow(
     val detail = buildList {
         worker.spawnKind?.let { add(it.label) }
         agent.branchName?.let { add(it) } ?: agent.repoShortName?.let { add(it) }
-        if (agent.listedAtMillis > 0) add(TimeFormat.relativeShort(agent.listedAtMillis, nowMillis))
-    }.joinToString(" \u00B7 ")
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -268,7 +273,11 @@ internal fun WorkerRow(
                     Pill("Needs input", tint = colors.orange, fill = colors.orange.copy(alpha = 0.14f))
                 }
             }
-            if (detail.isNotEmpty()) Text(detail, style = type.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (detail.isNotEmpty() || agent.listedAtMillis > 0) {
+                AgeLine(nowMillis, clock, type.small, colors.textQuaternary) { now ->
+                    (detail + listOfNotNull(TimeFormat.relativeShort(agent.listedAtMillis, now).takeIf { agent.listedAtMillis > 0 })).joinToString(" \u00B7 ")
+                }
+            }
         }
         Box {
             FlatIconButton(CursorIcons.More, "Actions for ${agent.name}", onClick = { menuAt = null; menuOpen = true }, enabled = !busy)
@@ -291,7 +300,7 @@ internal fun WorkerRow(
 
 /** A chat's row without the worker menu: a subagent, or the coordinator a primary's panel points back to. */
 @Composable
-internal fun AgentLine(agent: Agent, local: LocalAgentState, nowMillis: Long, subtitle: String, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+internal fun AgentLine(agent: Agent, local: LocalAgentState, nowMillis: Long, clock: State<Long>?, subtitle: String, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
     val row = remember(agent, local, nowMillis) { AgentListOrganizer.toRow(agent, local, nowMillis) }
@@ -309,10 +318,22 @@ internal fun AgentLine(agent: Agent, local: LocalAgentState, nowMillis: Long, su
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(agent.name, style = type.rowMedium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(subtitle, TimeFormat.relativeShort(agent.listedAtMillis, nowMillis).takeIf { agent.listedAtMillis > 0 }).joinToString(" \u00B7 "), style = type.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            AgeLine(nowMillis, clock, type.small, colors.textQuaternary) { now ->
+                listOfNotNull(subtitle, TimeFormat.relativeShort(agent.listedAtMillis, now).takeIf { agent.listedAtMillis > 0 }).joinToString(" \u00B7 ")
+            }
         }
         Icon(CursorIcons.ChevronRight, null, tint = colors.iconQuaternary, modifier = Modifier.size(14.dp))
     }
+}
+
+/**
+ * A row's line that ends in an age ("3m"): a scope of its own that reads [clock], so the minute tick redraws this
+ * text alone, not the row or the section around it. Without a clock the age holds at [nowMillis].
+ */
+@Composable
+private fun AgeLine(nowMillis: Long, clock: State<Long>?, style: TextStyle, color: Color, text: (now: Long) -> String) {
+    val now = clock?.let { maxOf(nowMillis, it.value) } ?: nowMillis
+    Text(text(now), style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable
