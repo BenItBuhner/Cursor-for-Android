@@ -1407,13 +1407,6 @@ class AgentRepository(
     }
 
     /**
-     * The rows still without their account record, asked for it by id once the list's work is over (see
-     * [materializeRecords]): its own job, so neither the fetch nor the page that landed the rows — nor a pull, a
-     * page asked for, a pin sync waiting on them — waits on the account service; each record is merged as it lands.
-     * After [prime] (the account's list or page read alongside the public one) has landed or failed: it brings most
-     * records at once, and when the list failed the records by id are not asked either (see [accountListUnread]).
-     */
-    /**
      * The account's list was read again (the pin round's read, or a fetch's): the rows it left bare while it was
      * refused or unanswered are asked for their records by id again (see [accountListUnread]).
      */
@@ -1423,11 +1416,23 @@ class AgentRepository(
         followWithRecords(token())
     }
 
+    /**
+     * The rows still without their account record, asked for it by id once the list's work is over (see
+     * [materializeRecords]): its own job, so neither the fetch nor the page that landed the rows — nor a pull, a
+     * page asked for, a pin sync waiting on them — waits on the account service; each record is merged as it lands.
+     * After [prime] (the account's list or page read alongside the public one) has landed or failed: it brings most
+     * records at once, and when the list failed the records by id are not asked either (see [accountListUnread]).
+     *
+     * Registered in [pending] before it is launched and until it is over, the wait for [prime] and for another pass's
+     * [recordMutex] included: otherwise the list reads as idle with a pass still to come, and a row it holds back
+     * until placed (see [holdUntilPlaced]) is drawn by a record that lands after whatever trusted the idle list.
+     */
     private fun followWithRecords(startedIn: Int, prime: Job? = null) {
+        val work = pending.begin("account records by id (follow-up)")
         scope.launch {
             prime?.join()
             stats.timed("account records by id", calls = { n: Int -> n }) { materializeRecords(startedIn) }
-        }
+        }.invokeOnCompletion { pending.end(work) }
     }
 
     private suspend fun fetch(silent: Boolean, depth: RefreshDepth) {
