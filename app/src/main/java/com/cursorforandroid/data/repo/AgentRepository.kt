@@ -1,5 +1,6 @@
 package com.cursorforandroid.data.repo
 
+import androidx.annotation.VisibleForTesting
 import com.cursorforandroid.data.api.AgentStartApi
 import com.cursorforandroid.data.api.ComposerLifecycleApi
 import com.cursorforandroid.data.api.ComposerSnapshot
@@ -65,6 +66,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -87,6 +89,7 @@ import java.io.IOException
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 data class AgentListState(
     val agents: List<Agent> = emptyList(),
@@ -128,6 +131,34 @@ data class AgentListState(
             byParent.getOrPut(parent.id) { ArrayList() }.add(agent)
         }
         byParent
+    }
+
+    /** The row with [id], the first when the list holds it twice; by index, not a pass over the list. */
+    fun agent(id: String): Agent? = indexOf(id).takeIf { it >= 0 }?.let { agents[it] }
+
+    /** Where [agent] finds a row. Built once per list; a list that only replaced rows in place carries it over ([withRowsInPlace]). */
+    @Volatile private var rowIndex: RowIndex? = null
+
+    private fun rowIndex(): RowIndex = rowIndex ?: synchronized(this) { rowIndex ?: RowIndex(agents).also { rowIndex = it } }
+
+    internal fun indexOf(id: String): Int = rowIndex().positions[id] ?: -1
+
+    /** True when an id is held twice: a replacement by id then touches every copy, which the index cannot tell. */
+    internal val hasDuplicateIds: Boolean get() = rowIndex().duplicates
+
+    /** True once [agent] can answer without building its index. */
+    internal val isIndexed: Boolean get() = rowIndex != null
+
+    /** This list with [rows] for its rows: the same ids at the same positions, so the index is shared rather than rebuilt. */
+    internal fun withRowsInPlace(rows: List<Agent>): AgentListState = copy(agents = rows).also { it.rowIndex = rowIndex }
+
+    private class RowIndex(agents: List<Agent>) {
+        val positions = HashMap<String, Int>(agents.size * 4 / 3 + 1)
+        var duplicates = false
+
+        init {
+            agents.forEachIndexed { i, agent -> if (positions.putIfAbsent(agent.id, i) != null) duplicates = true }
+        }
     }
 }
 
@@ -521,6 +552,26 @@ class AgentRepository(
      */
     private data class PendingRecord(val fields: RecordFields, val activityAtMillis: Long?)
 
+    /**
+     * Moved after every write, outside [classified] itself, to what it reads beside the rows — [placements],
+     * [rootRecords], [endedRuns], [pendingRecords], [holdUntilPlaced] (see [inputsMoved]). While it stands where
+     * the last full pass read it, a row the list already held classifies as that pass left it, so a publication that
+     * replaced a few rows classifies those alone (see [publishRows]). A write that skips [inputsMoved] leaves rows
+     * unplaced until the next full pass.
+     */
+    private val placementInputs = AtomicLong()
+
+    /** The list the last classification published, and [placementInputs] as that pass read them. Guarded by [publishLock]. */
+    private var classifiedList: AgentListState? = null
+    private var classifiedInputs = -1L
+
+    /** False: every publication classifies the whole list, the reference the tests hold [publishRows] to. */
+    @VisibleForTesting internal var classifyRowsAlone = true
+
+    private fun inputsMoved() {
+        placementInputs.incrementAndGet()
+    }
+
     /** Epoch millis of the last completed fetch for the current backend; zero before the first one and after a [reset]. */
     @Volatile var lastRefreshedAt: Long = 0L
         private set
@@ -578,7 +629,13 @@ class AgentRepository(
         }
     }
 
-    fun agent(id: String): Agent? = _state.value.agents.firstOrNull { it.id == id }
+    fun agent(id: String): Agent? = _state.value.agent(id)
+
+    /**
+     * The row with [id] as the list publishes it, emitted when that row changes: one lookup per publication rather
+     * than a pass over the list, and nothing downstream while other rows move.
+     */
+    fun row(id: String): Flow<Agent?> = _state.map { it.agent(id) }.distinctUntilChanged()
 
     /** Forgets the list on sign-out, so the next account never sees the previous one's agents, not even from a fetch still in flight. */
     fun reset() {
@@ -617,6 +674,7 @@ class AgentRepository(
         runStarts.clear()
         overruledRunning.clear()
         synchronized(launchTraces) { launchTraces.clear() }
+        inputsMoved()
     }
 
     /**
@@ -654,6 +712,7 @@ class AgentRepository(
             val held = endedRuns[agentId]
             if (held != null && held.runId != runId && held.startedAtMillis != null && startedAt != null && startedAt < held.startedAtMillis) return
             endedRuns[agentId] = EndedRun(runId, status, startedAt)
+            inputsMoved()
         }
     }
 
@@ -753,6 +812,7 @@ class AgentRepository(
     }
 
     private fun publishRoots() {
+        inputsMoved()
         _knownRoots.value = rootRecords.values.sortedByDescending { it.lastSeenMillis }
         registryChanges.update { it + 1 }
     }
@@ -795,7 +855,7 @@ class AgentRepository(
                         rootFailures.remove(id)
                         synchronized(publishLock) {
                             if (generation.get() == startedIn) {
-                                placements.remove(id)
+                                if (placements.remove(id) != null) inputsMoved()
                                 forgetRoot(id)
                             }
                         }
@@ -859,19 +919,53 @@ class AgentRepository(
             if (skipUnchanged && next === previous) return true
             // Every publication ends with the classification pass: whatever [transform] did to the rows — merged a
             // page, folded in a record, restored the disk — each row is placed by what is known of its lineage.
+            val inputs = placementInputs.get()
             _state.value = next.classified()
+            classifiedList = _state.value
+            classifiedInputs = inputs
             publishCounts.passes.incrementAndGet()
             if (_state.value !== previous) publishCounts.changes.incrementAndGet()
             true
         }
 
     /**
-     * What the list's publications have cost, counted: every pass of [classified] ([passes]) and every publication
-     * that changed the list its collectors see ([changes]; the flow keeps the list it holds when an equal one is
-     * published). For the benchmarks: each change is a pass of every collector of [state].
+     * True when every row of [list] classifies as the last full pass left it: [list] is what that pass (or a
+     * publication of rows since) published, nothing it reads beside the rows has moved, and no hold is waiting on
+     * the clock. Under [publishLock].
+     */
+    private fun rowsStayClassified(list: AgentListState): Boolean =
+        classifyRowsAlone && list === classifiedList && placementInputs.get() == classifiedInputs &&
+            list.awaitingPlacement.isEmpty() && holdUntilPlaced.isEmpty() && !list.hasDuplicateIds
+
+    /**
+     * Publishes [rows] — [previous]'s rows with the ones at [touched] replaced ([inPlace]: ids and order unchanged),
+     * or with one row put in front — classifying only the rows at [touched]; the others classify as they did (see
+     * [rowsStayClassified], which the caller has checked under [publishLock]). Nothing is published when every
+     * touched row classifies to the row it replaced.
+     */
+    private fun publishRows(previous: AgentListState, rows: ArrayList<Agent>, touched: IntArray, inPlace: Boolean) {
+        var changed = !inPlace
+        for (i in touched) {
+            val placed = rows[i].placed().settled()
+            rows[i] = placed
+            if (inPlace && placed != previous.agents[i]) changed = true
+        }
+        publishCounts.rows.addAndGet(touched.size)
+        if (!changed) return
+        _state.value = if (inPlace) previous.withRowsInPlace(rows) else previous.copy(agents = rows)
+        classifiedList = _state.value
+        publishCounts.changes.incrementAndGet()
+    }
+
+    /**
+     * What the list's publications have cost, counted: every pass of [classified] over the whole list ([passes]),
+     * every row classified on its own by a publication of a few rows ([rows], see [publishRows]), and every
+     * publication that changed the list its collectors see ([changes]; the flow keeps the list it holds when an
+     * equal one is published). For the benchmarks: each change is a pass of every collector of [state].
      */
     internal class PublishCounts {
         val passes = AtomicInteger()
+        val rows = AtomicInteger()
         val changes = AtomicInteger()
     }
 
@@ -1004,6 +1098,7 @@ class AgentRepository(
         if (current != null && current.signal.isAuthoritative && !signal.isAuthoritative) return false
         if (current != null && current.parent == parent && current.signal == signal) return false
         placements[id] = Placement(parent, signal)
+        inputsMoved()
         registryChanges.update { it + 1 }
         return true
     }
@@ -1081,6 +1176,7 @@ class AgentRepository(
                     // The account's records of chats the rows did not hold, for the pages that bring them: facts
                     // already read, kept in either mode like the records the rows carry.
                     lineage?.records?.forEach { pendingRecords[it.id] = PendingRecord(it.fields, it.activityAtMillis) }
+                    inputsMoved()
                     // Only entries whose record's flag was read with its fields come back: what an older build
                     // admitted on a bare flag, a membership, a transcript or a source is re-learned from the account.
                     lineage?.roots?.filter { it.isEvidencedStrictly }?.forEach { noteRoot(it) }
@@ -1581,6 +1677,7 @@ class AgentRepository(
                 val batch = PublishBatch<Pair<String, ComposerSnapshot?>>(this, PUBLISH_BATCH_MS) { read ->
                     // The account lists no such chat: no record is coming to place it, so its hold goes and it is drawn as it is.
                     val released = read.count { (id, record) -> record == null && holdUntilPlaced.remove(id) != null }
+                    if (released > 0) inputsMoved()
                     val records = read.mapNotNull { it.second }
                     if (records.isNotEmpty()) applyAccountSnapshots(records, startedIn) else if (released > 0) publish(null, startedIn) { it }
                 }
@@ -1848,6 +1945,7 @@ class AgentRepository(
             if (id in held || id in pendingLaunches || placements.containsKey(id) || pendingRecords.containsKey(id) || rootRecords.containsKey(id)) return@forEach
             if (holdUntilPlaced.putIfAbsent(id, now) == null) added = true
         }
+        if (added) inputsMoved()
         if (added) scope.launch {
             delay(PLACEMENT_HOLD_MS)
             publish(null, startedIn) { it }
@@ -2358,7 +2456,10 @@ class AgentRepository(
         // Remembered and patched as one step: a record read landing between the two would put the row back to
         // running for the run just stopped, and the memory is what tells the next read not to.
         synchronized(publishLock) {
-            if (generation.get() == startedIn) endedRuns[agentId] = EndedRun(target, RunStatus.CANCELLED, startOf(agentId, target))
+            if (generation.get() == startedIn) {
+                endedRuns[agentId] = EndedRun(target, RunStatus.CANCELLED, startOf(agentId, target))
+                inputsMoved()
+            }
             patch(agentId, startedIn) { row ->
                 val latest = row.latestRunId?.takeIf(::isDocumentedRunId) ?: target
                 row.copy(latestRunId = latest, runStatus = RunStatus.CANCELLED, lifecycle = AgentLifecycle.IDLE)
@@ -2478,8 +2579,28 @@ class AgentRepository(
     fun applyAccountSnapshots(composers: List<ComposerSnapshot>, startedIn: Int = token()) {
         if (composers.isEmpty()) return
         if (!noteRecords(composers, startedIn)) return
-        publish(null, startedIn) { it.withAccountSnapshots(composers) }
+        synchronized(publishLock) {
+            val s = _state.value
+            if (generation.get() == startedIn && rowsStayClassified(s)) publishAccountRows(s, composers)
+            else publish(null, startedIn) { it.withAccountSnapshots(composers) }
+        }
         noteRunning(composers, startedIn)
+    }
+
+    /** [withAccountSnapshots] for a list whose other rows stay classified: the named rows found by index, and classified alone. */
+    private fun publishAccountRows(s: AgentListState, composers: List<ComposerSnapshot>) {
+        var rows: ArrayList<Agent>? = null
+        val touched = ArrayList<Int>()
+        for (snap in composers.associateBy { it.id }.values) {
+            val at = s.indexOf(snap.id)
+            if (at < 0) continue
+            val agent = s.agents[at]
+            val updated = agent.withSnapshot(snap)
+            if (updated == agent) continue
+            (rows ?: ArrayList(s.agents).also { rows = it })[at] = updated
+            touched += at
+        }
+        rows?.let { publishRows(s, it, touched.toIntArray(), inPlace = true) }
     }
 
     /**
@@ -2491,7 +2612,7 @@ class AgentRepository(
     private fun noteRecords(composers: List<ComposerSnapshot>, startedIn: Int): Boolean = synchronized(publishLock) {
         if (generation.get() != startedIn) return false
         val now = AppClock.now()
-        val held = _state.value.agents.mapTo(HashSet()) { it.id }
+        val list = _state.value
         var kept = false
         composers.forEach { snap ->
             if (snap.scope == AgentScope.PROJECT_ROOT) {
@@ -2506,18 +2627,21 @@ class AgentRepository(
                     LineageSignal.COORDINATOR_CREATED -> true
                     else -> snap.parent != null
                 }
-                if (caughtUp) placements.remove(snap.id)
+                if (caughtUp && placements.remove(snap.id) != null) inputsMoved()
             }
             recordUnresolved.remove(snap.id)
-            if (snap.id !in held) {
+            if (list.indexOf(snap.id) < 0) {
                 val early = PendingRecord(snap.recordFields(), snap.activityAtMillis ?: pendingRecords[snap.id]?.activityAtMillis)
                 if (pendingRecords.put(snap.id, early) != early) kept = true
-            } else {
-                pendingRecords.remove(snap.id)
+            } else if (pendingRecords.remove(snap.id) != null) {
+                inputsMoved()
             }
         }
         // A record kept for a row to come is the registry's to persist, whether or not a row changed.
-        if (kept) registryChanges.update { it + 1 }
+        if (kept) {
+            inputsMoved()
+            registryChanges.update { it + 1 }
+        }
         true
     }
 
@@ -2617,36 +2741,40 @@ class AgentRepository(
         var changed = false
         val next = agents.map { agent ->
             val snap = byId[agent.id] ?: return@map agent
-            val name = snap.name?.trim()?.takeIf { it.isNotEmpty() } ?: agent.name
-            val lifecycle = when (snap.archived) {
-                true -> AgentLifecycle.ARCHIVED
-                false -> if (agent.lifecycle == AgentLifecycle.ARCHIVED) AgentLifecycle.IDLE else agent.lifecycle
-                null -> agent.lifecycle
-            }
-            // The record's fields are the row's; the classification pass ([Agent.placed]) reads the parent link and
-            // the flag from them, over the stamps that still stand.
-            val record = snap.recordFields()
-            val updated = agent.copy(
-                name = name,
-                lifecycle = lifecycle,
-                isProject = snap.isProject,
-                projectAppearance = snap.projectAppearance ?: agent.projectAppearance?.takeIf { snap.isProject },
-                parent = snap.parent,
-                scopeSignal = if (snap.parent != null || snap.isProject) LineageSignal.ACCOUNT_RECORD else null,
-                record = record,
-                source = snap.source ?: agent.source,
-                hasPendingInteraction = snap.hasPendingInteraction,
-                // The account's word on the model outranks what this device remembers sending; a record that names
-                // none leaves what an earlier record said.
-                accountModel = snap.model ?: agent.accountModel,
-                // The record's own time, as the desktop dates the chat (`lastMessageActivityAtMs ?? updatedAtMs`),
-                // taken as it is: not raised to the public row's `updatedAt`, which the account bumps for its own
-                // reasons, nor to when this refresh ran. A record that dates nothing leaves what an earlier one said.
-                activityAtMillis = snap.activityAtMillis ?: agent.activityAtMillis,
-            )
+            val updated = agent.withSnapshot(snap)
             if (updated == agent) agent else updated.also { changed = true }
         }
         return if (changed) copy(agents = next) else this
+    }
+
+    private fun Agent.withSnapshot(snap: ComposerSnapshot): Agent {
+        val name = snap.name?.trim()?.takeIf { it.isNotEmpty() } ?: this.name
+        val lifecycle = when (snap.archived) {
+            true -> AgentLifecycle.ARCHIVED
+            false -> if (this.lifecycle == AgentLifecycle.ARCHIVED) AgentLifecycle.IDLE else this.lifecycle
+            null -> this.lifecycle
+        }
+        // The record's fields are the row's; the classification pass ([Agent.placed]) reads the parent link and
+        // the flag from them, over the stamps that still stand.
+        val record = snap.recordFields()
+        return copy(
+            name = name,
+            lifecycle = lifecycle,
+            isProject = snap.isProject,
+            projectAppearance = snap.projectAppearance ?: projectAppearance?.takeIf { snap.isProject },
+            parent = snap.parent,
+            scopeSignal = if (snap.parent != null || snap.isProject) LineageSignal.ACCOUNT_RECORD else null,
+            record = record,
+            source = snap.source ?: source,
+            hasPendingInteraction = snap.hasPendingInteraction,
+            // The account's word on the model outranks what this device remembers sending; a record that names
+            // none leaves what an earlier record said.
+            accountModel = snap.model ?: accountModel,
+            // The record's own time, as the desktop dates the chat (`lastMessageActivityAtMs ?? updatedAtMs`),
+            // taken as it is: not raised to the public row's `updatedAt`, which the account bumps for its own
+            // reasons, nor to when this refresh ran. A record that dates nothing leaves what an earlier one said.
+            activityAtMillis = snap.activityAtMillis ?: activityAtMillis,
+        )
     }
 
     /**
@@ -2691,6 +2819,7 @@ class AgentRepository(
             if (signal == LineageSignal.MEMBERSHIP && (AgentParentKind.PROJECT_WORKER in retract || members.isNotEmpty())) {
                 revalidateRoot(rootId, membershipWorkers = members.values.count { it == AgentParentKind.PROJECT_WORKER })
             }
+            if (retracted) inputsMoved()
             if (retracted || registryChanges.value != registryBefore) publish(null, startedIn) { it }
         }
     }
@@ -2708,8 +2837,9 @@ class AgentRepository(
         synchronized(publishLock) {
             if (generation.get() != startedIn) return
             placements.remove(agentId)
+            inputsMoved()
             publish(null, startedIn) { s ->
-                val row = s.agents.firstOrNull { it.id == agentId } ?: return@publish s
+                val row = s.agent(agentId) ?: return@publish s
                 val record = row.record?.copy(managerAgentId = null)
                 if (row.parent == null && record == row.record) return@publish s
                 s.copy(agents = s.agents.map { if (it.id == agentId) it.copy(parent = null, scopeSignal = null, record = record) else it })
@@ -2729,17 +2859,27 @@ class AgentRepository(
 
     /** [startedIn] is the account the caller's operation started under; a reset since then drops the row. */
     fun upsert(agent: Agent, startedIn: Int = token()) {
-        publish(null, startedIn) { s ->
-            val exists = s.agents.any { it.id == agent.id }
-            val list = if (exists) s.agents.map { if (it.id == agent.id) agent else it } else listOf(agent) + s.agents
-            s.copy(agents = list)
+        synchronized(publishLock) {
+            if (generation.get() != startedIn) return
+            val s = _state.value
+            if (rowsStayClassified(s)) {
+                val at = s.indexOf(agent.id)
+                val rows = if (at >= 0) ArrayList(s.agents).also { it[at] = agent } else ArrayList<Agent>(s.agents.size + 1).also { it += agent; it += s.agents }
+                publishRows(s, rows, intArrayOf(maxOf(at, 0)), inPlace = at >= 0)
+                return
+            }
+            publish(null, startedIn) { st ->
+                val exists = st.indexOf(agent.id) >= 0
+                val list = if (exists) st.agents.map { if (it.id == agent.id) agent else it } else listOf(agent) + st.agents
+                st.copy(agents = list)
+            }
         }
     }
 
     /** Read and write in one critical section, so the row [transform] saw is the row it replaces. */
     fun patch(agentId: String, startedIn: Int = token(), transform: (Agent) -> Agent) {
         synchronized(publishLock) {
-            val current = _state.value.agents.firstOrNull { it.id == agentId } ?: return
+            val current = _state.value.agent(agentId) ?: return
             upsert(transform(current), startedIn)
         }
     }
