@@ -122,8 +122,6 @@ fun AgentRowItem(
     val shape = CursorTheme.shapes.base
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var menuAt by remember { mutableStateOf<IntOffset?>(null) }
-    var renameOpen by rememberSaveable { mutableStateOf(false) }
-    var snoozeOpen by rememberSaveable { mutableStateOf(false) }
     val interaction = remember { MutableInteractionSource() }
     val agent = row.agent
     val currentRow by rememberUpdatedState(row)
@@ -183,29 +181,47 @@ fun AgentRowItem(
             }
         }
         if (menuOpen) {
-            ChatOverflowMenu(
+            ChatRowMenu(
                 row = row,
                 expanded = true,
                 onDismiss = { menuOpen = false },
-                onRename = { menuOpen = false; renameOpen = true },
-                onSnooze = { menuOpen = false; snoozeOpen = true },
                 actions = actions,
                 at = menuAt,
             )
         }
-        if (renameOpen) {
-            RenameChatDialog(
-                initialName = row.agent.name,
-                onConfirm = { name -> renameOpen = false; actions.onRename?.invoke(row, name) },
-                onDismiss = { renameOpen = false },
-            )
-        }
-        if (snoozeOpen) {
-            SnoozeChatDialog(
-                onPick = { until -> snoozeOpen = false; actions.onSnooze(row, until) },
-                onDismiss = { snoozeOpen = false },
-            )
-        }
+    }
+}
+
+/**
+ * [ChatOverflowMenu] with the rename and snooze dialogs two of its items open. Call only while [expanded] is true:
+ * closed rows then have no menu composition at all. The parent stays expanded while a dialog replaces the popup,
+ * preserving the dialog's saveable state until that dialog closes.
+ */
+@Composable
+fun ChatRowMenu(row: AgentRow, expanded: Boolean, onDismiss: () -> Unit, actions: AgentRowActions, at: IntOffset? = null) {
+    var renameOpen by rememberSaveable { mutableStateOf(false) }
+    var snoozeOpen by rememberSaveable { mutableStateOf(false) }
+    ChatOverflowMenu(
+        row = row,
+        expanded = expanded && !renameOpen && !snoozeOpen,
+        onDismiss = onDismiss,
+        onRename = { renameOpen = true },
+        onSnooze = { snoozeOpen = true },
+        actions = actions,
+        at = at,
+    )
+    if (renameOpen) {
+        RenameChatDialog(
+            initialName = row.agent.name,
+            onConfirm = { name -> renameOpen = false; actions.onRename?.invoke(row, name); onDismiss() },
+            onDismiss = { renameOpen = false; onDismiss() },
+        )
+    }
+    if (snoozeOpen) {
+        SnoozeChatDialog(
+            onPick = { until -> snoozeOpen = false; actions.onSnooze(row, until); onDismiss() },
+            onDismiss = { snoozeOpen = false; onDismiss() },
+        )
     }
 }
 
