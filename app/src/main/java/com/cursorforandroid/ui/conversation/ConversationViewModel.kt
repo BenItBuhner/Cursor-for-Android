@@ -42,6 +42,7 @@ import com.cursorforandroid.domain.SlashCommand
 import com.cursorforandroid.domain.SlashCommands
 import com.cursorforandroid.domain.SnoozeDuration
 import com.cursorforandroid.domain.SubagentRows
+import com.cursorforandroid.domain.TimelineItem
 import com.cursorforandroid.domain.ToolPayload
 import com.cursorforandroid.domain.TranscriptPresenter
 import com.cursorforandroid.domain.TranscriptRow
@@ -135,12 +136,32 @@ data class FollowUpModelState(
     val modePill: ModePills.Pill? get() = ModePills.Pill.of(mode)
 }
 
-/** One published state of the chat with the rows the screen draws for it (see [ConversationViewModel.presented]). */
-class PresentedTranscript(val state: ConversationState, val presented: TranscriptPresenter.Presented) {
+/**
+ * One published state of the chat with the rows the screen draws for it (see [ConversationViewModel.presented]).
+ * [previous] is the presentation before it, whose [userMessages] are kept while they are the same messages.
+ */
+class PresentedTranscript(val state: ConversationState, val presented: TranscriptPresenter.Presented, previous: PresentedTranscript? = null) {
     val rows: List<TranscriptRow> get() = presented.rows
     val items get() = presented.items
     val coordinatorMode: Boolean get() = presented.coordinatorMode
     val subagents: SubagentRows.Index get() = presented.subagents
+
+    /**
+     * The user's messages among [items], in order: the list the last presentation had while they are its instances,
+     * so a reply streaming under them leaves the screen's readers of the messages alone (see [SentFades.look]).
+     */
+    val userMessages: List<UserMessage> = userMessagesOf(presented.items, previous)
+
+    private companion object {
+        fun userMessagesOf(items: List<TimelineItem>, previous: PresentedTranscript?): List<UserMessage> {
+            val kept = previous?.userMessages
+            if (kept != null && previous.presented.items === items) return kept
+            val messages = items.filterIsInstance<UserMessage>()
+            if (kept == null || kept.size != messages.size) return messages
+            for (i in messages.indices) if (messages[i] !== kept[i]) return messages
+            return kept
+        }
+    }
 }
 
 /** Where every screen's transcript is presented: one thread at a time, off the main one, in the order the states came. */
@@ -204,6 +225,9 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      * travels with it, so what the screen reads of the chat (loading, running, older turns) agrees with its rows.
      */
     private val presenter = graph.presenters.forAgent(agentId)
+    /** The last presentation made, for the next to keep what has not changed (see [PresentedTranscript.userMessages]). */
+    @Volatile
+    private var lastPresented: PresentedTranscript? = null
 
     val presented: StateFlow<PresentedTranscript> = combine(conversation, agent.map { it?.looksLikeProject == true }.distinctUntilChanged()) { c, project -> c to project }
         .conflate()
@@ -236,7 +260,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
                 else -> Unit
             }
         }
-        return PresentedTranscript(state, presented)
+        return PresentedTranscript(state, presented, lastPresented).also { lastPresented = it }
     }
 
     val draftText: StateFlow<String> = draft.asStateFlow()
