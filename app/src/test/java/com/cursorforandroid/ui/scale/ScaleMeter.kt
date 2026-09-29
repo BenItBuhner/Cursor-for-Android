@@ -320,7 +320,7 @@ class ScaleMeter(private val compose: ComposeTestRule) {
             val top = RecomposeCounter.snapshot().entries.sortedByDescending { it.value }.take(n).map { it.key.removePrefix("ui.").replace(' ', '_') to it.value }
             return result to top
         } finally {
-            RecomposeCounter.on = false
+            RecomposeCounter.uninstall()
             RecomposeCounter.reset()
         }
     }
