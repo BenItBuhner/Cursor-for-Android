@@ -7,6 +7,7 @@ import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSiz
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,11 +44,23 @@ internal class ShellWindow {
 
     /**
      * Hands [onResize] the width now and every width the window changes to from here on, in the composition that sees
-     * the change: before any of the shell is composed for it, which it reads in the same pass.
+     * the change: before any of the shell is composed for it, which it reads in the same pass. Remembered, the
+     * returned follower lets go once it is forgotten or its composition abandoned.
      */
-    fun follow(onResize: (Dp) -> Unit) {
+    fun follow(onResize: (Dp) -> Unit): RememberObserver {
         this.onResize = onResize
         Snapshot.withoutReadObservation { onResize(width) }
+        return Follower(onResize)
+    }
+
+    private inner class Follower(private val onResize: (Dp) -> Unit) : RememberObserver {
+        override fun onRemembered() = Unit
+
+        override fun onForgotten() {
+            if (this@ShellWindow.onResize === onResize) this@ShellWindow.onResize = null
+        }
+
+        override fun onAbandoned() = onForgotten()
     }
 }
 
