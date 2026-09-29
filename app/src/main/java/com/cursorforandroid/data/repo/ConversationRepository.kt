@@ -3611,6 +3611,7 @@ class ConversationRepository(
         // first page is small, so the newest message lands a round trip or two after the paint; the rest are larger.
         // In an ordinary chat, the window's turns a cold open's first paint left out (see [FIRST_PAINT_TURNS]), whole.
         var pages = 0
+        var widenedChat = false
         while (true) {
             val (window, project, want) = synchronized(e) { Triple(e.recordWindow?.takeIf { it.turnIndexed }, e.projectMode, e.window) }
             window ?: return
@@ -3643,12 +3644,20 @@ class ConversationRepository(
                 }
             })
             val done = applied ?: return
+            if (!coordinator) widenedChat = true
             persistRecord(e, done, window, backend, cacheTokens())
             // The widened window pairs its turns with runs the list's first page does not reach: the older pages
             // behind it, as a scroll up has them read (each turn's run for its status and footer).
             if (synchronized(e) { e.recordNeedsRuns() }) pageOlderRuns(e, agentId)
         }
         e.publish(mutate = { extending = false }, transform = { copy(isLoadingOlder = e.loadingOlder) })
+        // The turns read in behind the first paint want what the open asked for the painted ones: their runs' logs,
+        // and for a turn the record gave without its reply and whose log is gone, the transcript's copy. The logs
+        // only queue runs newer than one already found expired, so the transcript is asked here, not left to them.
+        if (widenedChat) {
+            loadTraces(e, agentId, e.shownRuns())
+            fillTextFromTranscript(e, agentId)
+        }
         // The steps the first read left for later, newest turn first: the stretches fill in behind what is on screen.
         // A turn with a piece the server failed to give after its retries waits until the rest are read — it would
         // hold every page up by its backoff — and is then asked again after a pause, a few times, then left: it shows
