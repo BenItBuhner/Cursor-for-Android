@@ -117,19 +117,23 @@ class FleetListScaleBenchmarkTest {
         val list = rig.pinned(sidebarList)
 
         // Thirty seconds of the fleet ticking under the open list.
+        var organizerBefore = rig.vm.organizerPasses
         val idle = rig.phase("list-idle")
         repeat(idleTicks) { rig.tick(idle) }
         meter.end(idle, heap = true)
         (rig.counters() - baseline).into(idle)
+        idle.extra["organizerPasses"] = rig.vm.organizerPasses - organizerBefore
         idle.top = meter.attributed { repeat(ATTRIBUTION_TICKS) { rig.tick(null) } }.second
 
         // Top to bottom and back, ticking, every Project and the Big Project's children listed.
         val listed = listInFull(list)
+        organizerBefore = rig.vm.organizerPasses
         val scroll = rig.phase("list-scroll")
         scroll.extra["listed"] = listed
         val downFrames = rig.drag(list, scroll, down = true)
         val upFrames = rig.drag(list, scroll, down = false)
         meter.end(scroll)
+        scroll.extra["organizerPasses"] = rig.vm.organizerPasses - organizerBefore
         scroll.top = meter.attributed { rig.drag(list, ScaleMeter.Phase("unreported", size.name), down = true, maxFrames = ATTRIBUTION_DRAG_FRAMES) }.second
         scroll.extra["dragFramesDown"] = downFrames
         scroll.extra["dragFramesUp"] = upFrames
@@ -138,6 +142,7 @@ class FleetListScaleBenchmarkTest {
         // A minute in the background while the fleet goes on, then back.
         val back = rig.phase("list-return")
         val before = rig.counters()
+        organizerBefore = rig.vm.organizerPasses
         compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         repeat(BACKGROUND_TICKS) {
             rig.fleet.deliver(rig.api, rig.graph, rig.fleet.tick())
@@ -147,6 +152,7 @@ class FleetListScaleBenchmarkTest {
         val returnFrames = meter.settle(back, quiet = 10, max = 240)
         meter.end(back)
         (rig.counters() - before).into(back)
+        back.extra["organizerPasses"] = rig.vm.organizerPasses - organizerBefore
         back.extra["settledFrames"] = returnFrames
         back.extra["settledMs"] = ScaleMeter.Phase.f(back.wall.sum())
         return Result(open, firstFrames, idle, scroll, back)

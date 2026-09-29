@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.random.Random
 
 /**
@@ -155,6 +156,10 @@ class AgentsViewModel(
 ) : ViewModel() {
 
     private val query = MutableStateFlow("")
+    private val organizerPassCounter = AtomicInteger()
+
+    /** Test/benchmark seam: completed full organizer passes since this view model was created. */
+    internal val organizerPasses: Int get() = organizerPassCounter.get()
 
     /** An archive / unarchive / delete the server refused, until the next one is attempted. */
     private val actionError = MutableStateFlow<String?>(null)
@@ -223,10 +228,14 @@ class AgentsViewModel(
         val local = device.local
         // Rows waiting on their record to place them are held, never drawn loose (see AgentListState.awaitingPlacement).
         val shown = list.shownAgents
+        organizerPassCounter.incrementAndGet()
         val sections = AgentListOrganizer.organize(shown, prefs, local, q, nowMillis = now, unavailableProjects = device.unavailableProjects, knownRoots = device.knownRoots, memberCounts = device.memberCounts)
         // The sidebar search narrows the sidebar only; while it is in use the recents are organized without it.
         val recentRows = if (q.isBlank()) AgentListOrganizer.recentRows(sections) else AgentListOrganizer.recentRows(shown, prefs, local, nowMillis = now)
-        val unsearched = if (q.isBlank()) sections else AgentListOrganizer.organize(shown, prefs, local, nowMillis = now, unavailableProjects = device.unavailableProjects, knownRoots = device.knownRoots, memberCounts = device.memberCounts)
+        val unsearched = if (q.isBlank()) sections else {
+            organizerPassCounter.incrementAndGet()
+            AgentListOrganizer.organize(shown, prefs, local, nowMillis = now, unavailableProjects = device.unavailableProjects, knownRoots = device.knownRoots, memberCounts = device.memberCounts)
+        }
         val projectRows = AgentListOrganizer.projectRows(unsearched)
         val rows = list.agents.map { AgentListOrganizer.toRow(it, local, now) }
         AgentListUiState(

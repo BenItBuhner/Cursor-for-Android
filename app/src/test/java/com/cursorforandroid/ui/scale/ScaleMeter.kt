@@ -8,7 +8,7 @@ import androidx.compose.runtime.tooling.CompositionObserver
 import androidx.compose.runtime.tooling.RecomposeScopeObserver
 import androidx.compose.runtime.tooling.observe
 import androidx.compose.ui.test.junit4.ComposeTestRule
-import com.cursorforandroid.audit.RecomposeCounter
+import com.cursorforandroid.util.RecomposeCounter
 import org.robolectric.Shadows.shadowOf
 import java.time.Duration
 import java.util.Collections
