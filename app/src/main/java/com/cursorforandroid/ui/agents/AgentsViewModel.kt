@@ -268,6 +268,7 @@ class AgentsViewModel(
     private val localState: Flow<LocalAgentState> = combine(graph.prefs.localAgentState, graph.pullRequests.states) { local, states ->
         local.copy(pullRequests = states)
     }.distinctUntilChanged()
+    private val listPreferences: Flow<ListPreferences> = graph.prefs.listPreferences.distinctUntilChanged()
 
     /** The three smallest device facts, bundled so the device combine stays within its arity. */
     private val countsAndFolds: Flow<Triple<Map<String, Int>, Set<String>, Boolean>> =
@@ -318,7 +319,7 @@ class AgentsViewModel(
 
     val uiState: StateFlow<AgentListUiState> = combine(
         graph.agents.state,
-        graph.prefs.listPreferences,
+        listPreferences,
         device,
         query,
         combine(clock, pending) { now, work -> now to work },
