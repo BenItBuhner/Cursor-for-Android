@@ -29,7 +29,7 @@ const CUTS = [
 const STILLS = [
   { frame: 64, file: `${NAME}-title.png` },
   { frame: 760, file: `${NAME}-phone.png` },
-  { frame: 1750, file: `${NAME}-tablet.png` },
+  { frame: 1664, file: `${NAME}-tablet.png` },
   { frame: 2650, file: `${NAME}-desktop.png` },
 ];
 
