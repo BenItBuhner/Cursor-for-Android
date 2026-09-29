@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -34,39 +33,31 @@ class SubagentActivity(
     private val row: (agentId: String) -> Flow<Agent?>,
     /** The chat's row read from the server, for a child the list does not hold. */
     private val load: suspend (agentId: String) -> Agent?,
-    /** The live snapshots of one run of a chat, streamed while [watched] and looked in on otherwise. */
-    private val run: (agentId: String, runId: String, watched: StateFlow<Boolean>) -> Flow<Run>,
+    /** The live snapshots of one run of a chat. */
+    private val run: (agentId: String, runId: String) -> Flow<Run>,
     private val models: StateFlow<List<ModelOption>>,
-    private val streams: SubagentStreamGate = SubagentStreamGate(),
 ) {
     /** What a run's stream has said so far: its items, and whether it has seen the run end and how. */
     data class Run(val items: List<TimelineItem>, val finished: Boolean, val status: RunStatus)
 
-    constructor(agents: AgentRepository, hub: LiveRunHub, models: StateFlow<List<ModelOption>>, streams: SubagentStreamGate = SubagentStreamGate()) : this(
+    constructor(agents: AgentRepository, hub: LiveRunHub, models: StateFlow<List<ModelOption>>) : this(
         row = { id -> agents.state.map { state -> state.agents.firstOrNull { it.id == id } } },
         load = { id -> agents.loadDetail(id).getOrNull() },
-        run = { agentId, runId, watched -> hub.snapshots(agentId, runId, watched = watched).map { Run(it.items, it.finished, it.status) } },
+        run = { agentId, runId -> hub.snapshots(agentId, runId).map { Run(it.items, it.finished, it.status) } },
         models = models,
-        streams = streams,
     )
 
-    /**
-     * The child [agentId] as its row and its live run say it, as it moves; null until anything is known of it. Its
-     * run is streamed while a place at [streams] is free, and looked in on every so often until one is.
-     */
-    fun of(agentId: String): Flow<SubagentChild?> = child(agentId) { runId -> followed(agentId, runId) }
-
-    /**
-     * [of] for a stretch's closed line, which draws one child at a time (one line to a stretch, so as many as are
-     * composed): its run streamed while [wanted], and looked in on otherwise — the child the line takes up next, kept
-     * current on the stream it will be taken up on. It takes no place at [streams], which are the rows'.
-     */
-    fun line(agentId: String, wanted: StateFlow<Boolean>): Flow<SubagentChild?> = child(agentId) { runId -> run(agentId, runId, wanted) }
-
+    /** The child [agentId] as its row and its live run say it, as it moves; null until anything is known of it. */
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun child(agentId: String, runOf: (runId: String) -> Flow<Run>): Flow<SubagentChild?> = channelFlow {
+    fun of(agentId: String): Flow<SubagentChild?> = channelFlow {
+        val listed = row(agentId).distinctUntilChanged()
+        // A child the list does not hold is read once; the list's row, when it arrives, outranks the read.
+        val read = flow<Agent?> {
+            emit(null)
+            if (row(agentId).first() == null) emit(load(agentId))
+        }
         // Shared within this collection: both the row and the stream below follow it, and the read is one request.
-        val agent = agent(agentId).shareIn(this, SharingStarted.Eagerly, replay = 1)
+        val agent = combine(listed, read) { l, r -> l ?: r }.distinctUntilChanged().shareIn(this, SharingStarted.Eagerly, replay = 1)
         val live: Flow<SubagentChild?> = agent
             .map { a -> a?.takeIf { it.isRunning }?.latestRunId }
             .distinctUntilChanged()
@@ -74,40 +65,13 @@ class SubagentActivity(
                 if (runId == null) {
                     flowOf(null)
                 } else {
-                    runOf(runId)
+                    run(agentId, runId)
                         .map<Run, SubagentChild?> { SubagentRows.withRun(SubagentChild(), it.items, it.finished, it.status) }
                         .onStart { emit(null) }
                 }
             }
             .distinctUntilChanged()
         combine(agent, live, models) { a, l, m -> merge(a?.let { SubagentRows.childOf(it, m) }, l) }.distinctUntilChanged().collect { send(it) }
-    }
-
-    /**
-     * The child [agentId] as its row alone says it — how its latest run stands, its name and model — with no stream:
-     * for a place that only counts the children still at work, where the step and action of each are not drawn.
-     */
-    fun listed(agentId: String): Flow<SubagentChild?> =
-        combine(agent(agentId), models) { a, m -> a?.let { SubagentRows.childOf(it, m) } }.distinctUntilChanged()
-
-    private fun agent(agentId: String): Flow<Agent?> {
-        val listed = row(agentId).distinctUntilChanged()
-        // A child the list does not hold is read once; the list's row, when it arrives, outranks the read.
-        val read = flow<Agent?> {
-            emit(null)
-            if (row(agentId).first() == null) emit(load(agentId))
-        }
-        return combine(listed, read) { l, r -> l ?: r }.distinctUntilChanged()
-    }
-
-    /** [runId] of [agentId] for as long as it is collected, holding a place at [streams] throughout. */
-    private fun followed(agentId: String, runId: String): Flow<Run> = flow {
-        val ticket = streams.acquire()
-        try {
-            emitAll(run(agentId, runId, ticket.watched))
-        } finally {
-            streams.release(ticket)
-        }
     }
 
     /** The list's word on the child, with its live run's over it: the run's status, step and action, and a question it waits on. */

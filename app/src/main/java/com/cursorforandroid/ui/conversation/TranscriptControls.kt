@@ -10,7 +10,6 @@ import com.cursorforandroid.domain.SubagentPlacement
 import com.cursorforandroid.domain.SubagentRows
 import com.cursorforandroid.domain.ToolPayload
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOf
 
 /**
@@ -80,18 +79,6 @@ data class TranscriptControls(
      * row that stands for it; a flow of nothing where the rows are rendered without the app behind them.
      */
     val subagentActivity: (agentId: String) -> Flow<SubagentChild?> = { flowOf(null) },
-    /**
-     * A cloud child's state as its list row alone says it, with no stream behind it: for a stretch's line, which
-     * counts the children at work but draws the step of one at most. Null where the rows are rendered without the
-     * app, and [subagentActivity] stands in.
-     */
-    val subagentListed: ((agentId: String) -> Flow<SubagentChild?>)? = null,
-    /**
-     * A cloud child a stretch's closed line draws: its run streamed while `wanted`, and looked in on while the line
-     * only keeps it ready to draw next. Null where the rows are rendered without the app, and [subagentActivity]
-     * stands in.
-     */
-    val subagentLine: ((agentId: String, wanted: StateFlow<Boolean>) -> Flow<SubagentChild?>)? = null,
     /**
      * The in-VM subagents the account's record of this chat tracks (Extended mode on the Beta engine), by the id
      * of the task call that started each: its status, and the step it last announced.

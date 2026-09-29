@@ -595,8 +595,6 @@ fun ConversationScreen(
                         subagents = subagents,
                         placement = placement,
                         subagentActivity = graph.subagentActivity::of,
-                        subagentListed = graph.subagentActivity::listed,
-                        subagentLine = graph.subagentActivity::line,
                         subagentRuns = subagentRuns,
                     )
                 }

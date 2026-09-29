@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -55,7 +54,6 @@ import com.cursorforandroid.ui.components.RunningGlyph
 import com.cursorforandroid.ui.components.pressable
 import com.cursorforandroid.ui.icons.ProjectIcons
 import com.cursorforandroid.ui.theme.CursorTheme
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 
 /**
@@ -178,48 +176,21 @@ internal val LocalSubagentStates = compositionLocalOf<Map<String, SubagentState>
  * [call]'s state: the stretch's word for it when it has one (see [LocalSubagentStates]), else read here — the live
  * child of the newest row about a cloud worker or task, else the account record's in-VM subagent, else the list's
  * row, else how a notice after the call said its child ended (a background task's call returns before its child does).
- * [follow] says how closely the child is followed (see [SubagentFollow]); [initial] is what it stands as until its
- * source first speaks.
  */
 @Composable
-internal fun rememberSubagentState(call: ToolCall, subagent: SubagentCall, follow: SubagentFollow = SubagentFollow.Live, initial: SubagentChild? = null): SubagentState {
+internal fun rememberSubagentState(call: ToolCall, subagent: SubagentCall): SubagentState {
     LocalSubagentStates.current[call.callId]?.let { return it }
     val controls = LocalTranscriptControls.current
     val agentId = subagent.agentId
     val latest = controls.subagents.isLatest(call, subagent)
     val agent = agentId?.takeIf { subagent.isCloudAgent }?.let(controls.agentById)
-    // One stream for as long as a line follows the child, so a child on standby is taken up without a restart.
-    val wanted = remember { MutableStateFlow(follow == SubagentFollow.Line) }
-    SideEffect { wanted.value = follow == SubagentFollow.Line }
-    val line = controls.subagentLine
-    val drawn = remember(line, wanted) { line?.let { of -> { id: String -> of(id, wanted) } } }
-    val source = when (follow) {
-        SubagentFollow.Live -> controls.subagentActivity
-        SubagentFollow.Line, SubagentFollow.Standby -> drawn ?: controls.subagentActivity
-        SubagentFollow.Listed -> controls.subagentListed ?: controls.subagentActivity
+    val activity = remember(agentId, latest, controls.subagentActivity) {
+        if (latest && agentId != null && subagent.isCloudAgent) controls.subagentActivity(agentId) else flowOf(null)
     }
-    val activity = remember(agentId, latest, source) {
-        if (latest && agentId != null && subagent.isCloudAgent) source(agentId) else flowOf(null)
-    }
-    val current by activity.collectAsState(initial)
-    val ending = controls.subagents.endingOf(call)
-    val found = current ?: controls.subagentRuns[call.callId] ?: agent?.let { SubagentRows.childOf(it, controls.models) }
-    // A row that still says running is up to a list refresh behind the notice that said the child ended; its stream is not.
-    val child = if (follow == SubagentFollow.Listed && ending != null && found?.status == SubagentChild.Status.Running) found.copy(status = ending, waiting = false)
-        else found ?: ending?.let { SubagentChild(status = it) }
+    val live by activity.collectAsState(null)
+    val child = live ?: controls.subagentRuns[call.callId] ?: agent?.let { SubagentRows.childOf(it, controls.models) }
+        ?: controls.subagents.endingOf(call)?.let { SubagentChild(status = it) }
     return SubagentState(child, agent, SubagentRows.look(call, subagent, child, latest))
-}
-
-/** How closely a subagent's child is followed for the place that draws it. */
-internal enum class SubagentFollow {
-    /** Its run streamed, for a row that draws its step and action (a place at the stream gate, as one is free). */
-    Live,
-    /** Its run streamed, for the closed line of a stretch that draws its step and action: one to a line, ungated. */
-    Line,
-    /** Its run looked in on every so often, for a closed line that may draw it next. */
-    Standby,
-    /** Its list row alone, for a line that only counts it. */
-    Listed,
 }
 
 /** What a row that cannot open a chat opens onto: the task's own card, or what was said to the worker. */
