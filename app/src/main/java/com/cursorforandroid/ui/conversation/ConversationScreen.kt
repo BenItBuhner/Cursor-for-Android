@@ -233,6 +233,7 @@ fun ConversationScreen(
     val fileUploads by viewModel.fileUploads.collectAsStateWithLifecycle()
     val uploadHint by viewModel.uploadHint.collectAsStateWithLifecycle()
     val deviceQueue by viewModel.queue.collectAsStateWithLifecycle()
+    val refusedQueuedId by viewModel.refusedQueuedId.collectAsStateWithLifecycle()
     // The stack opens or closes on the tap, the device's record of the choice following (and seeding it again when it changes).
     val queueStacked by viewModel.queueStacked.collectAsStateWithLifecycle()
     var queueStackedHere by remember(queueStacked) { mutableStateOf(queueStacked) }
@@ -824,16 +825,18 @@ fun ConversationScreen(
                             position = index + 1,
                             count = queue.size,
                             thumbnails = thumbnails,
-                            onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
+                            // A message on its way refuses all three (its card says why) and keeps its flight: the
+                            // run may yet take it, and its row then lifts off into the bubble like any delivered one.
+                            onEdit = { if (viewModel.editQueued(it.id)) queueFlights.dismiss(it.id) else haptics.perform(Haptic.Reject) },
                             // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
                             onSteer = { item ->
-                                haptics.perform(Haptic.Confirm)
-                                viewModel.steerQueued(item.id, turnUnderWay = isActive)
+                                haptics.perform(if (viewModel.steerQueued(item.id, turnUnderWay = isActive)) Haptic.Confirm else Haptic.Reject)
                             },
-                            onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
+                            onRemove = { if (viewModel.removeQueued(it.id)) queueFlights.dismiss(it.id) else haptics.perform(Haptic.Reject) },
                             flights = queueFlights,
                             face = face,
                             steers = isActive,
+                            refused = refusedQueuedId == queue[index].id,
                         )
                     } else {
                         val at = index - queue.size
