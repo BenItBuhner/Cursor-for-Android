@@ -229,7 +229,7 @@ fun ConversationScreen(
     val files by viewModel.pendingFiles.collectAsStateWithLifecycle()
     val fileUploads by viewModel.fileUploads.collectAsStateWithLifecycle()
     val uploadHint by viewModel.uploadHint.collectAsStateWithLifecycle()
-    val queue by viewModel.queue.collectAsStateWithLifecycle()
+    val deviceQueue by viewModel.queue.collectAsStateWithLifecycle()
     // The stack opens or closes on the tap, the device's record of the choice following (and seeding it again when it changes).
     val queueStacked by viewModel.queueStacked.collectAsStateWithLifecycle()
     var queueStackedHere by remember(queueStacked) { mutableStateOf(queueStacked) }
@@ -246,6 +246,13 @@ fun ConversationScreen(
     // (see QueuePlacement); read off two frames, the card and the bubble could both show it, as they did on Bennett's
     // phone (2026-09-20).
     val controls = remember(accountControls, conversation.queuePlacement) { accountControls.placed(conversation.queuePlacement) }
+    // The device's cards off that same frame: a message the run takes leaves the card in the frame its bubble is
+    // filed in, so the card's room and the bubble's change hands at once and the transcript moves once (see QueueHandover).
+    val queueHandover = remember(agentId) { QueueHandover() }
+    val queue = remember(deviceQueue, presentedTranscript) {
+        queueHandover.standing(deviceQueue, conversation.queuePlacement.filedQueueIds, viewModel::filedFromQueue)
+    }
+    SideEffect { queueHandover.composed(queue) }
     val isDemo = graph.session.isDemo
     // A Project coordinator's cards name its workers by the list's live rows and open their chats (either mode).
     val agentList by graph.agents.state.collectAsStateWithLifecycle()
