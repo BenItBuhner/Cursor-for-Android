@@ -442,6 +442,7 @@ internal object SharedAnimationTickerTestHooks {
 @Stable
 private class SharedAnimationTicker {
     private val readers = MutableStateFlow(0)
+    private val pendingSpinnerStarts = LinkedHashSet<SpinnerPhase>()
     private val mutableMillis = mutableLongStateOf(Long.MIN_VALUE)
     private val mutableRunningStep = mutableIntStateOf(0)
     private val mutableDurationScale = mutableFloatStateOf(1f)
@@ -449,11 +450,13 @@ private class SharedAnimationTicker {
     val runningStep: IntState get() = mutableRunningStep
     val durationScale: FloatState get() = mutableDurationScale
 
-    fun attach() {
+    fun attach(spinnerPhase: SpinnerPhase? = null) {
+        if (spinnerPhase != null) pendingSpinnerStarts += spinnerPhase
         readers.update { it + 1 }
     }
 
-    fun detach() {
+    fun detach(spinnerPhase: SpinnerPhase? = null) {
+        if (spinnerPhase != null) pendingSpinnerStarts -= spinnerPhase
         readers.update { count ->
             check(count > 0) { "Shared animation ticker detached without a reader" }
             count - 1
@@ -470,9 +473,12 @@ private class SharedAnimationTicker {
                 while (currentCoroutineContext().isActive) {
                     withInfiniteAnimationFrameMillis { millis ->
                         SharedAnimationTickerTestHooks.frame()
+                        val durationScale = motionDurationScale?.scaleFactor ?: 1f
+                        pendingSpinnerStarts.forEach { it.start(millis, durationScale) }
+                        pendingSpinnerStarts.clear()
                         mutableMillis.longValue = millis
                         mutableRunningStep.intValue = ((millis / RUNNING_STEP_MS) % RUNNING_FRAMES.size).toInt()
-                        mutableDurationScale.floatValue = motionDurationScale?.scaleFactor ?: 1f
+                        mutableDurationScale.floatValue = durationScale
                     }
                 }
             }
@@ -494,13 +500,13 @@ internal fun ProvideSharedAnimationTicker(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun sharedAnimationTicker(): SharedAnimationTicker {
+private fun sharedAnimationTicker(spinnerPhase: SpinnerPhase? = null): SharedAnimationTicker {
     val ticker = checkNotNull(LocalSharedAnimationTicker.current) {
         "Animated Cursor primitives must be composed inside CursorTheme"
     }
-    DisposableEffect(ticker) {
-        ticker.attach()
-        onDispose { ticker.detach() }
+    DisposableEffect(ticker, spinnerPhase) {
+        ticker.attach(spinnerPhase)
+        onDispose { ticker.detach(spinnerPhase) }
     }
     return ticker
 }
@@ -614,8 +620,8 @@ private const val SHIMMER_BAND = 1.4f
 /** Thin indeterminate ring for in-flight tool calls. */
 @Composable
 fun SpinnerRing(modifier: Modifier = Modifier, color: Color = CursorTheme.colors.iconTertiary, size: Dp = 11.dp, strokeWidth: Dp = 1.5.dp) {
-    val ticker = sharedAnimationTicker()
     val phase = remember { SpinnerPhase() }
+    val ticker = sharedAnimationTicker(phase)
     Box(
         modifier.size(size).drawBehind {
             val angle = phase.angle(ticker.millis.longValue, ticker.durationScale.floatValue)
@@ -631,9 +637,15 @@ private class SpinnerPhase {
     private var startedAt = Long.MIN_VALUE
     private var durationScale = 1f
 
+    fun start(millis: Long, scale: Float) {
+        startedAt = millis
+        durationScale = scale
+    }
+
     fun angle(millis: Long, scale: Float): Float {
         if (millis == Long.MIN_VALUE) return 0f
-        if (startedAt == Long.MIN_VALUE || durationScale != scale) {
+        if (startedAt == Long.MIN_VALUE) return 0f
+        if (durationScale != scale) {
             startedAt = millis
             durationScale = scale
         }
