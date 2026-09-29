@@ -177,7 +177,13 @@ class AgentsViewModelTest {
     fun `search and sidebar metadata reuse the organized rows`() = runBlocking<Unit> {
         mainDispatcher.set(Dispatchers.Unconfined)
         val vm = AgentsViewModel(graph)
-        vm.loaded()
+        // The initial pull-request lookup is another organizer input. Wait for it explicitly so this assertion
+        // measures only search and sidebar metadata rather than racing the legitimate badge update.
+        vm.uiState.first { state ->
+            val pullRequests = state.allAgents.mapNotNull { it.prUrl }
+            state.hasLoaded && state.recentRows.isNotEmpty() &&
+                pullRequests.isNotEmpty() && pullRequests.all { it in state.local.pullRequests }
+        }
         val passes = vm.organizerPasses
 
         vm.setQuery("cesium")
