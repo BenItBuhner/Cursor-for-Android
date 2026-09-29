@@ -141,7 +141,7 @@ class SubagentActivityTest {
     }
 
     @Test
-    fun `a child on standby is looked in on without a place, and taken up on the same stream`() = runTest(UnconfinedTestDispatcher()) {
+    fun `a line's child is streamed while wanted and looked in on otherwise, on one stream and no place`() = runTest(UnconfinedTestDispatcher()) {
         val gate = SubagentStreamGate(maxStreams = 1)
         var subscriptions = 0
         var watched: kotlinx.coroutines.flow.StateFlow<Boolean>? = null
@@ -153,21 +153,15 @@ class SubagentActivityTest {
             streams = gate,
         )
         val wanted = MutableStateFlow(false)
-        val job = launch { activity.of("bc-w1", wanted).collect { } }
+        val job = launch { activity.line("bc-w1", wanted).collect { } }
         assertThat(watched!!.value).isFalse()
-        assertThat(gate.counts()).isEqualTo(0 to 0)
-
         wanted.value = true
         assertThat(watched!!.value).isTrue()
-        assertThat(gate.counts()).isEqualTo(1 to 0)
-
+        // The rows' one place stays free for a row.
+        assertThat(gate.counts()).isEqualTo(0 to 0)
         wanted.value = false
         assertThat(watched!!.value).isFalse()
-        assertThat(gate.counts()).isEqualTo(0 to 0)
-
-        wanted.value = true
         job.cancel()
-        assertThat(gate.counts()).isEqualTo(0 to 0)
         assertThat(subscriptions).isEqualTo(1)
     }
 }

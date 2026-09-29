@@ -163,7 +163,7 @@ private fun AgentTranscript(graph: AppGraph, agentId: String, agent: Agent?, act
             placement = placement,
             subagentActivity = graph.subagentActivity::of,
             subagentListed = graph.subagentActivity::listed,
-            subagentFollowed = graph.subagentActivity::of,
+            subagentLine = graph.subagentActivity::line,
             subagentRuns = conversation.subagentRuns,
         )
     }

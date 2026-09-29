@@ -101,27 +101,31 @@ internal fun StretchView(stretch: TranscriptRow.Stretch, modifier: Modifier = Mo
 /**
  * Where each subagent of [stretch] stands, in order. The line counts the ones at work, which their list rows say,
  * and draws where one stands only in a Project's chat — the newest at work — so only the [FOLLOWED_FOR_LINE] newest
- * at work by their rows are followed: the newest its own stream still says works is streamed, and the one before it
- * is kept current to take over the moment it ends ([SubagentFollow.Standby]). [followAll] streams every one, for
- * steps drawn from these states. A subagent taken up starts from what its row said.
+ * at work by their rows are followed for it: the newest its own stream still says works is streamed
+ * ([SubagentFollow.Line]), and the one before it kept current to take over the moment it ends
+ * ([SubagentFollow.Standby]). [followAll] streams every one besides, for steps drawn from these states, through the
+ * rows' places at the gate. A subagent taken up starts from what its row said.
  */
 @Composable
 private fun subagentStates(stretch: TranscriptRow.Stretch, followAll: Boolean, coordinator: Boolean): List<Pair<TranscriptRow.Entry.Call, SubagentState>> {
     val listed = stretch.subagents.map { entry -> key(entry.key) { entry to rememberSubagentState(entry.call, entry.subagent!!, SubagentFollow.Listed) } }
-    if (!followAll && !coordinator) return listed
-    val followed = if (followAll) listed.map { it.first.key }
+    val lined = if (!coordinator) emptyList()
         else listed.filter { (entry, state) -> SubagentRows.isWorking(entry.subagent!!, state.look, state.child, stretch.live) }.takeLast(FOLLOWED_FOR_LINE).map { it.first.key }
+    if (!followAll && lined.isEmpty()) return listed
     // Which of them is streamed turns on what they say themselves, and changes only how each is followed, never which are.
-    var streamed by remember(stretch.key) { mutableStateOf<String?>(null) }
-    val live = streamed?.takeIf { it in followed } ?: followed.lastOrNull()
+    var drawn by remember(stretch.key) { mutableStateOf<String?>(null) }
+    val live = drawn?.takeIf { it in lined } ?: lined.lastOrNull()
     val states = listed.map { pair ->
         val (entry, state) = pair
-        if (entry.key !in followed) return@map pair
-        val how = if (followAll || entry.key == live) SubagentFollow.Live else SubagentFollow.Standby
+        val how = when {
+            entry.key in lined -> if (followAll || entry.key == live) SubagentFollow.Line else SubagentFollow.Standby
+            followAll -> SubagentFollow.Live
+            else -> return@map pair
+        }
         key(entry.key, FOLLOWED) { entry to rememberSubagentState(entry.call, entry.subagent!!, how, initial = state.child) }
     }
-    val newest = states.lastOrNull { (entry, state) -> entry.key in followed && SubagentRows.isWorking(entry.subagent!!, state.look, state.child, stretch.live) }?.first?.key
-    SideEffect { streamed = newest ?: followed.lastOrNull() }
+    val newest = states.lastOrNull { (entry, state) -> entry.key in lined && SubagentRows.isWorking(entry.subagent!!, state.look, state.child, stretch.live) }?.first?.key
+    SideEffect { drawn = newest ?: lined.lastOrNull() }
     return states
 }
 

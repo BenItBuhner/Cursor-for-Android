@@ -188,14 +188,15 @@ internal fun rememberSubagentState(call: ToolCall, subagent: SubagentCall, follo
     val agentId = subagent.agentId
     val latest = controls.subagents.isLatest(call, subagent)
     val agent = agentId?.takeIf { subagent.isCloudAgent }?.let(controls.agentById)
-    // One stream for as long as the child is followed at all, so a child on standby is taken up without a restart.
-    val wanted = remember { MutableStateFlow(follow == SubagentFollow.Live) }
-    SideEffect { wanted.value = follow == SubagentFollow.Live }
-    val followed = controls.subagentFollowed
-    val streamed = remember(followed, wanted) { followed?.let { of -> { id: String -> of(id, wanted) } } }
+    // One stream for as long as a line follows the child, so a child on standby is taken up without a restart.
+    val wanted = remember { MutableStateFlow(follow == SubagentFollow.Line) }
+    SideEffect { wanted.value = follow == SubagentFollow.Line }
+    val line = controls.subagentLine
+    val drawn = remember(line, wanted) { line?.let { of -> { id: String -> of(id, wanted) } } }
     val source = when (follow) {
+        SubagentFollow.Live -> controls.subagentActivity
+        SubagentFollow.Line, SubagentFollow.Standby -> drawn ?: controls.subagentActivity
         SubagentFollow.Listed -> controls.subagentListed ?: controls.subagentActivity
-        else -> streamed ?: controls.subagentActivity
     }
     val activity = remember(agentId, latest, source) {
         if (latest && agentId != null && subagent.isCloudAgent) source(agentId) else flowOf(null)
@@ -211,9 +212,11 @@ internal fun rememberSubagentState(call: ToolCall, subagent: SubagentCall, follo
 
 /** How closely a subagent's child is followed for the place that draws it. */
 internal enum class SubagentFollow {
-    /** Its run streamed, for a line that draws its step and action (a place at the stream gate, as one is free). */
+    /** Its run streamed, for a row that draws its step and action (a place at the stream gate, as one is free). */
     Live,
-    /** Its run looked in on every so often, for a line that may draw it next. */
+    /** Its run streamed, for the closed line of a stretch that draws its step and action: one to a line, ungated. */
+    Line,
+    /** Its run looked in on every so often, for a closed line that may draw it next. */
     Standby,
     /** Its list row alone, for a line that only counts it. */
     Listed,

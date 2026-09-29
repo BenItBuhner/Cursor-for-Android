@@ -60,6 +60,8 @@ class StretchSubagentFollowTest {
     private val listed = ids.associateWith { MutableStateFlow<SubagentChild?>(SubagentChild(SubagentChild.Status.Running)) }
     private val followed = mutableListOf<String>()
     private val wanted = mutableMapOf<String, StateFlow<Boolean>>()
+    /** The children followed as rows, through the gate's places. */
+    private val asRows = mutableListOf<String>()
 
     private fun streamed(id: String) = wanted[id]?.value == true
 
@@ -68,8 +70,8 @@ class StretchSubagentFollowTest {
         val controls = TranscriptControls(
             coordinatorMode = coordinatorMode,
             subagents = SubagentRows.index(rows),
-            subagentActivity = { id -> error("a stretch follows $id through subagentFollowed") },
-            subagentFollowed = { id, want -> followed += id; wanted[id] = want; live.getValue(id).onCompletion { wanted.remove(id) } },
+            subagentActivity = { id -> followed += id; asRows += id; live.getValue(id) },
+            subagentLine = { id, want -> followed += id; wanted[id] = want; live.getValue(id).onCompletion { wanted.remove(id) } },
             subagentListed = { id -> listed.getValue(id) },
         )
         compose.setContent {
@@ -95,6 +97,7 @@ class StretchSubagentFollowTest {
         assertThat(followed).containsExactly("bc-t5", "bc-t6")
         // Only the newest is streamed; the one before it is on standby, looked in on, holding no place at the gate.
         assertThat(ids.filter(::streamed)).containsExactly("bc-t6")
+        assertThat(asRows).isEmpty()
 
         // The newest ends on its stream before its row says so: the one on standby has the line at once, and is
         // taken up on the stream it already had.
@@ -147,6 +150,21 @@ class StretchSubagentFollowTest {
             compose.onNodeWithText(action).assertIsDisplayed()
         }
         assertThat(followed.toSet()).containsExactlyElementsIn(ids)
-        assertThat(ids.filter(::streamed)).containsExactlyElementsIn(ids)
+        assertThat(asRows.toSet()).containsExactlyElementsIn(ids)
+    }
+
+    @Test
+    fun `opened in a Project's chat, the line keeps its two and the rest are followed as rows`() {
+        show(coordinatorMode = true)
+        compose.onNodeWithText("6 Working").performClick()
+        compose.waitForIdle()
+        ids.forEach { id ->
+            val action = "Editing ${id.removePrefix("bc-")}.kt"
+            compose.waitUntil(5_000) { compose.onAllNodesWithText(action).fetchSemanticsNodes().isNotEmpty() }
+        }
+        // The line's two are streamed on the line's own streams, subscribed once; the other four take rows' places.
+        assertThat(ids.filter(::streamed)).containsExactly("bc-t5", "bc-t6")
+        assertThat(asRows).containsExactly("bc-t1", "bc-t2", "bc-t3", "bc-t4")
+        assertThat(followed.count { it == "bc-t5" || it == "bc-t6" }).isEqualTo(2)
     }
 }

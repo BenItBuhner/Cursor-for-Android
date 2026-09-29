@@ -87,10 +87,11 @@ data class TranscriptControls(
      */
     val subagentListed: ((agentId: String) -> Flow<SubagentChild?>)? = null,
     /**
-     * A cloud child for a stretch's line: its run streamed while `wanted`, and looked in on while the line only
-     * keeps it ready to draw next. Null where the rows are rendered without the app, and [subagentActivity] stands in.
+     * A cloud child a stretch's closed line draws: its run streamed while `wanted`, and looked in on while the line
+     * only keeps it ready to draw next. Null where the rows are rendered without the app, and [subagentActivity]
+     * stands in.
      */
-    val subagentFollowed: ((agentId: String, wanted: StateFlow<Boolean>) -> Flow<SubagentChild?>)? = null,
+    val subagentLine: ((agentId: String, wanted: StateFlow<Boolean>) -> Flow<SubagentChild?>)? = null,
     /**
      * The in-VM subagents the account's record of this chat tracks (Extended mode on the Beta engine), by the id
      * of the task call that started each: its status, and the step it last announced.
