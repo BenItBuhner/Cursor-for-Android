@@ -337,6 +337,36 @@ class SentFadeTest {
         repeat(28) { frame(); write() }
     }
 
+    @Test
+    fun demoFlightBefore() = demoFlight("flight-before", seesFlights = false)
+
+    @Test
+    fun demoFlightAfter() = demoFlight("flight-after", seesFlights = true)
+
+    /**
+     * A queued message the run took, filed 48 ms into its flight, every 16 ms frame from half a second before the run
+     * takes it to a second after it lands, into `SENT_FADE_DEMO_DIR`/[name]: with fades run under the copy, or waiting it out.
+     */
+    private fun demoFlight(name: String, seesFlights: Boolean) {
+        val out = System.getenv("SENT_FADE_DEMO_DIR")?.let { File(it, name).apply { mkdirs() } } ?: return
+        scene.sentFadesSeeFlights = seesFlights
+        scene.queue += listOf(
+            QueuedFollowUp("q-1", queued, queuedAtMillis = 0L),
+            QueuedFollowUp("q-2", "Then open the PR as a draft", queuedAtMillis = 0L),
+        )
+        scene.show(motion, withSentFades = true)
+        var index = 0
+        fun write() = scene.drawTo(File(out, "frame_%03d.png".format(index++)))
+        repeat(30) { write(); frame() }
+        compose.runOnUiThread {
+            scene.queue.removeAll { it.id == "q-1" }
+            scene.messages += UserMessage("local-q", queued, isPending = true)
+        }
+        repeat(3) { write(); frame() }
+        compose.runOnUiThread { scene.messages[scene.messages.indexOfFirst { it.id == "local-q" }] = UserMessage("local-q", queued) }
+        repeat(90) { write(); frame() }
+    }
+
     private companion object {
         const val FRAME = "sent_fade_frame"
         const val MAX_STEP = 0.22f
