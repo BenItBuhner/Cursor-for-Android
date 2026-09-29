@@ -93,7 +93,14 @@ class NetworkFanoutScaleBenchmarkTest {
         runExtendedOpenBackstackAndBackground(fixture)
         runStandardBackstack(fixture)
 
-        assertThat(uncaught.map { (thread, error) -> "$thread: ${error.stackTraceToString().take(1_500)}" }).isEmpty()
+        val unexpected = uncaught.filterNot { (thread, error) ->
+            // Closing a rig shuts down OkHttp's executor; a retry sleeping in the interceptor is interrupted by that
+            // deliberate teardown and may reach the process handler after its owning scenario has finished.
+            thread.startsWith("OkHttp Dispatcher") &&
+                error is InterruptedException &&
+                error.stackTrace.any { it.className.endsWith("RetryInterceptorKt") && it.methodName == "sleepInSlices" }
+        }
+        assertThat(unexpected.map { (thread, error) -> "$thread: ${error.stackTraceToString().take(1_500)}" }).isEmpty()
     }
 
     private suspend fun runCold(fixture: ScaleFleetServer, keepLive: Boolean) {
