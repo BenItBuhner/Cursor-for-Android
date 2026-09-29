@@ -88,7 +88,6 @@ data class WorkerLaunch(
     val repoUrl: String? = null,
     val baseBranch: String? = null,
     val modelId: String? = null,
-    val autoCreatePr: Boolean = false,
     /** Client-minted, so a retry after a lost reply creates nothing twice; the account keeps it as the worker's id. */
     val workerId: String = "bc-${UUID.randomUUID()}",
 )
@@ -215,7 +214,6 @@ class ProjectApi(
                 source = SOURCE,
                 repoUrl = launch.repoUrl?.takeIf { it.isNotBlank() },
                 baseBranch = launch.baseBranch?.takeIf { it.isNotBlank() },
-                autoCreatePr = launch.autoCreatePr.takeIf { it && launch.repoUrl != null },
                 // The account refuses a start that names no model; the desktop sends `default` (Auto) when none is chosen.
                 requestedModels = listOf(RequestedModelDto(launch.modelId?.trim()?.takeIf { it.isNotEmpty() } ?: "default")),
                 returnImmediately = true,
@@ -412,7 +410,6 @@ class ProjectApi(
         val source: String,
         val repoUrl: String? = null,
         val baseBranch: String? = null,
-        val autoCreatePr: Boolean? = null,
         val requestedModels: List<RequestedModelDto>? = null,
         val returnImmediately: Boolean,
     )
