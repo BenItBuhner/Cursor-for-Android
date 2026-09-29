@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Follows running agents (up to [maxTracked] at a time, like the iOS Live Activity's eight) through the [LiveRunHub]
@@ -79,6 +80,8 @@ class RunMonitor(
      * take an id out of it.
      */
     private val finishedEmitted = RecentIds(MAX_REMEMBERED_FINISHES)
+    /** Snapshots turned into a [TrackedRun] so far, each a pass over the run's items: for the benchmarks. */
+    internal val digests = AtomicInteger()
 
     private class Tracker(val runId: String, val job: Job)
 
@@ -224,10 +227,12 @@ class RunMonitor(
             ?: agent.updatedAtMillis.takeIf { it > 0 }
             ?: nowProvider()
         upsert(TrackedRun(agent.id, runId, agent.name, agent.runStatus ?: RunStatus.CREATING, LivePhase.Starting, startedAt, branch = agent.branchName, prUrl = agent.prUrl))
-        hub.snapshots(agent.id, runId, startedAt)
+        // Sampled: the notification is read at a glance, not per token, and its finish is never held back.
+        hub.snapshots(agent.id, runId, startedAt, sampleMs = SAMPLE_MS)
             .transformWhile { emit(it); !it.finished }
             .collect { snapshot ->
                 val current = agents.agent(agent.id) ?: agent
+                digests.incrementAndGet()
                 val tracked = toTracked(current, snapshot)
                 if (snapshot.finished) {
                     trackers.remove(agent.id)
@@ -301,6 +306,8 @@ class RunMonitor(
          * the notification, never the count it reports.
          */
         const val MAX_TRACKED = 8
+        /** The slowest a followed run's snapshots reach the monitor (see `LiveRunHub.snapshots`); the notification posts slower still. */
+        const val SAMPLE_MS = 500L
         private const val FULL_REFRESH_EVERY = 5
         /** Far more finishes than a session sees, and small enough that the ids cost nothing to hold. */
         private const val MAX_REMEMBERED_FINISHES = 256
