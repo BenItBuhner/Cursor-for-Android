@@ -161,7 +161,10 @@ private data class OrganizedUi(
  * already-organized tree. The clock remains a key, so date buckets, relative ages and snooze expiry keep their exact
  * update timing.
  */
-private class AgentListComputation(private val passCounter: AtomicInteger) {
+private class AgentListComputation(
+    private val passCounter: AtomicInteger,
+    private val listChangeCounter: AtomicInteger,
+) {
     private var agents: List<Agent>? = null
     private var awaitingPlacement: Set<String>? = null
     private var prefs: ListPreferences? = null
@@ -180,6 +183,7 @@ private class AgentListComputation(private val passCounter: AtomicInteger) {
     private var repoSlugs: List<String> = emptyList()
 
     fun organize(list: AgentListState, newPrefs: ListPreferences, device: DeviceState, query: String, now: Long): OrganizedUi {
+        if (agents !== list.agents) listChangeCounter.incrementAndGet()
         val sameBase =
             agents === list.agents &&
                 awaitingPlacement === list.awaitingPlacement &&
@@ -254,10 +258,13 @@ class AgentsViewModel(
 
     private val query = MutableStateFlow("")
     private val organizerPassCounter = AtomicInteger()
-    private val listComputation = AgentListComputation(organizerPassCounter)
+    private val agentListChangeCounter = AtomicInteger()
+    private val listComputation = AgentListComputation(organizerPassCounter, agentListChangeCounter)
 
     /** Test/benchmark seam: completed full organizer passes since this view model was created. */
     internal val organizerPasses: Int get() = organizerPassCounter.get()
+    /** Test/benchmark seam: distinct agent-list identities observed since this view model was created. */
+    internal val agentListChanges: Int get() = agentListChangeCounter.get()
 
     /** An archive / unarchive / delete the server refused, until the next one is attempted. */
     private val actionError = MutableStateFlow<String?>(null)
