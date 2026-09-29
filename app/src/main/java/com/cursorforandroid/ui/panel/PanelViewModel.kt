@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.api.userMessage
 import com.cursorforandroid.data.repo.AgentFileRepository
+import com.cursorforandroid.data.repo.AgentListState
 import com.cursorforandroid.data.repo.ConversationState
 import com.cursorforandroid.data.repo.DesktopOpen
 import com.cursorforandroid.data.repo.FileRead
@@ -54,6 +55,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -287,26 +289,26 @@ class PanelViewModel(private val graph: AppGraph, val agentId: String) : ViewMod
     private var sideChatsJob: Job? = null
 
     // The flows [state] folds are cold: they run while it is collected, and [snapshot] reads what they would say at once.
-    private val agent = graph.agents.state.map { s -> s.agents.firstOrNull { it.id == agentId } }.distinctUntilChanged()
+    // Each read off the agent list on the default dispatcher: the panel's fold on the main thread runs only when its row moved.
+    private val agent = graph.agents.row(agentId).flowOn(Dispatchers.Default)
 
     /** The chats the list hangs off this one as side chats, newest first — in either mode, from whatever placed them. */
-    private val sideChats = graph.agents.state.map { s -> sideChatsOf(s.agents) }.distinctUntilChanged()
+    private val sideChats = graph.agents.state.map { s -> sideChatsOf(s) }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     /** The row of the chat this one hangs off, once the list holds it (a side chat's parent, a worker's coordinator). */
-    private val parentAgent = graph.agents.state.map { s -> parentOf(s.agents) }.distinctUntilChanged()
+    private val parentAgent = graph.agents.state.map { s -> parentOf(s) }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
     /** The rows of the chats open as tabs, kept current by the agent list. */
-    private val tabAgents = combine(openTabs, graph.agents.state) { tabs, s -> tabAgentsOf(tabs, s.agents) }.distinctUntilChanged()
+    private val tabAgents = combine(openTabs, graph.agents.state) { tabs, s -> tabAgentsOf(tabs, s) }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
-    private fun sideChatsOf(agents: List<Agent>): List<Agent> =
-        agents.filter { it.parent?.id == agentId && it.parent.kind == AgentParentKind.SIDE_CHAT }.sortedByDescending { it.listedAtMillis }
+    private fun sideChatsOf(list: AgentListState): List<Agent> =
+        list.childrenOf[agentId].orEmpty().filter { it.parent?.kind == AgentParentKind.SIDE_CHAT }.sortedByDescending { it.listedAtMillis }
 
-    private fun parentOf(agents: List<Agent>): Agent? =
-        agents.firstOrNull { it.id == agentId }?.parent?.id?.let { parentId -> agents.firstOrNull { it.id == parentId } }
+    private fun parentOf(list: AgentListState): Agent? = list.agent(agentId)?.parent?.id?.let(list::agent)
 
-    private fun tabAgentsOf(tabs: List<PanelTab>, agents: List<Agent>): Map<String, Agent> {
-        val ids = tabs.mapNotNullTo(HashSet()) { (it as? PanelTab.Agent)?.agentId }
-        return if (ids.isEmpty()) emptyMap() else agents.filter { it.id in ids }.associateBy { it.id }
+    private fun tabAgentsOf(tabs: List<PanelTab>, list: AgentListState): Map<String, Agent> {
+        val ids = tabs.mapNotNullTo(LinkedHashSet()) { (it as? PanelTab.Agent)?.agentId }
+        return if (ids.isEmpty()) emptyMap() else ids.mapNotNull(list::agent).associateBy { it.id }
     }
 
     private val capabilities: StateFlow<Capabilities> = graph.extendedMode.capabilities.stateIn(viewModelScope, SharingStarted.Eagerly, Capabilities.DOCUMENTED)
@@ -368,18 +370,18 @@ class PanelViewModel(private val graph: AppGraph, val agentId: String) : ViewMod
 
     /** What [states] would fold now, read at once. */
     private fun snapshot(): PanelState {
-        val agents = graph.agents.state.value.agents
+        val list = graph.agents.state.value
         val conversation = graph.conversations.state(agentId).value
         val open = openTabs.value
         val extended = ExtendedLoads(
             VmLoads(diff.value, workspace.value, machine.value, desktop.value, pullRequestCreation.value),
             graph.steering.state(agentId).value,
-            SideChatLoads(parentOf(agents), sideChatsOf(agents), sideChatsLoad.value, sideChatCreation.value),
+            SideChatLoads(parentOf(list), sideChatsOf(list), sideChatsLoad.value, sideChatCreation.value),
             expandedSections.value,
-            TabLoads(PanelTabsState(open, selectedTabKey.value), files.value, tabAgentsOf(open, agents), context.value),
+            TabLoads(PanelTabsState(open, selectedTabKey.value), files.value, tabAgentsOf(open, list), context.value),
         )
         val loads = Loads(pullRequest.value, artifacts.value, usage.value, browser.value, extended)
-        return stateOf(agents.firstOrNull { it.id == agentId }, conversation, contentOf(conversation.items), capabilities.value, loads)
+        return stateOf(list.agent(agentId), conversation, contentOf(conversation.items), capabilities.value, loads)
     }
 
     private fun stateOf(a: Agent?, conversation: ConversationState, content: Pair<TranscriptContent, List<MessageAttachment>>, capabilities: Capabilities, loads: Loads): PanelState {
