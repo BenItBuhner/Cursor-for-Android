@@ -121,16 +121,20 @@ class ProjectSectionRecompositionTest {
         val graph = project(workerAgeMillis = 3_600_000L)
         val recompositions = show(graph)
 
-        fun scopesFor(change: () -> Unit): Int {
+        // The view is derived off the main thread, so what a change does lands a moment later: time for it to arrive
+        // before the frames are counted, and for a change the section shows, frames until it has.
+        fun scopesFor(shown: String? = null, change: () -> Unit): Int {
             val before = recompositions.scopes
             change()
+            Thread.sleep(100)
             frames()
+            if (shown != null) repeat(100) { if (compose.onAllNodes(hasText(shown)).fetchSemanticsNodes().isEmpty()) { Thread.sleep(20); frames(1) } }
             return recompositions.scopes - before
         }
         assertThat(scopesFor { graph.agents.patch("bc-o5") { it.copy(name = "Other 5 renamed") } }).isEqualTo(0)
         assertThat(scopesFor { graph.agents.patch("bc-o6") { it.copy(name = "Other 6 renamed") } }).isEqualTo(0)
 
-        assertThat(scopesFor { graph.agents.patch("bc-w1") { it.copy(name = "Worker 1 renamed") } }).isGreaterThan(0)
+        assertThat(scopesFor(shown = "Worker 1 renamed") { graph.agents.patch("bc-w1") { it.copy(name = "Worker 1 renamed") } }).isGreaterThan(0)
         assertThat(compose.onAllNodes(hasText("Worker 1 renamed")).fetchSemanticsNodes()).hasSize(1)
     }
 
