@@ -3,8 +3,9 @@ package com.cursorforandroid.ui.home
 import android.app.Application
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.ExperimentalComposeRuntimeApi
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.currentComposer
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.tooling.CompositionData
 import androidx.compose.runtime.tooling.observe
 import androidx.compose.ui.test.hasAnyAncestor
@@ -72,9 +73,12 @@ class HomeKeystrokeScopeTest {
         val list = NewChatHomeFixtures.list()
         compose.setContent {
             val root = currentComposer.composition
-            remember(root) { root.observe(rec) }
+            DisposableEffect(root) {
+                val handle = root.observe(rec)
+                onDispose { handle?.dispose() }
+            }
             val d = currentComposer.compositionData
-            remember { data = d }
+            SideEffect { data = d }
             CursorTheme(mode = ThemeMode.Dark) {
                 HomeScreen(
                     graph = graph,
