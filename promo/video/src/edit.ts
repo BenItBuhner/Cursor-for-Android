@@ -166,19 +166,22 @@ const inner = shot(
   [from(unfold, "wide"), { at: onInner(0.5, 0.5), k: 6.75, rx: 4, ry: -5, ax: 0.6 }],
   [from(unfold, "tall"), { at: onInner(0.62, 0.45), k: 8.4, rx: 4, ry: -6, ay: 0.56 }],
 );
-/** The window grows into the tablet's from here: the camera draws back with it, square on. */
+/**
+ * The window grows into the tablet's from here: the camera draws back with it, square on, and holds the tablet high
+ * enough in the wide frame for the caption under it to sit on the floor rather than over the composer.
+ */
 const grow = shot(
   b(43),
   b(45),
   "swift",
-  [from(inner, "wide"), { at: onTablet(0.5, 0.5), k: 5.95, rx: 3, ry: 0, ax: 0.5, ay: 0.47 }],
+  [from(inner, "wide"), { at: onTablet(0.5, 0.5), k: 5.4, rx: 3, ry: 0, ax: 0.5, ay: 0.41 }],
   [from(inner, "tall"), { at: onTablet(0.5, 0.5), k: 4.25, rx: 3, ry: 0, ay: 0.55 }],
 );
 const tablet = shot(
   b(45),
   b(47),
   "drift",
-  [from(grow, "wide"), { at: onTablet(0.5, 0.5), k: 6.15, rx: 4, ry: 2, ax: 0.5, ay: 0.47 }],
+  [from(grow, "wide"), { at: onTablet(0.5, 0.5), k: 5.52, rx: 4, ry: 2, ax: 0.5, ay: 0.41 }],
   [from(grow, "tall"), { at: onTablet(0.5, 0.5), k: 4.4, rx: 4, ry: 2, ay: 0.55 }],
 );
 const answer = shot(
