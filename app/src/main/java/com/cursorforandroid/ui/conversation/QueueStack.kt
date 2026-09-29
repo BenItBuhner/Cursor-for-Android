@@ -4,7 +4,9 @@ import android.animation.ValueAnimator
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -23,6 +25,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -51,11 +55,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.composerDockInset
+import com.cursorforandroid.ui.components.dockedCard
 import com.cursorforandroid.ui.components.pressable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.platform.LocalDensity
@@ -92,6 +98,8 @@ private class Placed {
 private class CardMotion {
     var y: Animatable<Float, AnimationVector1D>? = null
     var depth: Animatable<Float, AnimationVector1D>? = null
+    /** The card's height as last laid out: what its surface keeps as it leaves. */
+    var height = 0
 
     fun depthNow(): Float = depth?.value ?: 0f
 }
@@ -99,6 +107,31 @@ private class CardMotion {
 /** The deck's height as it springs to where the cards will rest: the floor under the cards' own motion. */
 private class DeckMotion {
     var height: Animatable<Float, AnimationVector1D>? = null
+}
+
+/** A card gone from the stack's keys, still drawn as it goes: [progress] runs from 0 (where it stood) to 1 (gone). */
+private class Exit {
+    val progress = Animatable(0f)
+    /** The card left for its bubble, which took its room in the same frame: nothing of it stays to fold. */
+    var handedOver = false
+}
+
+/**
+ * The cards on their way out, by key, in the order they left. Kept off the snapshot — composition and layout read it —
+ * with [tick] to compose the stack again once one is gone.
+ */
+private class Exits {
+    val leaving = LinkedHashMap<String, Exit>()
+    var previous: List<String> = emptyList()
+    var tick by mutableIntStateOf(0)
+
+    /** The keys that left since the last composition start their exit; a key back in [keys] is simply a card again. */
+    fun follow(keys: List<String>, live: Boolean, known: Set<String>) {
+        val now = keys.toHashSet()
+        leaving.keys.removeAll(now)
+        if (!live) leaving.clear() else for (id in previous) if (id !in now && id in known && id !in leaving) leaving[id] = Exit()
+        previous = keys
+    }
 }
 
 /**
@@ -121,6 +154,12 @@ private class DeckMotion {
  * every card simply stands there. A card's box is where it is drawn, scale and all, so a send's flight lands on the
  * card at the back of the deck — its face fading as it sinks in — and a delivery lifts off the front card (see
  * `SendMotion`). [card] draws the card at an index of [keys], told its [QueueCardFace].
+ *
+ * A card that leaves [keys] does not blink out: its words are the delivery's flight (see `SendMotion`), and its surface
+ * stays where it stood, fading and folding down onto its foot over [QueueExitMillis] while the cards around it spring
+ * into their new places, so neither the stack nor the transcript over it jumps. A card [delivered] to its bubble is
+ * the exception: the bubble takes its room in the same frame, so the stack gives it up at once and the transcript
+ * moves once. [gapBelow] is the space under the stack while it holds anything, folded away with the last card.
  */
 @Composable
 fun QueueStack(
@@ -135,10 +174,11 @@ fun QueueStack(
     heightSpec: AnimationSpec<Float> = if (animationSpec === StackSpring) DeckSpring else animationSpec,
     /**
      * Whether the card for a key just gone from [keys] left for the transcript, whose bubble takes the room it gave up
-     * in the same frame: the deck gives that room up at once too, so what stands above it holds still. A card the
-     * reader took off closes up on the deck's spring.
+     * in the same frame: the deck gives that room up at once too, so what stands above it holds still. Any other card
+     * that leaves folds away.
      */
     delivered: (key: String) -> Boolean = { false },
+    gapBelow: Dp = 0.dp,
     card: @Composable (index: Int, face: QueueCardFace) -> Unit,
 ) {
     val count = keys.size
@@ -148,6 +188,10 @@ fun QueueStack(
     val motions = remember { HashMap<String, CardMotion>() }
     val deckMotion = remember { DeckMotion() }
     val placed = remember { Placed() }
+    val exits = remember { Exits() }
+    exits.tick
+    exits.follow(keys, animate(), motions.keys)
+    val leaving = exits.leaving.keys.toList()
     val handleShare = remember { Animatable(if (stackable) 1f else 0f) }
     val turn = remember { Animatable(if (collapsed) 0f else 1f) }
     LaunchedEffect(stackable) { settle(handleShare, if (stackable) 1f else 0f, animate(), animationSpec) }
@@ -156,6 +200,7 @@ fun QueueStack(
     val open by rememberUpdatedState { if (collapsed) onStackedChange(false) }
     val density = LocalDensity.current
     val gap = with(density) { Gap.roundToPx() }
+    val foot = with(density) { gapBelow.roundToPx() }
     val peek = with(density) { Peek.toPx() }
 
     Layout(
@@ -182,6 +227,18 @@ fun QueueStack(
                     ) { card(index, face) }
                 }
             }
+            for (id in leaving) {
+                key(id) {
+                    val exit = exits.leaving[id]
+                    LaunchedEffect(exit) {
+                        exit?.progress?.animateTo(1f, tween(QueueExitMillis, easing = FastOutSlowInEasing))
+                        exits.leaving.remove(id)
+                        exits.tick++
+                    }
+                    // Only the surface: the words went with the delivery's flight. Nothing on it is heard or pressed.
+                    Box(Modifier.clearAndSetSemantics {}.pointerInput(Unit) { openOnTap(swallow = true) {} }.dockedCard())
+                }
+            }
         },
         modifier = modifier
             .testTag(QueueStackTag)
@@ -191,8 +248,12 @@ fun QueueStack(
     ) { measurables, constraints ->
         val width = constraints.maxWidth
         val handle = measurables.first().measure(Constraints(maxWidth = width))
-        val cards = measurables.drop(1).map { it.measure(Constraints(minWidth = width, maxWidth = width)) }
+        val cards = measurables.subList(1, 1 + keys.size).map { it.measure(Constraints(minWidth = width, maxWidth = width)) }
         val n = cards.size
+        val gone = leaving
+        val ghosts = measurables.subList(1 + keys.size, measurables.size).mapIndexed { g, m ->
+            m.measure(Constraints.fixed(width, motions[gone.getOrNull(g)]?.height ?: 0))
+        }
         val live = animate()
         // Where each card belongs now: its top from the stack's foot (negative, up), and its depth in the deck.
         val targetY = FloatArray(n)
@@ -220,20 +281,34 @@ fun QueueStack(
             if (shown(depth[k]) > 0f) top = minOf(top, y[k])
             if (shown(targetDepth[k]) > 0f) rest = minOf(rest, targetY[k])
         }
-        // A card that leaves takes its springs with it, so the cards alone would drop the deck's top in one frame, and
+        for (id in gone) if (delivered(id)) exits.leaving[id]?.handedOver = true
+        // A leaving card holds the deck's top where it stood, and lets it down with its fold: its own height and the
+        // gap over the card under it; but for a card handed over to its bubble, which gives its room up at once.
+        var stays = if (n > 0) 1f else 0f
+        for ((g, id) in gone.withIndex()) {
+            val m = motions[id] ?: continue
+            val exit = exits.leaving[id]
+            if (exit?.handedOver == true) continue
+            val e = exit?.progress?.value ?: 1f
+            if (shown(m.depthNow()) > 0f) top = minOf(top, (m.y?.value ?: 0f) + (ghosts[g].height + gap) * e)
+            stays = maxOf(stays, 1f - e)
+        }
+        // The cards that stay spring into their places with a touch of overshoot, which would dip the deck's top and
         // the transcript over the dock with it. The deck springs to where the cards will rest instead, never lower
         // than where they are drawn, and without the cards' dip below it; but for a card handed over to its bubble.
         val handedOver = motions.keys.any { it !in ids && delivered(it) }
         val floor = (if (handedOver) Animatable(-rest) else deckMotion.height.springTo(-rest, live, scope, heightSpec)).also { deckMotion.height = it }
-        val deck = maxOf(ceil(-top).toInt(), if (live) floor.value.roundToInt() else 0)
+        val deck = maxOf(ceil(-top).toInt(), if (live) floor.value.roundToInt() else 0).coerceAtLeast(0)
         val share = handleShare.value
         val lead = (handle.height * share).roundToInt()
-        val height = deck + lead
+        val below = (foot * stays).roundToInt()
+        val height = deck + lead + below
         layout(width, height) {
-            motions.keys.retainAll(ids.toSet())
+            motions.keys.retainAll(ids.toSet() + gone)
             placed.coordinates.keys.retainAll(ids.toSet())
             for (k in 0 until n) {
                 val m = motionOf(k)
+                m.height = cards[k].height
                 m.y = m.y.springTo(targetY[k], live, scope, animationSpec)
                 m.depth = m.depth.springTo(targetDepth[k], live, scope, animationSpec)
             }
@@ -248,13 +323,27 @@ fun QueueStack(
                 // where the front card covers it, and nowhere it could be seen.
                 val cut = if (k > 0 && y[k] < frontTop) (frontTop - y[k] + frontHeight / 2f) / scale else Float.MAX_VALUE
                 val clipped = cut < cards[k].height
-                cards[k].placeWithLayer(0, height + y[k].roundToInt(), zIndex = (n - k).toFloat()) {
+                cards[k].placeWithLayer(0, height - below + y[k].roundToInt(), zIndex = (n - k).toFloat()) {
                     transformOrigin = TransformOrigin(0.5f, 0f)
                     scaleX = scale
                     scaleY = scale
                     alpha = shown(d)
                     clip = clipped
                     shape = if (clipped) TopClip(cut) else RectangleShape
+                }
+            }
+            for ((g, id) in gone.withIndex()) {
+                val m = motions[id] ?: continue
+                val exit = exits.leaving[id]?.takeUnless { it.handedOver } ?: continue
+                val d = m.depthNow()
+                val scale = 1f - ScaleStep * d.coerceIn(0f, Peeks.toFloat())
+                // Over the cards, as it stood in front of whatever comes forward into its place, fading as it folds.
+                ghosts[g].placeWithLayer(0, height - below + (m.y?.value ?: 0f).roundToInt(), zIndex = (n + 1).toFloat()) {
+                    val e = exit.progress.value
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                    scaleX = scale
+                    scaleY = scale * (1f - e)
+                    alpha = shown(d) * (1f - e)
                 }
             }
         }
@@ -351,6 +440,9 @@ private val Peek = 6.dp
 /** The gap between cards in the opened list: the dock's own. */
 private val Gap = 4.dp
 private val HandleHeight = 24.dp
+
+/** How long a card that left the stack takes to fade and fold away. */
+internal const val QueueExitMillis = 240
 
 /** Opening, closing and every change of place: a touch of overshoot, settled in about a third of a second. */
 internal val StackSpring = spring<Float>(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)

@@ -249,11 +249,13 @@ fun ConversationScreen(
     // (see QueuePlacement); read off two frames, the card and the bubble could both show it, as they did on Bennett's
     // phone (2026-09-20).
     val controls = remember(accountControls, queuePlacement) { accountControls.placed(queuePlacement) }
-    // The device's cards off that same frame: a message the run takes leaves the card in the frame its bubble is
-    // filed in, so the card's room and the bubble's change hands at once and the transcript moves once (see QueueHandover).
+    // A card being steered stays on the device's queue, standing for the account's row of the message, until the same
+    // frame files it as a bubble (see SteeredCards). The device's cards off that same frame: a message the run takes
+    // leaves the card in the frame its bubble is filed in, so the card's room and the bubble's change hands at once and
+    // the transcript moves once (see QueueHandover).
     val queueHandover = remember(agentId) { QueueHandover() }
     val queue = remember(deviceQueue, queuePlacement) {
-        queueHandover.standing(deviceQueue, queuePlacement.filedQueueIds, viewModel::filedFromQueue)
+        queueHandover.standing(SteeredCards.standing(deviceQueue, queuePlacement), queuePlacement.filedQueueIds, viewModel::filedFromQueue)
     }
     SideEffect { queueHandover.composed(queue) }
     val isDemo = graph.session.isDemo
@@ -743,11 +745,12 @@ fun ConversationScreen(
         val arrival = rememberArrivalGlide(agentId)
         // Extended mode keeps the queue on the account, where the desktop and the web keep theirs; otherwise on this device.
         val accountQueue = capabilities.accountQueue && !isDemo
+        val accountRows = if (accountQueue) SteeredCards.accountRows(controls.queue, deviceQueue) else emptyList()
         // A queued message the run takes flies from its card to its bubble, as a send flies from the composer.
-        val queuedRows = remember(queue, accountQueue, controls.queue) {
+        val queuedRows = remember(queue, accountRows) {
             LinkedHashMap<String, String>().apply {
                 queue.forEach { put(it.id, it.previewText) }
-                if (accountQueue) controls.queue.forEach { put(it.id, it.previewText) }
+                accountRows.forEach { put(it.id, it.previewText) }
             }
         }
         val userMessages by remember(presentedState) { derivedStateOf(referentialEqualityPolicy()) { presentedState.value.userMessages } }
@@ -812,54 +815,53 @@ fun ConversationScreen(
             ) {
                 // What is waiting to go out sits right above the box it came from, oldest first, one line each — the
                 // device's and, in Extended mode, the account's in one stack, a deck once there are more than a couple.
-                val accountRows = if (accountQueue) controls.queue else emptyList()
-                if (queue.isNotEmpty() || accountRows.isNotEmpty()) {
-                    val queueKeys = remember(queue, accountRows) { queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" } }
-                    QueueStack(
-                        keys = queueKeys,
-                        stacked = queueStackedHere,
-                        onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
-                        modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
-                        delivered = { key -> queueFlights.delivered(key.substringAfter(':')) },
-                    ) { index, face ->
-                        if (index < queue.size) {
-                            QueuedFollowUpCard(
-                                item = queue[index],
-                                position = index + 1,
-                                count = queue.size,
-                                thumbnails = thumbnails,
-                                onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
-                                // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
-                                onSteer = { item ->
-                                    haptics.perform(Haptic.Confirm)
-                                    viewModel.steerQueued(item.id, turnUnderWay = isActive)
-                                },
-                                onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
-                                flights = queueFlights,
-                                face = face,
-                                steers = isActive,
-                            )
-                        } else {
-                            val at = index - queue.size
-                            AccountQueueCard(
-                                item = accountRows[at],
-                                position = at + 1,
-                                count = accountRows.size,
-                                inFlightIds = controls.inFlightQueueIds,
-                                // The up arrow promotes the message into the turn under way as a steer; with none running, it is sent now.
-                                onSteer = { item ->
-                                    haptics.perform(Haptic.Confirm)
-                                    viewModel.queueSteer(item.id, turnUnderWay = isActive)
-                                },
-                                onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
-                                onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
-                                onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
-                                steers = isActive,
-                                onMove = { item, up -> viewModel.queueMove(item.id, up) },
-                                flights = queueFlights,
-                                face = face,
-                            )
-                        }
+                // Composed even when empty, so the last card to go folds away rather than blinking out; it is no height then.
+                val queueKeys = remember(queue, accountRows) { queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" } }
+                QueueStack(
+                    keys = queueKeys,
+                    stacked = queueStackedHere,
+                    onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
+                    modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth),
+                    gapBelow = 4.dp,
+                    delivered = { key -> queueFlights.delivered(key.substringAfter(':')) },
+                ) { index, face ->
+                    if (index < queue.size) {
+                        QueuedFollowUpCard(
+                            item = queue[index],
+                            position = index + 1,
+                            count = queue.size,
+                            thumbnails = thumbnails,
+                            onEdit = { queueFlights.dismiss(it.id); viewModel.editQueued(it.id) },
+                            // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
+                            onSteer = { item ->
+                                haptics.perform(Haptic.Confirm)
+                                viewModel.steerQueued(item.id, turnUnderWay = isActive)
+                            },
+                            onRemove = { queueFlights.dismiss(it.id); viewModel.removeQueued(it.id) },
+                            flights = queueFlights,
+                            face = face,
+                            steers = isActive,
+                        )
+                    } else {
+                        val at = index - queue.size
+                        AccountQueueCard(
+                            item = accountRows[at],
+                            position = at + 1,
+                            count = accountRows.size,
+                            inFlightIds = controls.inFlightQueueIds,
+                            // The up arrow promotes the message into the turn under way as a steer; with none running, it is sent now.
+                            onSteer = { item ->
+                                haptics.perform(Haptic.Confirm)
+                                viewModel.queueSteer(item.id, turnUnderWay = isActive)
+                            },
+                            onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
+                            onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
+                            onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
+                            steers = isActive,
+                            onMove = { item, up -> viewModel.queueMove(item.id, up) },
+                            flights = queueFlights,
+                            face = face,
+                        )
                     }
                 }
                 // The draft is read here and nowhere else in the screen: typing recomposes the composer, never the transcript or
