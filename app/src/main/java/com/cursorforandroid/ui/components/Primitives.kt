@@ -83,9 +83,7 @@ import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
@@ -429,9 +427,15 @@ fun Dot(color: Color, size: Dp = CursorDimens.unreadDot, modifier: Modifier = Mo
 internal object SharedAnimationTickerTestHooks {
     @Volatile
     var onFrame: (() -> Unit)? = null
+    @Volatile
+    var onRunningChanged: ((Boolean) -> Unit)? = null
 
     fun frame() {
         onFrame?.invoke()
+    }
+
+    fun runningChanged(running: Boolean) {
+        onRunningChanged?.invoke(running)
     }
 }
 
@@ -464,13 +468,12 @@ private class SharedAnimationTicker {
     }
 
     suspend fun run() {
-        readers
-            .map { it > 0 }
-            .distinctUntilChanged()
-            .collectLatest { active ->
-                if (!active) return@collectLatest
+        SharedAnimationTickerTestHooks.runningChanged(true)
+        try {
+            while (currentCoroutineContext().isActive) {
+                readers.first { it > 0 }
                 val motionDurationScale = coroutineContext[MotionDurationScale]
-                while (currentCoroutineContext().isActive) {
+                while (readers.value > 0 && currentCoroutineContext().isActive) {
                     withInfiniteAnimationFrameMillis { millis ->
                         SharedAnimationTickerTestHooks.frame()
                         val durationScale = motionDurationScale?.scaleFactor ?: 1f
@@ -482,6 +485,9 @@ private class SharedAnimationTicker {
                     }
                 }
             }
+        } finally {
+            SharedAnimationTickerTestHooks.runningChanged(false)
+        }
     }
 }
 

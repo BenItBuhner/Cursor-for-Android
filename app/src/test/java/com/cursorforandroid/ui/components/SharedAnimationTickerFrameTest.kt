@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
@@ -15,6 +16,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.google.common.truth.Truth.assertThat
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,6 +24,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Fixed-clock visual evidence that [RunningGlyph]'s eight 175 ms steps keep their exact geometry. */
 @RunWith(AndroidJUnit4::class)
@@ -31,6 +34,33 @@ class SharedAnimationTickerFrameTest {
 
     @get:Rule
     val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @After
+    fun tearDown() {
+        SharedAnimationTickerTestHooks.onRunningChanged = null
+    }
+
+    @Test
+    fun `active ticker does not keep an auto advancing test clock busy`() {
+        val starts = AtomicInteger()
+        val stops = AtomicInteger()
+        SharedAnimationTickerTestHooks.onRunningChanged = { running ->
+            if (running) starts.incrementAndGet() else stops.incrementAndGet()
+        }
+        compose.setContent {
+            CursorTheme(mode = ThemeMode.Dark) {
+                Column {
+                    repeat(60) {
+                        RunningGlyph(size = 1.dp)
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.waitUntil(5_000) { starts.get() > 0 && starts.get() == stops.get() }
+
+        assertThat(compose.activity.window.decorView.isAttachedToWindow).isTrue()
+    }
 
     @Test
     fun `standalone spinner keeps its local ticker fallback`() {
