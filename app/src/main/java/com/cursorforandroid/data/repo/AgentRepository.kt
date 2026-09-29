@@ -147,7 +147,6 @@ data class LaunchRequest(
     val ref: String?,
     val modelId: String?,
     val modelParams: List<ModelParam>,
-    val autoCreatePr: Boolean,
     val planMode: Boolean,
     /**
      * Ask or Debug (Extended mode): modes the documented create has no word for, so a launch with one goes through
@@ -164,9 +163,6 @@ data class LaunchRequest(
     /** [env]'s worker as the fleet endpoint last listed it, when [env] is a machine (see [MachineWorker]). */
     val worker: MachineWorker? = null,
 ) {
-    /** `autoCreatePR` as it goes out: a pull request wants a repository, so the switch only counts with one. */
-    val opensPullRequest: Boolean get() = autoCreatePr && repoUrl != null
-
     /**
      * What the chat is called until the server has named it: the prompt's first line of text, its slash commands
      * stripped, cut at a word to about the length of the titles the server generates.
@@ -212,8 +208,7 @@ fun DeviceTarget.toEnvDto(): AgentEnvDto? = when (type) {
  * A machine or pool with a repository names it by URL, as `https://host/owner/name` ([RepoRemote]): Cursor matches it
  * against the worker's `repo=owner/name` label and checks it through its GitHub app before routing, so a checkout that
  * app cannot reach is refused, in the server's words. A blank branch sends no `startingRef`, as the desktop sends none
- * for a machine unless one is picked. `autoCreatePR` stays out of every repository-less request (see
- * [LaunchRequest.opensPullRequest]).
+ * for a machine unless one is picked. `autoCreatePR` is never sent: the API's default is off.
  */
 fun LaunchRequest.toCreateAgentDto(): CreateAgentRequestDto {
     val envDto = env.toEnvDto()
@@ -234,7 +229,6 @@ fun LaunchRequest.toCreateAgentDto(): CreateAgentRequestDto {
             envDto == null -> emptyList()
             else -> null
         },
-        autoCreatePR = opensPullRequest.takeIf { it },
         mcpServers = mcpServers.toInlineServers(),
         mode = if (planMode) "plan" else null,
     )
@@ -1879,7 +1873,6 @@ class AgentRepository(
             latestRunId = null,
             repoUrl = request.repoUrl,
             startingRef = request.ref,
-            autoCreatePr = request.opensPullRequest,
             modelDisplayName = modelDisplayName,
             modelId = request.modelId,
             modelParams = if (request.modelId != null) request.modelParams else emptyList(),
@@ -2079,7 +2072,6 @@ class AgentRepository(
             modelId = request.modelId,
             modelParams = request.modelParams,
             mode = accountMode ?: if (request.planMode) AgentMode.PLAN else AgentMode.AGENT,
-            autoCreatePr = request.autoCreatePr,
             name = request.name,
             mcpServers = request.mcpServers,
             machine = machine,

@@ -24,6 +24,7 @@ import com.cursorforandroid.data.api.ConnectRepositoryBranchesApi
 import com.cursorforandroid.data.api.RepositoryBranchesApi
 import com.cursorforandroid.data.api.ConnectAgentStartApi
 import com.cursorforandroid.data.api.ApiThrottle
+import com.cursorforandroid.data.api.HostPause
 import com.cursorforandroid.data.api.ConnectJsonClient
 import com.cursorforandroid.data.api.ConnectProjectCreationApi
 import com.cursorforandroid.data.api.ConnectPromptUploadApi
@@ -153,9 +154,11 @@ import com.cursorforandroid.domain.SlashCatalog
 import com.cursorforandroid.domain.SlashCommand
 import com.cursorforandroid.domain.SteerOutcome
 import com.cursorforandroid.domain.QueuedFollowUp
+import com.cursorforandroid.domain.ReleaseNotes
 import com.cursorforandroid.domain.ToolPayload
 import com.cursorforandroid.domain.TranscriptDiagnostics
 import com.cursorforandroid.domain.TranscriptPresenters
+import com.cursorforandroid.domain.UpdateState
 import com.cursorforandroid.domain.WorkerMembership
 import com.cursorforandroid.domain.WorkerSpawnKind
 import com.cursorforandroid.domain.WorkspaceTree
@@ -172,11 +175,15 @@ import com.cursorforandroid.update.allocatableBytes
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -304,10 +311,16 @@ class AppGraph(
         if (lazyNewChatDrafts.isInitialized()) newChatDrafts.flush()
     }
 
+    /** The pause each host asked for with a `429`, held by the REST calls, the run streams and the account's Connect calls alike. */
+    private val hostPauses = HostPause()
+
+    /** The connection pool and threads every OkHttp client below is built on (see [CursorApiFactory.newRoot]). */
+    private val httpRoot = lazy { CursorApiFactory.newRoot() }
+
     /** The account's API: one client, with the SSE stream sharing its dispatcher and connection pool. */
     private val realParts = lazy {
-        val client = CursorApiFactory.okHttp { keyStore.apiKey() }
-        CursorApiFactory.retrofit(client) to SseRunStreamer(CursorApiFactory.sseClient(client), { keyStore.apiKey() })
+        val client = CursorApiFactory.okHttp(httpRoot.value, hostPauses) { keyStore.apiKey() }
+        CursorApiFactory.retrofit(client) to SseRunStreamer(CursorApiFactory.sseClient(client), { keyStore.apiKey() }, pauses = hostPauses)
     }
     private val realBackend = real ?: CursorBackend(isDemo = false, parts = realParts)
     /** Seeded when the demo is entered, so a launch into a real account never pays for the dataset. */
@@ -351,8 +364,8 @@ class AppGraph(
      * around it: at OkHttp's five per host a figure's presign queued there behind the record's blobs and the open
      * chats' streams, where no call timeout runs yet.
      */
-    private val lazyAccountClient = lazy { CursorApiFactory.loginClient().also { it.dispatcher.maxRequestsPerHost = ApiThrottle.ON_THE_WIRE + 2 } }
-    private val lazyAccountRpc = lazy { ConnectJsonClient(lazyAccountClient.value, CursorLoginEndpoints.API_URL) }
+    private val lazyAccountClient = lazy { CursorApiFactory.loginClient(httpRoot.value).also { it.dispatcher.maxRequestsPerHost = ApiThrottle.ON_THE_WIRE + 2 } }
+    private val lazyAccountRpc = lazy { ConnectJsonClient(lazyAccountClient.value, CursorLoginEndpoints.API_URL, throttle = ApiThrottle(pauses = hostPauses)) }
 
     /** How long the account's calls are still held off by a pause the server asked for (a `429`, see `ApiThrottle`); 0 when none, or before any call. */
     fun accountPauseMillis(): Long {
@@ -374,7 +387,7 @@ class AppGraph(
     /** The agent's live VM: its workspace files and its branch diff (the panel's Files › Workspace and Changes). */
     private val lazyAgentFiles = lazy { AgentFilesApi(lazyAccountRpc.value, lazySessionTokens.value) }
     /** The machine's cursor-server, for a picture a tool call read outside the workspace (see [CursorServerApi]). */
-    private val lazyCursorServer = lazy { CursorServerApi(lazyAccountRpc.value, lazySessionTokens.value, CursorApiFactory.cursorServerClient()) }
+    private val lazyCursorServer = lazy { CursorServerApi(lazyAccountRpc.value, lazySessionTokens.value, CursorApiFactory.cursorServerClient(httpRoot.value)) }
     /** The account's view of a pull request on any host it connects, and opening one from here. */
     private val lazyPullRequestApi = lazy { PullRequestApi(lazyAccountRpc.value, lazySessionTokens.value) }
     /** Where the agent's machine is, for its desktop. */
@@ -422,7 +435,7 @@ class AppGraph(
      * GitHub's REST API, anonymous: what stands in for the account service while Extended mode is off, for the
      * repositories it hosts — pull request states and the `.cursor/` skills and commands in a repository's tree.
      */
-    private val lazyGitHub = lazy { GitHubApi(CursorApiFactory.gitHubClient()) }
+    private val lazyGitHub = lazy { GitHubApi(CursorApiFactory.gitHubClient(httpRoot.value)) }
     private val lazyGitHubPullRequests = lazy { GitHubPullRequestSource(lazyGitHub.value) }
     private val lazyGitHubSlashCommands = lazy { GitHubSlashCommandApi(lazyGitHub.value) }
 
@@ -431,7 +444,7 @@ class AppGraph(
      * the app has no documented way to mint (the CLI's exchange is not in the reference), so the provider answers
      * null and every Origin read degrades to "open in browser" until one exists.
      */
-    private val lazyOrigin = lazy { OriginApi(CursorApiFactory.originClient(), tokenProvider = { null }) }
+    private val lazyOrigin = lazy { OriginApi(CursorApiFactory.originClient(httpRoot.value), tokenProvider = { null }) }
 
     /**
      * The panel's reads of a pull request, a repository's files and the agent's token usage: the documented and
@@ -909,7 +922,7 @@ class AppGraph(
     val artifacts: ArtifactRepository get() = lazyArtifacts.value
 
     /** The files `/cursor/stores/…` paths in replies point at, read through the account's store reads (Extended mode). */
-    private val lazyMediaClient = lazy { CursorApiFactory.mediaClient() }
+    private val lazyMediaClient = lazy { CursorApiFactory.mediaClient(httpRoot.value) }
     private val lazyStoreFiles = lazy {
         StoreFileRepository(
             api = { projectAccount },
@@ -921,7 +934,7 @@ class AppGraph(
     }
     val storeFiles: StoreFileRepository get() = lazyStoreFiles.value
 
-    private val lazyMedia = lazy { MediaLoader(app, lazyMediaClient.value, artifacts, stores = { storeFiles }, files = { agentFileReads }) }
+    private val lazyMedia = lazy { MediaLoader(app, { lazyMediaClient.value }, artifacts, stores = { storeFiles }, files = { agentFileReads }) }
     val media: MediaLoader get() = lazyMedia.value
 
     /** The media viewer's saves to the gallery: the process's, so a save runs on past the viewer's close and shows when it opens again. */
@@ -944,7 +957,7 @@ class AppGraph(
      */
     private val lazyReleases = lazy {
         GitHubReleasesClient(
-            CursorApiFactory.updateClient(),
+            CursorApiFactory.updateClient(httpRoot.value),
             BuildConfig.GITHUB_REPO,
             apiBaseUrl = BuildConfig.UPDATE_API_BASE_URL,
             freeSpace = { allocatableBytes(app, it) },
@@ -965,9 +978,21 @@ class AppGraph(
             // The background service streaming a run is the one thing a silent self-update would cut off; a monitor
             // this process never built is holding no stream, and asking is not worth building one.
             agentsRunning = { lazyRunMonitor.isInitialized() && runMonitor.isRunning },
-        )
+        ).also { builtUpdates.value = it }
     }
     val updates: UpdateManager get() = lazyUpdates.value
+
+    private val builtUpdates = MutableStateFlow<UpdateManager?>(null)
+
+    /**
+     * [UpdateManager.state] for the sidebar's hint, without building the updater: Idle until something has — the
+     * deferred startup, Settings — which is all the updater itself says before then, as it restores on first use.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val updateState: Flow<UpdateState> = builtUpdates.flatMapLatest { it?.state ?: flowOf(UpdateState.Idle) }
+
+    /** What [updateState] says right now, for a composition's first frame. */
+    fun currentUpdateState(): UpdateState = builtUpdates.value?.state?.value ?: UpdateState.Idle
 
     /**
      * The installed version's release notes — the What's new page, its row in Settings and its card in the sidebar.
@@ -979,9 +1004,18 @@ class AppGraph(
             prefs = prefs,
             cache = JsonDiskCache(File(app.cacheDir, "whats-new")),
             installedVersionName = appVersion,
-        )
+        ).also { builtWhatsNew.value = it }
     }
     val whatsNew: WhatsNewRepository get() = lazyWhatsNew.value
+
+    private val builtWhatsNew = MutableStateFlow(releaseNotes)
+
+    /**
+     * [WhatsNewRepository.unread] for the sidebar's card, without building the repository: null until something has
+     * (the deferred startup's refresh, Settings), which is all it says itself before its first refresh.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val whatsNewUnread: Flow<ReleaseNotes?> = builtWhatsNew.flatMapLatest { it?.unread ?: flowOf(null) }
 
     private val swept = AtomicBoolean(false)
 

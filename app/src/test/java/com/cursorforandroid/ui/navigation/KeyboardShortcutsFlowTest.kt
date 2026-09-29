@@ -29,6 +29,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -38,6 +39,7 @@ import com.cursorforandroid.data.local.CachedConversation
 import com.cursorforandroid.domain.BuiltInSlashCommands
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.ui.agents.AgentRowTags
+import com.cursorforandroid.ui.agents.AgentsViewModel
 import com.cursorforandroid.ui.settings.KeyboardShortcutsCopy
 import com.cursorforandroid.ui.settings.KeyboardShortcutsTags
 import com.cursorforandroid.ui.settings.SettingsTags
@@ -281,6 +283,40 @@ class KeyboardShortcutsFlowTest {
         compose.waitUntil(10_000) { displayed(hasContentDescription("Search chats")) }
         chord(KeyEvent.KEYCODE_B)
         compose.waitUntil(10_000) { !displayed(hasContentDescription("Search chats")) }
+    }
+
+    @Test
+    fun `on a phone with the drawer shut, Ctrl+1 to 0 open the rows it would show, a chat's nested chats among them once listed there`() {
+        showShell(wide = false)
+        val list = ViewModelProvider(compose.activity, AgentsViewModel.Factory(graph))[AgentsViewModel::class.java].uiState
+        compose.waitUntil(30_000) { list.value.hasLoaded && !list.value.isRefreshing }
+        val project = list.value.sections.first().rows.first()
+        val worker = project.children.first().agent.name
+        val second = list.value.sections.flatMap { it.rows }.map { it.agent.name }.distinct()[1]
+        assertTrue(worker != second)
+
+        chord(KeyEvent.KEYCODE_1)
+        compose.waitUntil(20_000) { chatOpen(PROJECT) }
+        chord(KeyEvent.KEYCODE_2)
+        compose.waitUntil(20_000) { chatOpen(second) }
+
+        // The Project's workers listed in the drawer, and the drawer shut again: Ctrl+2 is the first of them.
+        chord(KeyEvent.KEYCODE_B)
+        compose.waitUntil(10_000) { displayed(SEARCH_CHATS) }
+        compose.onNode(hasContentDescription("Show chats under $PROJECT")).performClick()
+        compose.waitUntil(10_000) { exists(hasContentDescription("Hide chats under $PROJECT")) }
+        chord(KeyEvent.KEYCODE_B)
+        compose.waitUntil(10_000) { !displayed(SEARCH_CHATS) }
+        chord(KeyEvent.KEYCODE_2)
+        compose.waitUntil(20_000) { chatOpen(worker) }
+
+        // The list changed behind the screen, the Projects group folded: Ctrl+1 is the first row the drawer would show now.
+        val vm = ViewModelProvider(compose.activity, AgentsViewModel.Factory(graph))[AgentsViewModel::class.java]
+        vm.setSectionCollapsed(list.value.sections.first().key, true)
+        compose.waitUntil(10_000) { list.value.sections.first().key in list.value.collapsedSections }
+        compose.waitForIdle()
+        chord(KeyEvent.KEYCODE_1)
+        compose.waitUntil(20_000) { chatOpen(list.value.sections[1].rows.first().agent.name) }
     }
 
     @Test

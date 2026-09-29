@@ -66,17 +66,32 @@ class TranscriptPresenter {
          * equal them. The equality is cheap where it matters: a group's steps and a message's text are the very
          * instances the trace or the transcript holds, so their comparison is the identity check `equals` starts with.
          */
-        fun matches(items: List<TimelineItem>, from: Int, to: Int, mode: Boolean, interrupted: Set<String>, repeats: Set<String>): Boolean {
+        fun matches(items: List<TimelineItem>, from: Int, to: Int, mode: Boolean): Boolean {
             if (this.mode != mode || to - from != source.size) return false
             for (i in source.indices) {
                 val mine = source[i]
                 val theirs = items[from + i]
                 if (mine !== theirs && !(mine.javaClass === theirs.javaClass && mine == theirs)) return false
             }
+            return true
+        }
+
+        /** Whether the segment was cut for the same two facts read over the whole. */
+        fun cutFor(interrupted: Set<String>, repeats: Set<String>): Boolean {
             if (this.interrupted.size != interrupted.size || this.repeats.size != repeats.size) return false
             for (id in this.interrupted) if (id !in interrupted) return false
             for (key in this.repeats) if (key !in repeats) return false
             return true
+        }
+
+        /** Every key a call or an item of [source] could be left out under, read once (see [candidateKeys]). */
+        private var keys: List<String>? = null
+
+        /** The keys [all] leaves out among the segment's calls and items: [repeatsWithin] over [source]. */
+        fun repeatsIn(all: CoordinatorTranscript.LeftOutScan): Set<String> {
+            if (all.isEmpty) return emptySet()
+            val keys = keys ?: candidateKeys(source, 0, source.size).also { keys = it }
+            return leftOutAmong(keys, all)
         }
     }
 
@@ -100,11 +115,15 @@ class TranscriptPresenter {
     @Synchronized
     fun present(items: List<TimelineItem>, coordinatorMode: Boolean, runActive: Boolean): Presented {
         val startedAt = System.nanoTime()
+        again(items, coordinatorMode, runActive)?.let { presented ->
+            TranscriptPerf.focused?.presenterRun(System.nanoTime() - startedAt, built = 0, reused = presented.segmentsReused)
+            return presented
+        }
         val interruptedAll = TranscriptRows.interruptedFooters(items)
         // The other fact that crosses a turn: a message — or the whole activity — a later turn's log carries again is
         // the earlier turn's, and is drawn there alone (see CoordinatorTranscript.repeatedMessages, replayedActivity).
         // Read over the whole, told per segment.
-        val repeatsAll = CoordinatorTranscript.leftOut(items)
+        val repeatsAll = leftOut(items)
         val previous = segments
         // Whether the chat is a coordinator's by its content, before anything is cut: the mode shapes every segment.
         val mode = coordinatorMode || contentSaysCoordinator(items, previous)
@@ -116,14 +135,18 @@ class TranscriptPresenter {
         while (start < items.size) {
             val end = segmentEnd(items, start)
             val interrupted = interruptedWithin(items, start, end, interruptedAll)
-            val repeats = repeatsWithin(items, start, end, repeatsAll)
             // The last presentation's segments are in order, as these are: the candidate is the next one not yet
             // matched, and a segment that moved (a page inserted above) is found by scanning on.
             var match: Segment? = null
+            var repeats: Set<String>? = null
             var q = p
             while (q < previous.size) {
                 val candidate = previous[q]
-                if (candidate.matches(items, start, end, mode, interrupted, repeats)) { match = candidate; p = q + 1; break }
+                if (candidate.matches(items, start, end, mode)) {
+                    // The candidate's items are these: the keys they could be left out under are the candidate's.
+                    val within = candidate.repeatsIn(repeatsAll).also { repeats = it }
+                    if (candidate.cutFor(interrupted, within)) { match = candidate; p = q + 1; break }
+                }
                 // The candidate starts where this segment does but differs (a turn that grew or was completed): it
                 // is this segment's earlier self, and nothing after it can be this segment either.
                 if (candidate.startsLike(items[start])) { p = q + 1; break }
@@ -135,7 +158,7 @@ class TranscriptPresenter {
             } else {
                 // The segment's source items are kept as the segment's own copy only when they were not reused, so
                 // the presentation holds no second copy of what it was given.
-                next += cut(items.subList(start, end), mode, interrupted, repeats)
+                next += cut(items.subList(start, end), mode, interrupted, repeats ?: repeatsWithin(items, start, end, repeatsAll))
                 built++
             }
             start = end
@@ -155,6 +178,28 @@ class TranscriptPresenter {
         val index = SubagentRows.index(rows).let { if (it == subagents) subagents else it.also { fresh -> subagents = fresh } }
         TranscriptPerf.focused?.presenterRun(System.nanoTime() - startedAt, built = built, reused = reused)
         return Presented(presentedItems, rows, mode, goal, segmentsBuilt = built, segmentsReused = reused, subagents = index)
+            .also { last = Last(items.toList(), coordinatorMode, runActive, it) }
+    }
+
+    /** The last presentation's input — its items copied, so a caller's list changed in place does not match — and its answer. */
+    private class Last(val items: List<TimelineItem>, val coordinatorMode: Boolean, val runActive: Boolean, var presented: Presented)
+
+    private var last: Last? = null
+
+    /**
+     * The last answer when the input is the last one — the same item instances, mode and liveness, as a state that
+     * moved only a flag (loading older, the queue) gives — else null. The passes of [present] read nothing but these
+     * three and this presenter's state, which a presentation of the same input leaves as it found it; an input
+     * [present] comes to read must join this check. The answer says no segment was cut, as none was.
+     */
+    private fun again(items: List<TimelineItem>, coordinatorMode: Boolean, runActive: Boolean): Presented? {
+        val last = last ?: return null
+        if (last.coordinatorMode != coordinatorMode || last.runActive != runActive || last.items.size != items.size) return null
+        for (i in items.indices) if (last.items[i] !== items[i]) return null
+        val presented = last.presented
+        if (presented.segmentsBuilt == 0) return presented
+        return Presented(presented.items, presented.rows, presented.coordinatorMode, presented.goal, segmentsBuilt = 0, segmentsReused = segments.size, subagents = presented.subagents)
+            .also { last.presented = it }
     }
 
     /** The last presentation's index, kept while it says the same so the rows reading it are not recomposed. */
@@ -198,23 +243,44 @@ class TranscriptPresenter {
         return found ?: emptySet()
     }
 
-    /** The keys of [all] (see [CoordinatorTranscript.leftOut]) that name a call or an item of `items[from, to)`. */
-    private fun repeatsWithin(items: List<TimelineItem>, from: Int, to: Int, all: Set<String>): Set<String> {
-        if (all.isEmpty()) return emptySet()
-        var found: MutableSet<String>? = null
-        for (i in from until to) {
-            val item = items[i]
-            val whole = CoordinatorTranscript.itemKey(item)
-            if (whole in all) (found ?: HashSet<String>().also { found = it }) += whole
-            if (item !is ActivityGroup) continue
-            for (step in item.steps) {
-                if (step !is ToolCall) continue
-                val key = CoordinatorTranscript.messageKey(item, step)
-                if (key in all) (found ?: HashSet<String>().also { found = it }) += key
-            }
+    /**
+     * The scan of [CoordinatorTranscript.leftOut] over [scanned] — the items up to the newest turn's runs, ending at a
+     * footer — kept so a presentation reads only the runs after them while those items stay as they were.
+     */
+    private var scanBase: CoordinatorTranscript.LeftOutScan? = null
+    private val scanned = ArrayList<TimelineItem>()
+
+    /** [CoordinatorTranscript.leftOut] over [items], read on from the kept scan where [items] begin with what it read. */
+    private fun leftOut(items: List<TimelineItem>): CoordinatorTranscript.LeftOutScan {
+        var from = scanned.size
+        if (from > items.size || (0 until from).any { !same(scanned[it], items[it]) }) {
+            scanBase = null
+            scanned.clear()
+            from = 0
         }
-        return found ?: emptySet()
+        // The newest turn is the one that moves: the runs before it are read into the kept scan, once.
+        var until = items.indexOfLast { it is UserMessage }.coerceAtLeast(0)
+        while (until > from && items[until - 1] !is RunFooter) until--
+        if (until > from) {
+            try {
+                (scanBase ?: CoordinatorTranscript.LeftOutScan().also { scanBase = it }).scan(items, from, until)
+            } catch (e: RuntimeException) {
+                // A scan that throws has read part of what it was given: the kept scan is read afresh next time.
+                scanBase = null
+                scanned.clear()
+                throw e
+            }
+            scanned.addAll(items.subList(from, until))
+            from = until
+        }
+        return CoordinatorTranscript.LeftOutScan(scanBase).also { it.scan(items, from, items.size) }
     }
+
+    private fun same(a: TimelineItem, b: TimelineItem): Boolean = a === b || (a.javaClass === b.javaClass && a == b)
+
+    /** The keys [all] leaves out (see [CoordinatorTranscript.leftOut]) that name a call or an item of `items[from, to)`. */
+    private fun repeatsWithin(items: List<TimelineItem>, from: Int, to: Int, all: CoordinatorTranscript.LeftOutScan): Set<String> =
+        if (all.isEmpty) emptySet() else leftOutAmong(candidateKeys(items, from, to), all)
 
     private fun cut(source: List<TimelineItem>, mode: Boolean, interrupted: Set<String>, repeats: Set<String>): Segment {
         val items = source.toList()
@@ -266,4 +332,23 @@ class TranscriptPresenter {
         val replacement = if (openedInput === stretch) openedOutput!! else TranscriptRows.withGroupOpen(stretch, entryIndex).also { openedInput = stretch; openedOutput = it }
         return (out ?: rows.toMutableList()).also { it[index] = replacement }
     }
+}
+
+/** Every key a call or an item of `items[from, to)` could be left out under (see [CoordinatorTranscript.leftOut]), in order. */
+private fun candidateKeys(items: List<TimelineItem>, from: Int, to: Int): List<String> {
+    val out = ArrayList<String>(to - from)
+    for (i in from until to) {
+        val item = items[i]
+        out += CoordinatorTranscript.itemKey(item)
+        if (item !is ActivityGroup) continue
+        for (step in item.steps) if (step is ToolCall) out += CoordinatorTranscript.messageKey(item, step)
+    }
+    return out
+}
+
+/** The [keys] that [all] leaves out. */
+private fun leftOutAmong(keys: List<String>, all: CoordinatorTranscript.LeftOutScan): Set<String> {
+    var found: MutableSet<String>? = null
+    for (key in keys) if (all.leavesOut(key)) (found ?: HashSet<String>().also { found = it }) += key
+    return found ?: emptySet()
 }
