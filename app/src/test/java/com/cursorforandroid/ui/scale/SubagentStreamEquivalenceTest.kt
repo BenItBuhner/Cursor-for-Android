@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.data.api.RunStreamEvent
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.domain.SubagentChild
+import com.cursorforandroid.domain.SubagentRows
 import com.cursorforandroid.fixtures.ScaleFleet
 import com.google.common.truth.Truth.assertWithMessage
 import kotlinx.coroutines.flow.Flow
@@ -21,6 +22,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -51,8 +53,8 @@ class SubagentStreamEquivalenceTest {
 
     @Test
     fun `every line and row reads as main's did, frame by frame, within a frame`() {
-        val frames = record()
         val record = System.getenv("SUBAGENT_EQUIVALENCE_RECORD")?.takeIf { it.isNotBlank() }
+        val frames = record(settleOffFrame = record == null)
         if (record != null) {
             File(record).apply { parentFile?.mkdirs() }.writeText(encode(frames))
             println("SCALE subagent-equivalence recorded ${frames.size} frames to $record")
@@ -78,8 +80,12 @@ class SubagentStreamEquivalenceTest {
         assertWithMessage(frames.last().joinToString("\n")).that(frames.last().count { it.startsWith("line:${SubagentStretchScene.PER_STRETCH} Working") }).isEqualTo(SubagentStretchScene.STRETCHES)
     }
 
-    /** What the screen reads after each of [FRAMES] frames, the streams scripted a frame at a time. */
-    private fun record(): List<List<String>> {
+    /**
+     * What the screen reads after each of [FRAMES] frames, the streams scripted a frame at a time. Main works each
+     * child's state out inside the frame; with [settleOffFrame] each frame first waits until every child's state, worked
+     * out off the main thread, shows what its run's latest snapshot says, so a slow machine reads settled frames too.
+     */
+    private fun record(settleOffFrame: Boolean): List<List<String>> {
         rig = ScaleRig(compose, ScaleFleet.Size.S50, now)
         SubagentStretchScene.install(rig.api, now)
         rig.start(bigTurns = 20)
@@ -87,7 +93,13 @@ class SubagentStreamEquivalenceTest {
         val workers = SubagentStretchScene.workers
         runBlocking { workers.forEach { rig.streamer.emit("run-$it", RunStreamEvent.Status("run-$it", RunStatus.RUNNING)) } }
         val derived = AtomicLong()
-        val source: (String) -> Flow<SubagentChild?> = { id -> graph.subagentActivity.of(id).onEach { derived.incrementAndGet() } }
+        val shown = ConcurrentHashMap<String, SubagentChild>()
+        val source: (String) -> Flow<SubagentChild?> = { id ->
+            graph.subagentActivity.of(id).onEach { child ->
+                if (child != null) shown[id] = child else shown.remove(id)
+                derived.incrementAndGet()
+            }
+        }
         compose.setContent { SubagentStretchScene.Screen(graph, source) }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
@@ -106,6 +118,12 @@ class SubagentStreamEquivalenceTest {
             // The hub has every event, and whatever works them off the main thread has gone quiet.
             val deadline = System.nanoTime() + 5_000_000_000L
             while (workers.any { (graph.liveRuns.current(it, "run-$it")?.eventCount ?: 0) < emitted + 1 } && System.nanoTime() < deadline) Thread.sleep(1)
+            if (settleOffFrame) {
+                val live = workers.associateWith { id ->
+                    graph.liveRuns.current(id, "run-$id")?.let { SubagentRows.withRun(SubagentChild(), it.items, it.finished, it.status) }
+                }
+                while (live.any { (id, run) -> run != null && !shows(shown[id], run) } && System.nanoTime() < deadline) Thread.sleep(1)
+            }
             var last = -1L
             while (derived.get() != last && System.nanoTime() < deadline) {
                 last = derived.get()
@@ -116,6 +134,12 @@ class SubagentStreamEquivalenceTest {
         }
         return readings
     }
+
+    /** [child] carries its run's word: a child's live status, step and action outrank the list's. */
+    private fun shows(child: SubagentChild?, run: SubagentChild): Boolean = child != null &&
+        (run.status == null || child.status == run.status) &&
+        (run.step == null || child.step == run.step) &&
+        (run.action == null || child.action == run.action)
 
     /** One frame a line, `index<TAB>readings joined`, a frame left out when it read as the one before. */
     private fun encode(frames: List<List<String>>): String = buildString {
