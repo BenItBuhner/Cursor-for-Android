@@ -28,12 +28,11 @@ import com.cursorforandroid.data.FakeRunStreamer
 import com.cursorforandroid.data.api.RunStreamEvent
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.data.repo.CursorBackend
-import com.cursorforandroid.domain.ActivityGroup
 import com.cursorforandroid.domain.RunStatus
-import com.cursorforandroid.domain.ThinkingBlock
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.cursorforandroid.util.AppClock
+import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.RoborazziTaskType
 import com.github.takahirom.roborazzi.captureScreenRoboImage
@@ -154,6 +153,7 @@ class WorkingCaptionHandoffTest {
 
     private fun listBounds(): Rect = compose.onNode(transcript).fetchSemanticsNode().boundsInRoot
 
+    @OptIn(ExperimentalRoborazziApi::class)
     private fun screen(): Bitmap {
         val file = File.createTempFile("working-handoff-frame", ".png").apply { deleteOnExit() }
         captureScreenRoboImage(file.path, RoborazziOptions(taskType = RoborazziTaskType.Record))
@@ -179,11 +179,10 @@ class WorkingCaptionHandoffTest {
         val lead = List(LEAD_IN_FRAMES) { compose.mainClock.advanceTimeByFrame(); frame("caption at rest") }
 
         runBlocking { streamer.emit(runId, RunStreamEvent.Thinking(THOUGHT)) }
-        compose.waitUntil(20_000) {
-            graph.conversations.state(agentId).value.items.any { item -> (item as? ActivityGroup)?.steps?.any { it is ThinkingBlock } == true }
-        }
-        // The rows are presented off the main thread: frames go by, the caption at rest, until the first the thought is on.
-        compose.waitUntil(20_000) {
+        // The thought reaches the screen through work on the main thread and off it: frames go by, each one running
+        // the main thread's queue, the caption at rest, until the first the thought is on. A wait that only looked
+        // would hold the main thread and could starve it.
+        compose.waitUntil(60_000) {
             compose.mainClock.advanceTimeByFrame()
             thinking() != null
         }
