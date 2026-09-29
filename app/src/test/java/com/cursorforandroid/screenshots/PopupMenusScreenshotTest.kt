@@ -22,11 +22,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
-import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -79,9 +81,7 @@ import com.cursorforandroid.ui.conversation.LocalTranscriptControls
 import com.cursorforandroid.ui.conversation.TimelineItemView
 import com.cursorforandroid.ui.conversation.TranscriptControls
 import com.cursorforandroid.ui.customize.CustomizeSheet
-import com.cursorforandroid.util.awaitSynced
-import com.cursorforandroid.util.holdFrameClock
-import com.cursorforandroid.util.pumpSynced
+import com.cursorforandroid.ui.customize.READ_ALL
 import com.cursorforandroid.ui.projects.ProjectActions
 import com.cursorforandroid.ui.projects.projectSection
 import com.cursorforandroid.ui.theme.CursorDimens
@@ -90,6 +90,7 @@ import com.cursorforandroid.ui.theme.ThemeMode
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
@@ -469,20 +470,19 @@ class PopupMenusScreenshotTest {
         val api = FakeCursorApi()
         api.addIdleAgent(id = "bc-1", name = "Cli exploration", runId = "run-1", repo = "https://github.com/acme/app")
         api.addIdleAgent(id = "bc-2", name = "Latest release process", runId = "run-2", repo = "https://github.com/acme/site")
-        val graph = AppGraph(ApplicationProvider.getApplicationContext<Context>(), demo = CursorBackend(api, FakeRunStreamer(), isDemo = true))
+        val graph = AppGraph(ApplicationProvider.getApplicationContext<Context>(), demo = CursorBackend(api, FakeRunStreamer(), isDemo = true), agentListDispatcher = Dispatchers.Main)
         runBlocking { graph.session.enterDemo() }
         val viewModel = AgentsViewModel(graph)
-        compose.holdFrameClock()
         compose.setContent {
             Scene(mode) { CustomizeSheet(viewModel, onDismiss = {}) }
         }
-        compose.awaitSynced {
+        // Read all is drawn enabled only once the unread chats have reached the sheet (see AppGraph.agentListDispatcher).
+        compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodes(hasText("Group by")).fetchSemanticsNodes().isNotEmpty() &&
-                viewModel.uiState.value.repoSlugs.size == 2
+                compose.onAllNodes(hasTestTag("sheet-header-action-$READ_ALL") and isEnabled()).fetchSemanticsNodes().isNotEmpty() &&
+                compose.runOnIdle { viewModel.uiState.value.repoSlugs.size == 2 }
         }
         compose.onNodeWithText("Group by").performClick()
-        compose.awaitSynced { compose.onAllNodes(hasText("Date")).fetchSemanticsNodes().isNotEmpty() }
-        compose.pumpSynced()
         capture(name)
     }
 
