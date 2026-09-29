@@ -1,18 +1,13 @@
 package com.cursorforandroid.ui.navigation
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
-import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
-import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
@@ -90,19 +85,11 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-/** The hosting activity through any number of wrappers (a themed context, a display context); null outside one. */
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
-
 /**
  * Same shell as the official app: the New Chat pane is home; the sidebar is a column on wide screens (a [SidebarRail],
  * collapsible with the drawer's slide) and an edge-swipe drawer on phones. Destinations live on a [NavStack] rendered
  * by [CursorNavHost].
  */
-@OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
 @Composable
 fun AppNavHost(
     graph: AppGraph,
@@ -115,15 +102,13 @@ fun AppNavHost(
     searchRequested: Boolean = false,
     onSearchConsumed: () -> Unit = {},
 ) {
-    // The window size class is measured from the activity; without one (a wrapped context) the phone layout stands in
-    // rather than the cast bringing the app down.
-    val activity = LocalContext.current.findActivity()
-    val wide = if (activity == null) false else calculateWindowSizeClass(activity).widthSizeClass != WindowWidthSizeClass.Compact
+    val window = remember { ShellWindow() }
+    ShellWindowReader(window, wide = null)
     AppShell(
         graph = graph,
         user = user,
         isDemo = isDemo,
-        wide = wide,
+        window = window,
         deepLinkAgentId = deepLinkAgentId,
         onDeepLinkConsumed = onDeepLinkConsumed,
         newChatRequested = newChatRequested,
@@ -147,6 +132,40 @@ internal fun AppShell(
     searchRequested: Boolean = false,
     onSearchConsumed: () -> Unit = {},
 ) {
+    val window = remember { ShellWindow() }
+    ShellWindowReader(window, wide)
+    AppShell(
+        graph = graph,
+        user = user,
+        isDemo = isDemo,
+        window = window,
+        deepLinkAgentId = deepLinkAgentId,
+        onDeepLinkConsumed = onDeepLinkConsumed,
+        newChatRequested = newChatRequested,
+        onNewChatConsumed = onNewChatConsumed,
+        searchRequested = searchRequested,
+        onSearchConsumed = onSearchConsumed,
+    )
+}
+
+/**
+ * The shell in [window], which [ShellWindowReader] keeps ahead of it: the width class decides the layout here, and the
+ * exact width reaches the panes without recomposing any of it.
+ */
+@Composable
+private fun AppShell(
+    graph: AppGraph,
+    user: CursorUser,
+    isDemo: Boolean,
+    window: ShellWindow,
+    deepLinkAgentId: String?,
+    onDeepLinkConsumed: () -> Unit,
+    newChatRequested: Boolean,
+    onNewChatConsumed: () -> Unit,
+    searchRequested: Boolean,
+    onSearchConsumed: () -> Unit,
+) {
+    val wide = window.wide
     val stack = rememberSaveable(saver = NavStack.Saver) { NavStack(Screen.Home) }
     val agentsViewModel: AgentsViewModel = viewModel(factory = AgentsViewModel.Factory(graph))
     val listState by agentsViewModel.uiState.collectAsStateWithLifecycle()
@@ -161,7 +180,8 @@ internal fun AppShell(
     var sidebarCollapsed by rememberSaveable { mutableStateOf(false) }
     // Where the window or a key's new screen last left the rail, beside the chat or away (see byKey), until anything
     // else moves it.
-    var railKeyed by remember { mutableStateOf<Boolean?>(null) }
+    val railKeyedState = remember { mutableStateOf<Boolean?>(null) }
+    var railKeyed by railKeyedState
     // The long groups the reader listed in full, for this visit to the sidebar: not saved, cut back on leaving.
     val shortLists = remember { SidebarShortLists() }
     val colors = CursorTheme.colors
@@ -197,8 +217,12 @@ internal fun AppShell(
     // it in that frame: a rail still sliding once the window has changed would drag the chat and a pinned panel
     // through widths of their own after it. That includes making way for the chat's sheet, pinned open as the window
     // widens into room for it.
-    val sheetOpen = { (stack.top.screen as? Screen.Agent)?.let { shortcuts.chats.target(it.id) }?.sheetOpen == true }
-    if (panes.configure(LocalConfiguration.current.screenWidthDp.dp, sheetOpen)) railKeyed = panes.widths.railShown
+    // Heard in the composition that sees the window change, ahead of the shell, so nothing here recomposes for a width
+    // that leaves the layout as it was: a window dragged wider or narrower a dp at a time.
+    remember(window, panes) {
+        val sheetOpen = { (stack.top.screen as? Screen.Agent)?.let { shortcuts.chats.target(it.id) }?.sheetOpen == true }
+        window.follow { width -> if (panes.configure(width, sheetOpen)) railKeyedState.value = panes.widths.railShown }
+    }
     LaunchedEffect(panes) { panes.load() }
     // Read coarse, so a drag at either edge resizes the panes without recomposing the shell.
     val railShown by remember(panes) { derivedStateOf { panes.widths.railShown } }
@@ -443,21 +467,24 @@ internal fun AppShell(
         )
     }
 
-    val rowActions = AgentRowActions(
-        onOpen = { row ->
-            agentsViewModel.markRead(row.agent)
-            openRow(row)
-        },
-        onTogglePin = { agentsViewModel.togglePinned(it.agent.id) },
-        onArchive = { agentsViewModel.archive(it.agent.id) },
-        onUnarchive = { agentsViewModel.unarchive(it.agent.id) },
-        // The public API has no rename; the demo renames its in-memory row, Extended mode the account's.
-        onRename = if (isDemo || extendedMode) ({ row, name -> agentsViewModel.rename(row.agent.id, name) }) else null,
-        onSnooze = { row, until -> agentsViewModel.snooze(row.agent.id, until) },
-        onUnsnooze = { agentsViewModel.unsnooze(it.agent.id) },
-        // Projects are the account's: their editor, like the rename, is offered with Extended mode (the demo edits its own rows).
-        onEditProject = if (isDemo || extendedMode) ({ row -> projectEditor = ProjectEditorTarget.Edit(row.agent.id) }) else null,
-    )
+    // Kept from one composition to the next, so the rows it is handed to skip whatever else recomposes the shell.
+    val rowActions = remember(agentsViewModel, isDemo, extendedMode) {
+        AgentRowActions(
+            onOpen = { row ->
+                agentsViewModel.markRead(row.agent)
+                openRow(row)
+            },
+            onTogglePin = { agentsViewModel.togglePinned(it.agent.id) },
+            onArchive = { agentsViewModel.archive(it.agent.id) },
+            onUnarchive = { agentsViewModel.unarchive(it.agent.id) },
+            // The public API has no rename; the demo renames its in-memory row, Extended mode the account's.
+            onRename = if (isDemo || extendedMode) ({ row, name -> agentsViewModel.rename(row.agent.id, name) }) else null,
+            onSnooze = { row, until -> agentsViewModel.snooze(row.agent.id, until) },
+            onUnsnooze = { agentsViewModel.unsnooze(it.agent.id) },
+            // Projects are the account's: their editor, like the rename, is offered with Extended mode (the demo edits its own rows).
+            onEditProject = if (isDemo || extendedMode) ({ row -> projectEditor = ProjectEditorTarget.Edit(row.agent.id) }) else null,
+        )
+    }
     val destination = when (topScreen) {
         Screen.Home -> SidebarDestination.NewChat
         Screen.Settings -> SidebarDestination.Settings
@@ -811,8 +838,12 @@ internal fun AppShell(
     }
 }
 
-/** What the detail pane's screens read from the shell around them; see the movable content in [AppShell]. */
-private class DetailPane(
+/**
+ * What the detail pane's screens read from the shell around them; see the movable content in [AppShell]. Compared by
+ * value, so a composition of the shell that changes none of it leaves the pane's screens alone.
+ */
+@Immutable
+private data class DetailPane(
     val listState: AgentListUiState,
     val user: CursorUser,
     val isDemo: Boolean,

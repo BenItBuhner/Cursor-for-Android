@@ -611,16 +611,26 @@ class PreferencesStore(
 
     val demoMode: Flow<Boolean> = accountData.map { it[Keys.demoMode] ?: false }.distinctUntilChanged()
 
-    val cachedUser: Flow<CursorUser?> = accountData.changedIn(Keys.cachedUser).map { p ->
-        p[Keys.cachedUser]?.let { runCatching { CursorJson.decodeFromString(CachedUser.serializer(), it) }.getOrNull() }
-            ?.let { CursorUser(it.apiKeyName, it.email, it.firstName, it.lastName, it.userId, it.profilePictureUrl) }
-    }
+    val cachedUser: Flow<CursorUser?> = accountData.changedIn(Keys.cachedUser).map { it.cachedUser() }
 
     /** How the stored key was obtained and when it lapses. A key stored before this was recorded counts as pasted. */
-    val credentialInfo: Flow<CredentialInfo?> = accountData.map { p ->
-        val method = p[Keys.signInMethod]?.let { raw -> SignInMethod.entries.firstOrNull { it.name == raw } }
-        method?.let { CredentialInfo(it, p[Keys.apiKeyExpiresAt]) }
-    }.distinctUntilChanged()
+    val credentialInfo: Flow<CredentialInfo?> = accountData.map { it.credentialInfo() }.distinctUntilChanged()
+
+    /** What a cold start's session restore reads of the settings, all from one read of them. */
+    data class SessionSnapshot(val demoMode: Boolean, val credentialInfo: CredentialInfo?, val cachedUser: CursorUser?)
+
+    suspend fun sessionSnapshot(): SessionSnapshot = accountData.map { p ->
+        SessionSnapshot(demoMode = p[Keys.demoMode] ?: false, credentialInfo = p.credentialInfo(), cachedUser = p.cachedUser())
+    }.first()
+
+    private fun Preferences.cachedUser(): CursorUser? =
+        this[Keys.cachedUser]?.let { runCatching { CursorJson.decodeFromString(CachedUser.serializer(), it) }.getOrNull() }
+            ?.let { CursorUser(it.apiKeyName, it.email, it.firstName, it.lastName, it.userId, it.profilePictureUrl) }
+
+    private fun Preferences.credentialInfo(): CredentialInfo? {
+        val method = this[Keys.signInMethod]?.let { raw -> SignInMethod.entries.firstOrNull { it.name == raw } }
+        return method?.let { CredentialInfo(it, this[Keys.apiKeyExpiresAt]) }
+    }
 
     data class ComposerDefaults(
         val repoUrl: String?,
