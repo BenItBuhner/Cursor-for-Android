@@ -2,7 +2,8 @@
 // public/footage/takes.json with what the capture recorded beside every frame — the app's content size, the system
 // bars' heights, the clock, a finger, the keys held, the take's marks — and the frames each streamed text lands in,
 // which the cut must never speed through or cut inside.
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,7 +26,14 @@ for (const { id, take, segment } of SEGMENTS) {
   const mp4 = join(out, take, `${segment}.mp4`);
   const jsonl = join(out, take, `${segment}.jsonl`);
   if (!existsSync(mp4) || !existsSync(jsonl)) throw new Error(`No ${take}/${segment} capture: run promo/capture/run.sh ${take}`);
-  copyFileSync(mp4, join(footage, `${id}.mp4`));
+  // The capture's frames reach ffmpeg as BGRA, which its scaler converts with BT.601's matrix and leaves untagged, and
+  // Remotion reads an untagged stream as BT.709: the UI's colours would shift a few levels. The stream says so, as is.
+  const tagged = spawnSync(
+    "ffmpeg",
+    ["-v", "error", "-y", "-i", mp4, "-c", "copy", "-bsf:v", "h264_metadata=matrix_coefficients=6:video_full_range_flag=0", join(footage, `${id}.mp4`)],
+    { stdio: "inherit" },
+  );
+  if (tagged.status !== 0) throw new Error(`ffmpeg could not copy ${mp4}`);
   const frames = readFileSync(jsonl, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   const marks = {};
   frames.forEach((f, i) => (f.marks ?? []).forEach((m) => (marks[m] = i)));
