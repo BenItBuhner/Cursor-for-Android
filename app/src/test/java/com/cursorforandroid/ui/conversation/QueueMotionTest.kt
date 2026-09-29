@@ -4,8 +4,6 @@ import android.graphics.Bitmap
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithContentDescription
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -152,13 +150,15 @@ class QueueMotionTest {
         scene.queue += queued("q-1", "Run the migration first")
         scene.show(motion)
         compose.runOnUiThread { scene.queue.clear() }
-        scene.frames(32)
-        assertThat(motion.flights).isEmpty()
-        compose.onAllNodesWithContentDescription("Queued follow-up 1 of", substring = true, useUnmergedTree = true)
-            .fetchSemanticsNodes().isNotEmpty()
+        scene.frame()
+        val flight = checkNotNull(motion.flight)
+        scene.frames(480)
+        assertThat(flight.phase).isEqualTo(SendFlight.Phase.Holding)
         compose.runOnUiThread { scene.messages += com.cursorforandroid.domain.UserMessage("u-2", "Run the migration first") }
-        scene.frames(96)
-        compose.onNodeWithText("Run the migration first", useUnmergedTree = true).assertExists()
+        scene.frame()
+        scene.frames(32)
+        assertThat(flight.phase).isEqualTo(SendFlight.Phase.Flying)
+        assertThat(flight.targetId).isEqualTo("u-2")
     }
 
     @Test

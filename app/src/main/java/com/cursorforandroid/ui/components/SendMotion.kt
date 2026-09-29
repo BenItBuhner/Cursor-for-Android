@@ -942,31 +942,13 @@ private class Departure(val id: String, val text: String, val takeoff: Takeoff)
  * rather than waiting for it; with animations off nothing flies (see [SendMotion.depart]).
  */
 @Composable
-fun QueueDeliveries(
-    flights: QueueFlights,
-    rows: Map<String, String>,
-    transcript: Set<String>,
-    transcriptTexts: Set<String>,
-    /** Words still shown on an account card after leaving the device's queue — a hand-off, not a bubble filing. */
-    stillOnCardTexts: Set<String> = emptySet(),
-    scrolledAway: () -> Boolean,
-) {
+fun QueueDeliveries(flights: QueueFlights, rows: Map<String, String>, transcript: Set<String>, scrolledAway: () -> Boolean) {
     val motion = LocalSendMotion.current
     val leaving = if (motion == null) {
         emptyList()
     } else {
-        flights.shown.mapNotNull { (id, text) ->
-            if (id in rows) return@mapNotNull null
-            val key = com.cursorforandroid.domain.QueuePlacement.textKey(text)
-            // The card stays until the transcript files the bubble; only then does the row lift off and the deck hand over.
-            // Off the newest turn the bubble lands out of view: the copy fades where the row stood, without waiting to see it filed.
-            val onAccountCard = key in stillOnCardTexts
-            if (!scrolledAway() && !onAccountCard && id !in transcript && key !in transcriptTexts) return@mapNotNull null
-            flights.leaving(id)?.takeoff()?.let { Departure(id, text, it) }
-        }
+        flights.shown.mapNotNull { (id, text) -> if (id in rows) null else flights.leaving(id)?.takeoff()?.let { Departure(id, text, it) } }
     }
-    // Read during this composition, before the stack measures, so [QueueStack.delivered] and the deck height agree with the flight.
-    flights.delivering = leaving.mapTo(HashSet()) { it.id }
     SideEffect {
         if (motion != null && leaving.isNotEmpty()) {
             val excluded = flights.transcript + flights.shown.keys
@@ -980,6 +962,7 @@ fun QueueDeliveries(
         flights.shown = rows
         flights.transcript = transcript
         flights.keepOnly(rows.keys)
+        flights.delivering = leaving.mapTo(HashSet()) { it.id }
     }
 }
 

@@ -83,7 +83,6 @@ import com.cursorforandroid.domain.SubagentPlacement
 import com.cursorforandroid.ui.agents.RenameChatDialog
 import com.cursorforandroid.ui.agents.SnoozeChatDialog
 import com.cursorforandroid.ui.components.ChatHeader
-import com.cursorforandroid.domain.QueuePlacement
 import com.cursorforandroid.domain.UserMessage
 import com.cursorforandroid.ui.components.ComposerAnchor
 import com.cursorforandroid.ui.components.rememberComposerExpansion
@@ -230,7 +229,7 @@ fun ConversationScreen(
     val files by viewModel.pendingFiles.collectAsStateWithLifecycle()
     val fileUploads by viewModel.fileUploads.collectAsStateWithLifecycle()
     val uploadHint by viewModel.uploadHint.collectAsStateWithLifecycle()
-    val deviceQueue by viewModel.queue.collectAsStateWithLifecycle()
+    val queue by viewModel.queue.collectAsStateWithLifecycle()
     // The stack opens or closes on the tap, the device's record of the choice following (and seeding it again when it changes).
     val queueStacked by viewModel.queueStacked.collectAsStateWithLifecycle()
     var queueStackedHere by remember(queueStacked) { mutableStateOf(queueStacked) }
@@ -724,44 +723,21 @@ fun ConversationScreen(
         val arrival = rememberArrivalGlide(agentId)
         // Extended mode keeps the queue on the account, where the desktop and the web keep theirs; otherwise on this device.
         val accountQueue = capabilities.accountQueue && !isDemo
-        val stillOnCardIds = remember(deviceQueue, accountQueue, controls.queue, conversation.queuePlacement) {
-            buildSet {
-                if (accountQueue) {
-                    controls.queue.forEach { add(it.id) }
-                    conversation.queuePlacement.waiting.forEach { add(it.id) }
-                }
-            }
-        }
-        val stillOnCardTexts = remember(deviceQueue, accountQueue, controls.queue, conversation.queuePlacement) {
-            buildSet {
-                if (accountQueue) {
-                    controls.queue.forEach { add(QueuePlacement.textKey(it.text)) }
-                    conversation.queuePlacement.waiting.forEach { add(QueuePlacement.textKey(it.text)) }
-                }
-            }
-        }
-        val deviceHandoff = rememberDeviceQueueHandoff(deviceQueue, items, queueFlights, stillOnCardIds, stillOnCardTexts)
-        val queue = deviceHandoff.standing
         // A queued message the run takes flies from its card to its bubble, as a send flies from the composer.
-        val queuedRows = remember(deviceHandoff.rowsForFlight, accountQueue, controls.queue) {
+        val queuedRows = remember(queue, accountQueue, controls.queue) {
             LinkedHashMap<String, String>().apply {
-                deviceHandoff.rowsForFlight.forEach { (id, text) -> put(id, text) }
+                queue.forEach { put(it.id, it.previewText) }
                 if (accountQueue) controls.queue.forEach { put(it.id, it.previewText) }
             }
         }
         val transcriptMessageIds = remember(items) { items.mapNotNullTo(HashSet()) { (it as? UserMessage)?.id } }
-        val transcriptMessageKeys = remember(items) {
-            items.filterIsInstance<UserMessage>().mapTo(HashSet()) { QueuePlacement.textKey(it.text) }
-        }
         QueueDeliveries(
             flights = queueFlights,
             rows = queuedRows,
             transcript = transcriptMessageIds,
-            transcriptTexts = transcriptMessageKeys,
-            stillOnCardTexts = stillOnCardTexts,
             scrolledAway = { !transcriptScroll.following && TranscriptScroll.offBottom(listState.layoutInfo) },
         )
-        val willQueue = isActive || queue.isNotEmpty() || queueFlights.delivering.isNotEmpty() || (accountQueue && controls.queue.isNotEmpty())
+        val willQueue = isActive || queue.isNotEmpty() || (accountQueue && controls.queue.isNotEmpty())
         // The composer and the strips over it dock at the bottom (composerDockPadding): the gutter at each side, and
         // under the box a gap a shade wider than the gutter, above the keyboard's edge while there is one and above
         // the navigation bar — or the window's edge — otherwise. The transcript above takes whatever height is left
@@ -816,7 +792,7 @@ fun ConversationScreen(
                 // What is waiting to go out sits right above the box it came from, oldest first, one line each — the
                 // device's and, in Extended mode, the account's in one stack, a deck once there are more than a couple.
                 val accountRows = if (accountQueue) controls.queue else emptyList()
-                if (queue.isNotEmpty() || accountRows.isNotEmpty() || queueFlights.delivering.isNotEmpty()) {
+                if (queue.isNotEmpty() || accountRows.isNotEmpty()) {
                     val queueKeys = remember(queue, accountRows) { queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" } }
                     QueueStack(
                         keys = queueKeys,
