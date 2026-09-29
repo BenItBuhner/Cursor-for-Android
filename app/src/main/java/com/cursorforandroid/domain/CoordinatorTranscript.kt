@@ -313,6 +313,16 @@ object CoordinatorTranscript {
         return if (changed) out else items
     }
 
+    /** [items] without the coordinator's messages to the user (see [isUserMessageCall]): its activity alone. The same list when it sent none. */
+    fun withoutMessages(items: List<TimelineItem>): List<TimelineItem> {
+        var keys: MutableSet<String>? = null
+        for (item in items) {
+            if (item !is ActivityGroup) continue
+            for (step in item.steps) if (step is ToolCall && isUserMessageCall(reinterpret(step))) (keys ?: HashSet<String>().also { keys = it }) += messageKey(item, step)
+        }
+        return keys?.let { withoutRepeats(items, it) } ?: items
+    }
+
     /** The message texts of [items] as they read once whitespace is normalised, for telling a copy from its message. */
     fun messageTexts(items: List<TimelineItem>): Set<String> {
         var out: MutableSet<String>? = null

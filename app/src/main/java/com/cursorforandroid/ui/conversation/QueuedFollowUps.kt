@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorforandroid.domain.PendingFollowup
 import com.cursorforandroid.domain.QueuedFollowUp
+import com.cursorforandroid.domain.SteerPhase
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.runtime.produceState
 import com.cursorforandroid.domain.PromptFileKind
@@ -97,6 +99,11 @@ import com.cursorforandroid.ui.components.onContextClick
  * arrow then retries it. One on its way out shows a ring instead of the glyphs; a held one whose retry is out keeps
  * its glyphs, dimmed, until the server answers.
  *
+ * A message steered into the running turn is on its way the same way: its glyphs dim, and it stays on its card
+ * until the transcript shows it — "Steering…" on its second line, where a held card keeps its wait, while the
+ * account takes it, then "Steered", the message dimmed throughout. A steer that did not go through leaves the card as it was,
+ * the reason under the line in red, and the up arrow tries again.
+ *
  * With [flights], each row is an end of the send's flight (see `SendMotion`): a message sent while the agent is busy
  * lands in its row from the composer, and a row the run takes lifts off the card into its bubble.
  */
@@ -111,7 +118,7 @@ fun QueuedFollowUps(
     flights: QueueFlights? = null,
     /** A turn is under way: the up arrow steers into it (and says so) rather than sending next. */
     steers: Boolean = false,
-    /** The row whose glyph tap was just refused, its message being on its way: it says so in place of its wait. */
+    /** The row whose glyph tap was just refused, its message being on its way: its second line says so for a moment. */
     refusedId: String? = null,
 ) {
     Column(modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -182,12 +189,7 @@ private fun QueuedFollowUpRow(
             // The card's own surface, stood in from the composer's sides so its corners are concentric with the box's.
             // The description sits on the surface, so the row's node is the card as drawn.
             .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface(), face.contentAlpha, face.cover))
-            .semantics {
-                contentDescription = when (val note = item.warning) {
-                    null -> "Queued follow-up $position of $count"
-                    else -> "Queued follow-up $position of $count, not sent: $note"
-                }
-            }
+            .semantics { contentDescription = QueueCardWords.description(item, position, count) }
             .heightIn(min = RowHeight)
             .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp)
             .faceOf(face),
@@ -209,17 +211,27 @@ private fun QueuedFollowUpRow(
         // whether or not an attempt happens to be in flight this instant: the attempts are brief and the pauses
         // between them long, and a card that read "sending" for each would flicker between the two for as long as
         // the server took (see QueuedFollowUp.isHeld). The ring is for a first send only.
-        val sending = item.isSending && !item.isHeld
-        Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+        val steer = item.steer
+        val sending = item.isSending && !item.isHeld && steer == null
+        Column(Modifier.weight(1f).padding(vertical = 4.dp).animateContentSize(tween(NoteFadeMs))) {
             // The commands dim with the rest of the line while it goes out.
-            val textColor = if (sending) colors.textTertiary else colors.textPrimary
+            val textColor = if (sending || steer != null) colors.textTertiary else colors.textPrimary
             QueueLine(words, textColor, motion, anchor, item.id)
             if (item.files.isNotEmpty()) AttachedFileNames(item.files.map { it.file.name })
             // Why it did not go, in the server's words or the connection's: without it the warning is only a riddle.
             item.warning?.let { note ->
                 Text(note, style = type.small, color = colors.red, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            if (item.isHeld) HeldNote(item, refused = refused && item.isSending)
+            // A refused tap says why on the one second line the card has: a steer's note, else a held message's wait.
+            val saysRefused = refused && item.isOnItsWay
+            if (steer != null) {
+                SteerNote(steer, refused = saysRefused)
+            } else {
+                item.steerError?.let { reason ->
+                    Text(reason, style = type.small, color = colors.red, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag(QueueSteerErrorTag))
+                }
+            }
+            if (item.isHeld) HeldNote(item, refused = saysRefused && steer == null)
         }
         Spacer(Modifier.width(8.dp))
         if (sending) {
@@ -227,9 +239,10 @@ private fun QueuedFollowUpRow(
                 SpinnerRing(size = 11.dp)
             }
         } else {
-            // A held message's retry on the wire keeps the waiting face, but its glyphs dim for as long as the request
-            // is out: it cannot be called back, so a tap then is refused and the held line says why (see HeldNote).
-            val onItsWay = item.isSending || item.isSteered
+            // A message on its way — a held message's retry out, or a steer the account has not yet shown in the
+            // transcript — keeps its glyphs, dimmed, for as long as that lasts: its request cannot be called back, so
+            // a tap then is refused and the card's second line says why (see RefusableLine).
+            val onItsWay = item.isOnItsWay
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -245,12 +258,88 @@ private fun QueuedFollowUpRow(
 }
 
 /**
+ * A steered card's second line, where a held card keeps its wait: "Steering…" while the account takes the message,
+ * then "Steered", the one fading into the other in place, the line no taller for it. Quiet, as the wait is. A glyph
+ * tap refused meanwhile ([refused]) swaps it for why, as a held card's wait does (see [RefusableLine]).
+ */
+@Composable
+private fun SteerNote(phase: SteerPhase, refused: Boolean) {
+    val colors = CursorTheme.colors
+    val type = CursorTheme.typography
+    val steered by animateFloatAsState(if (phase == SteerPhase.STEERED) 1f else 0f, tween(NoteFadeMs), label = "steer-note")
+    RefusableLine(refused) { faded ->
+        Box(faded.fillMaxWidth().testTag(QueueSteerLabelTag).semantics { liveRegion = LiveRegionMode.Polite }) {
+            Text(
+                QueueCardWords.STEERING, style = type.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.graphicsLayer { alpha = 1f - steered }.then(if (phase == SteerPhase.STEERED) Modifier.clearAndSetSemantics {} else Modifier),
+            )
+            if (phase == SteerPhase.STEERED || steered > 0f) {
+                Box(Modifier.matchParentSize().graphicsLayer { alpha = steered }, contentAlignment = Alignment.CenterStart) {
+                    Text(QueueCardWords.STEERED, style = type.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A card's second line, and why a glyph tap was just refused ([refused]), the message being on its way: the reason
+ * fades in over the [line] in the same place and no taller — the line keeps its room underneath — and then back, so
+ * the card never grows for it and nothing pops up elsewhere. [line] takes the modifier that fades it out.
+ */
+@Composable
+private fun RefusableLine(refused: Boolean, line: @Composable (Modifier) -> Unit) {
+    val colors = CursorTheme.colors
+    val type = CursorTheme.typography
+    val swap by animateFloatAsState(if (refused) 1f else 0f, tween(NoteFadeMs), label = "refusal")
+    Box {
+        line(Modifier.graphicsLayer { alpha = 1f - swap })
+        if (refused || swap > 0f) {
+            Box(Modifier.matchParentSize().graphicsLayer { alpha = swap }, contentAlignment = Alignment.CenterStart) {
+                Text(
+                    QueueGlyphs.REFUSED,
+                    style = type.small,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag(QueueGlyphs.REFUSED_TAG).semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
+        }
+    }
+}
+
+/** What a device card says of itself, to the eye and to a screen reader. */
+internal object QueueCardWords {
+    const val STEERING = "Steering\u2026"
+    const val STEERED = "Steered \u00B7 the agent reads it at its next step"
+
+    fun steerLabel(phase: SteerPhase): String = when (phase) {
+        SteerPhase.STEERING -> STEERING
+        SteerPhase.STEERED -> STEERED
+    }
+
+    fun description(item: QueuedFollowUp, position: Int, count: Int): String {
+        val base = "Queued follow-up $position of $count"
+        val warning = item.warning
+        val steer = item.steer
+        return when {
+            warning != null -> "$base, not sent: $warning"
+            steer == SteerPhase.STEERING -> "$base, steering into this turn"
+            steer == SteerPhase.STEERED -> "$base, steered; the agent reads it at its next step"
+            item.isSending && !item.isHeld -> "$base, sending"
+            item.steerError != null -> "$base, not steered: ${item.steerError}"
+            else -> base
+        }
+    }
+}
+
+/**
  * The line under a message the server keeps refusing as busy while nothing here calls the agent busy: what is being
  * waited for and for how long, ticking by the second, and — from the third refusal on — the server's own words for
  * it, so a wait of minutes is never a riddle. Quiet, not red: nothing has failed.
  *
- * A glyph tap refused while the retry is out ([refused]) swaps the wait for why, in the same place and no taller —
- * the wait keeps its room underneath — and then back, so the card never grows for it and nothing pops up elsewhere.
+ * A glyph tap refused while the retry is out ([refused]) swaps the wait for why (see [RefusableLine]).
  */
 @Composable
 private fun HeldNote(item: QueuedFollowUp, refused: Boolean) {
@@ -268,8 +357,7 @@ private fun HeldNote(item: QueuedFollowUp, refused: Boolean) {
     // and the time's own space are non-breaking, and a card too narrow for the whole line (a phone, the card stood in
     // from the composer's sides) breaks before the last word and carries the time down with it.
     val waited = TimeFormat.duration((now - since).coerceAtLeast(0L))?.replace(' ', '\u00A0')
-    val swap by animateFloatAsState(if (refused) 1f else 0f, tween(RefusalFadeMs), label = "held-refusal")
-    Box {
+    RefusableLine(refused) { faded ->
         Text(
             // What is waited for: the agent's turn, or — the server having asked every caller to slow down — the wait it named.
             listOfNotNull(item.holdReason ?: QueuedFollowUp.WAITING_FOR_AGENT, waited).joinToString("\u00A0\u00B7\u00A0"),
@@ -277,20 +365,8 @@ private fun HeldNote(item: QueuedFollowUp, refused: Boolean) {
             color = colors.textQuaternary,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.testTag("queued-held").graphicsLayer { alpha = 1f - swap },
+            modifier = Modifier.testTag("queued-held").then(faded),
         )
-        if (refused || swap > 0f) {
-            Box(Modifier.matchParentSize().graphicsLayer { alpha = swap }, contentAlignment = Alignment.CenterStart) {
-                Text(
-                    QueueGlyphs.REFUSED,
-                    style = type.small,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag(QueueGlyphs.REFUSED_TAG).semantics { liveRegion = LiveRegionMode.Polite },
-                )
-            }
-        }
     }
     item.serverReason?.let { reason ->
         Text("Cursor says: $reason", style = type.small, color = colors.textQuaternary, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("queued-held-reason"))
@@ -579,10 +655,10 @@ object QueueGlyphs {
     const val SEND = "Send now"
     /** The message could not be sent: the tap tries again. */
     const val RETRY = "Retry sending"
-    /** The glyphs' state while the message's request is out (a held message's retry): dimmed, and a tap is refused. */
+    /** The glyphs' state while the message's request is out (a held message's retry, a steer): dimmed, and a tap is refused. */
     const val ON_ITS_WAY = "Being sent"
     const val ON_ITS_WAY_TAG = "queued-glyphs-on-its-way"
-    /** What a held card's line says for a moment when one of its glyphs is tapped while it is [ON_ITS_WAY]. */
+    /** What a card's second line (a held one's wait, a steered one's note) says for a moment when one of its glyphs is tapped while it is [ON_ITS_WAY]. */
     const val REFUSED = "Being sent · can't change it now"
     const val REFUSED_TAG = "queued-held-refused"
 
@@ -609,8 +685,11 @@ private fun Modifier.faceOf(face: QueueCardFace): Modifier =
 private val RowHeight = 40.dp
 private val Tile = 18.dp
 private val Glyph = 14.dp
+/** A card's second line comes in, and one note on it fades into the next, over this long. */
+private const val NoteFadeMs = 160
+const val QueueSteerLabelTag = "queued-steer"
+const val QueueSteerErrorTag = "queued-steer-error"
 private const val TileThumbnailPx = 256
-private const val RefusalFadeMs = 160
 
 /** Where a tile's preview of the picture at [path] is kept once decoded ([AttachmentImages]). */
 internal fun tileThumbnailKey(path: String): String = "$path@$TileThumbnailPx"

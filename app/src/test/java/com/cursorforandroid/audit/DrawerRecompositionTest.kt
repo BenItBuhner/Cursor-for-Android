@@ -23,6 +23,8 @@ import com.cursorforandroid.ui.agents.SidebarTags
 import com.cursorforandroid.ui.navigation.AppShell
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
+import com.cursorforandroid.util.RecomposeCounter
+import com.cursorforandroid.util.pumpSynced
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -57,8 +59,7 @@ class DrawerRecompositionTest {
 
     @After
     fun tearDown() {
-        RecomposeCounter.on = false
-        RecomposeCounter.reset()
+        RecomposeCounter.uninstall()
     }
 
     private fun launch() {
@@ -92,10 +93,7 @@ class DrawerRecompositionTest {
 
     private fun drawerOpen() = compose.onAllNodes(hasContentDescription("Close navigation menu")).fetchSemanticsNodes().isNotEmpty()
 
-    private fun settle() = repeat(4) {
-        Thread.sleep(150)
-        compose.waitForIdle()
-    }
+    private fun settle() = repeat(4) { compose.pumpSynced() }
 
     @Test
     fun `behind a chat with the drawer shut, a change to the list recomposes nothing of the sidebar`() {
@@ -189,7 +187,7 @@ class DrawerRecompositionTest {
         compose.mainClock.autoAdvance = false
         vm.setSectionCollapsed(folded, false)
         val moving = (1..40).map {
-            Thread.sleep(5)
+            compose.pumpSynced()
             compose.mainClock.advanceTimeByFrame()
             compose.onNode(below).getBoundsInRoot().top.value
         }
