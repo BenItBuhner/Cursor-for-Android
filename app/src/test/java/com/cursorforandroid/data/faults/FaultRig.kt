@@ -318,6 +318,10 @@ class FaultRig(
 
     override fun close() {
         scope.cancel()
+        // Executor shutdown does not cancel calls that are already running. A live poll/stream can therefore keep
+        // MockWebServer.shutdown() in the owning test's teardown indefinitely after the test scope is cancelled.
+        client.dispatcher.cancelAll()
+        accountClient.dispatcher.cancelAll()
         client.dispatcher.executorService.shutdownNow()
         client.connectionPool.evictAll()
         accountClient.dispatcher.executorService.shutdownNow()
