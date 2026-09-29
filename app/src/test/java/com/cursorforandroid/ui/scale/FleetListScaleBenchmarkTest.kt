@@ -81,6 +81,8 @@ class FleetListScaleBenchmarkTest {
         assertWithMessage(r.open.line()).that(r.openFirstFrames).isAtMost(MAX_OPEN_FRAMES)
         assertWithMessage(r.idle.line()).that(r.idle.tickScopes.sorted()[r.idle.tickScopes.size / 2]).isAtMost(MAX_SCOPES_PER_TICK)
         assertWithMessage(r.scroll.line()).that(r.scroll.scopes / r.scroll.frames.coerceAtLeast(1)).isAtMost(MAX_SCOPES_PER_SCROLL_FRAME)
+        assertWithMessage(r.idle.line()).that(r.idle.top.map { it.first }).containsNoneOf("agents.ChatRowMenu", "agents.ChatOverflowMenu")
+        assertWithMessage(r.idle.line()).that(r.idle.extra.getValue("organizerPasses") as Int).isAtMost(IDLE_TICKS * MAX_ORGANIZER_PASSES_PER_TICK)
     }
 
     private class Result(val open: ScaleMeter.Phase, val openFirstFrames: Int, val idle: ScaleMeter.Phase, val scroll: ScaleMeter.Phase, val back: ScaleMeter.Phase) {
@@ -186,5 +188,6 @@ class FleetListScaleBenchmarkTest {
         const val MAX_SCOPES_PER_TICK = 4_000
         const val MAX_OPEN_FRAMES = 60
         const val MAX_SCOPES_PER_SCROLL_FRAME = 400
+        const val MAX_ORGANIZER_PASSES_PER_TICK = 2
     }
 }

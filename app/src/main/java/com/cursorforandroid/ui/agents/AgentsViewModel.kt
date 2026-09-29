@@ -9,7 +9,6 @@ import com.cursorforandroid.data.repo.RefreshDepth
 import com.cursorforandroid.data.repo.AgentListState
 import com.cursorforandroid.data.repo.RefreshOutcome
 import com.cursorforandroid.domain.Agent
-import com.cursorforandroid.domain.AgentIndicator
 import com.cursorforandroid.domain.AgentListOrganizer
 import com.cursorforandroid.domain.AgentRow
 import com.cursorforandroid.domain.AgentSection
@@ -148,6 +147,104 @@ private class DeviceState(
     val shortenLongGroups: Boolean = true,
 )
 
+private data class OrganizedUi(
+    val sections: List<AgentSection>,
+    val recentRows: List<AgentRow>,
+    val projectRows: List<AgentRow>,
+    val unreadCount: Int,
+    val runningCount: Int,
+)
+
+/**
+ * Keeps expensive list derivations tied to the identities that can change their result. Metadata-only list-state
+ * emissions (refresh/tail flags), pending work and sidebar folds reuse the organized rows; search only narrows that
+ * already-organized tree. The clock remains a key, so date buckets, relative ages and snooze expiry keep their exact
+ * update timing.
+ */
+private class AgentListComputation(private val passCounter: AtomicInteger) {
+    private var agents: List<Agent>? = null
+    private var awaitingPlacement: Set<String>? = null
+    private var prefs: ListPreferences? = null
+    private var local: LocalAgentState? = null
+    private var unavailableProjects: Set<String>? = null
+    private var knownRoots: List<KnownRoot>? = null
+    private var memberCounts: Map<String, Int>? = null
+    private var nowMillis: Long = Long.MIN_VALUE
+    private var base: OrganizedUi? = null
+
+    private var searchedBase: OrganizedUi? = null
+    private var searchedQuery: String? = null
+    private var searchedSections: List<AgentSection> = emptyList()
+
+    private var repoAgents: List<Agent>? = null
+    private var repoSlugs: List<String> = emptyList()
+
+    fun organize(list: AgentListState, newPrefs: ListPreferences, device: DeviceState, query: String, now: Long): OrganizedUi {
+        val sameBase =
+            agents === list.agents &&
+                awaitingPlacement === list.awaitingPlacement &&
+                prefs === newPrefs &&
+                local === device.local &&
+                unavailableProjects === device.unavailableProjects &&
+                knownRoots === device.knownRoots &&
+                memberCounts === device.memberCounts &&
+                nowMillis == now
+
+        val unsearched = if (sameBase) {
+            checkNotNull(base)
+        } else {
+            passCounter.incrementAndGet()
+            val organized = AgentListOrganizer.organizeWithCounts(
+                agents = list.shownAgents,
+                countAgents = list.agents,
+                prefs = newPrefs,
+                local = device.local,
+                nowMillis = now,
+                unavailableProjects = device.unavailableProjects,
+                knownRoots = device.knownRoots,
+                memberCounts = device.memberCounts,
+            )
+            OrganizedUi(
+                sections = organized.sections,
+                recentRows = AgentListOrganizer.recentRows(organized.sections),
+                projectRows = AgentListOrganizer.projectRows(organized.sections),
+                unreadCount = organized.unreadCount,
+                runningCount = organized.runningCount,
+            ).also {
+                agents = list.agents
+                awaitingPlacement = list.awaitingPlacement
+                prefs = newPrefs
+                local = device.local
+                unavailableProjects = device.unavailableProjects
+                knownRoots = device.knownRoots
+                memberCounts = device.memberCounts
+                nowMillis = now
+                base = it
+            }
+        }
+
+        if (query.isBlank()) return unsearched
+        val sections = if (searchedBase === unsearched && searchedQuery == query) {
+            searchedSections
+        } else {
+            AgentListOrganizer.search(unsearched.sections, query).also {
+                searchedBase = unsearched
+                searchedQuery = query
+                searchedSections = it
+            }
+        }
+        return unsearched.copy(sections = sections)
+    }
+
+    fun repoSlugs(newAgents: List<Agent>): List<String> {
+        if (repoAgents !== newAgents) {
+            repoAgents = newAgents
+            repoSlugs = newAgents.mapNotNull { it.repoSlug }.distinct().sortedBy { it.lowercase() }
+        }
+        return repoSlugs
+    }
+}
+
 @OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 class AgentsViewModel(
     private val graph: AppGraph,
@@ -157,6 +254,7 @@ class AgentsViewModel(
 
     private val query = MutableStateFlow("")
     private val organizerPassCounter = AtomicInteger()
+    private val listComputation = AgentListComputation(organizerPassCounter)
 
     /** Test/benchmark seam: completed full organizer passes since this view model was created. */
     internal val organizerPasses: Int get() = organizerPassCounter.get()
@@ -226,24 +324,13 @@ class AgentsViewModel(
         combine(clock, pending) { now, work -> now to work },
     ) { list, prefs, device, q, (now, work) ->
         val local = device.local
-        // Rows waiting on their record to place them are held, never drawn loose (see AgentListState.awaitingPlacement).
-        val shown = list.shownAgents
-        organizerPassCounter.incrementAndGet()
-        val sections = AgentListOrganizer.organize(shown, prefs, local, q, nowMillis = now, unavailableProjects = device.unavailableProjects, knownRoots = device.knownRoots, memberCounts = device.memberCounts)
-        // The sidebar search narrows the sidebar only; while it is in use the recents are organized without it.
-        val recentRows = if (q.isBlank()) AgentListOrganizer.recentRows(sections) else AgentListOrganizer.recentRows(shown, prefs, local, nowMillis = now)
-        val unsearched = if (q.isBlank()) sections else {
-            organizerPassCounter.incrementAndGet()
-            AgentListOrganizer.organize(shown, prefs, local, nowMillis = now, unavailableProjects = device.unavailableProjects, knownRoots = device.knownRoots, memberCounts = device.memberCounts)
-        }
-        val projectRows = AgentListOrganizer.projectRows(unsearched)
-        val rows = list.agents.map { AgentListOrganizer.toRow(it, local, now) }
+        val organized = listComputation.organize(list, prefs, device, q, now)
         AgentListUiState(
-            sections = sections,
-            recentRows = recentRows,
-            projectRows = projectRows,
+            sections = organized.sections,
+            recentRows = organized.recentRows,
+            projectRows = organized.projectRows,
             allAgents = list.agents,
-            repoSlugs = list.agents.mapNotNull { it.repoSlug }.distinct().sortedBy { it.lowercase() },
+            repoSlugs = listComputation.repoSlugs(list.agents),
             prefs = prefs,
             local = local,
             query = q,
@@ -254,8 +341,8 @@ class AgentsViewModel(
             isLoadingMore = list.isLoadingMore,
             // A refused row action is the newer news, and the one the user is waiting on.
             error = device.actionError ?: list.error,
-            unreadCount = rows.count { it.isUnread },
-            runningCount = rows.count { it.indicator == AgentIndicator.Running },
+            unreadCount = organized.unreadCount,
+            runningCount = organized.runningCount,
             collapsedSections = device.collapsedSections,
             shortenLongGroups = device.shortenLongGroups,
             nowMillis = now,
@@ -279,9 +366,10 @@ class AgentsViewModel(
             refreshPullRequests()
         }
         viewModelScope.launch {
-            graph.agents.state.collect { s ->
-                graph.catalog.seedRepositories(s.agents.mapNotNull { it.repoUrl })
-            }
+            graph.agents.state
+                .map { state -> state.agents.mapNotNullTo(LinkedHashSet()) { it.repoUrl } }
+                .distinctUntilChanged()
+                .collect { repositories -> graph.catalog.seedRepositories(repositories.toList()) }
         }
         viewModelScope.launch {
             // The badges are read for the rows on screen, as they come on screen — not for every row the list holds:

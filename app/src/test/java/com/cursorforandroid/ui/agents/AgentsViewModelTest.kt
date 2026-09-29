@@ -174,6 +174,24 @@ class AgentsViewModelTest {
     }
 
     @Test
+    fun `search and sidebar metadata reuse the organized rows`() = runBlocking<Unit> {
+        mainDispatcher.set(Dispatchers.Unconfined)
+        val vm = AgentsViewModel(graph)
+        vm.loaded()
+        val passes = vm.organizerPasses
+
+        vm.setQuery("cesium")
+        vm.uiState.first { it.query == "cesium" }
+        assertThat(vm.organizerPasses).isEqualTo(passes)
+
+        val section = "metadata-only-test"
+        vm.setSectionCollapsed(section, true)
+        vm.uiState.first { section in it.collapsedSections }
+        assertThat(vm.organizerPasses).isEqualTo(passes)
+        graph.prefs.setSidebarSectionCollapsed(section, false)
+    }
+
+    @Test
     fun `read all marks every loaded conversation read`() = runBlocking<Unit> {
         mainDispatcher.set(Dispatchers.Unconfined)
         val vm = AgentsViewModel(graph)
