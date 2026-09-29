@@ -5,9 +5,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.data.FakeCursorApi
 import com.cursorforandroid.data.FakeRunStreamer
 import com.cursorforandroid.data.api.RunStreamEvent
+import com.cursorforandroid.data.api.dto.SseToolCallDto
 import com.cursorforandroid.data.local.AttachmentStore
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.data.local.SecureKeyStore
+import com.cursorforandroid.domain.ActivityGroup
 import com.cursorforandroid.domain.AssistantMessage
 import com.cursorforandroid.domain.RunStatus
 import com.google.common.truth.Truth.assertThat
@@ -20,6 +22,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -29,9 +33,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * A subscriber that asks the [LiveRunHub] for sampled snapshots (the live notification's monitor, a follow-up waiting
- * on a run's end) hears at most one per period and its finish at once; a run only such subscribers watch is rebuilt at
- * that pace, not per event; and nothing a paced run sat on is lost — not to a subscriber that wants every event
- * arriving, not to a connection that drops.
+ * on a run's end) hears the words streaming into a step at most once per period, and a step change, a status and the
+ * finish at once; a run only such subscribers watch is rebuilt at that pace, not per token; and nothing a paced run
+ * sat on is lost — not to a subscriber that wants every event arriving, not to a connection that drops.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -122,11 +126,12 @@ class LiveRunHubSamplingTest {
     @Test
     fun `a subscriber that wants every event, arriving on a paced run, is sent what the run sat on at once`() = runBlocking {
         val notification = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 3_000).collect { } }
-        // The connection's first event (the status) goes out at once; the tokens after it, inside the period, are held back.
+        // The connection's first event (the status) goes out at once, and so does the reply's start, a step; the words
+        // after it, inside the period, are held back.
         awaitUntil { hub.current("bc-1", "run-1")?.eventCount == 1 }
         stream(count = 6, spacingMs = 10)
         delay(100)
-        assertThat(hub.current("bc-1", "run-1")!!.reply()).isEmpty()
+        assertThat(hub.current("bc-1", "run-1")!!.reply()).isEqualTo(reply(1))
 
         val openedAt = System.nanoTime()
         val screen = MutableStateFlow<LiveRunHub.Snapshot?>(null)
@@ -170,6 +175,60 @@ class LiveRunHubSamplingTest {
         awaitUntil { published.any { it.reconnecting } }
         assertThat(published.first { it.reconnecting }.reply()).isEqualTo(reply(4))
         observer.cancel()
+        notification.cancel()
+    }
+
+    private fun tool(id: String, status: String) = RunStreamEvent.ToolCall(
+        SseToolCallDto(callId = id, name = "read_file", status = status, args = buildJsonObject { put("path", JsonPrimitive("src/$id.kt")) }),
+    )
+
+    private fun LiveRunHub.Snapshot.calls() = items.filterIsInstance<ActivityGroup>().flatMap { it.calls }
+
+    @Test
+    fun `a step change mid-period reaches a sampled subscriber at once, with the words before it`() = runBlocking {
+        val seen = MutableStateFlow<LiveRunHub.Snapshot?>(null)
+        val notification = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 3_000).collect { seen.value = it } }
+        awaitUntil { streamer.connections.isNotEmpty() }
+        stream(count = 10, spacingMs = 10)
+        delay(100)
+        // The reply's start went out; the words after it are the period's.
+        assertThat(seen.value!!.reply()).isEqualTo(reply(1))
+
+        val startedAt = System.nanoTime()
+        streamer.emit("run-1", tool("read", "running"))
+        awaitUntil { seen.value!!.calls().any { it.isRunning } }
+        assertThat((System.nanoTime() - startedAt) / 1_000_000).isLessThan(1_000)
+        assertThat(seen.value!!.reply()).isEqualTo(reply(10))
+
+        val endedAt = System.nanoTime()
+        streamer.emit("run-1", tool("read", "completed"))
+        awaitUntil { seen.value!!.calls().none { it.isRunning } }
+        streamer.emit("run-1", RunStreamEvent.Thinking("Next."))
+        awaitUntil { seen.value!!.stepChanges >= 4 }
+        assertThat((System.nanoTime() - endedAt) / 1_000_000).isLessThan(1_000)
+        notification.cancel()
+    }
+
+    @Test
+    fun `a status change and a run ending in error reach a sampled subscriber at once, the last words with them`() = runBlocking {
+        val seen = MutableStateFlow<LiveRunHub.Snapshot?>(null)
+        val notification = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 60_000).collect { seen.value = it } }
+        awaitUntil { streamer.connections.isNotEmpty() }
+        stream(count = 5, spacingMs = 10)
+
+        val statusAt = System.nanoTime()
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.CREATING))
+        awaitUntil { seen.value?.status == RunStatus.CREATING }
+        assertThat((System.nanoTime() - statusAt) / 1_000_000).isLessThan(1_000)
+        assertThat(seen.value!!.reply()).isEqualTo(reply(5))
+
+        stream(count = 5, spacingMs = 10, from = 5)
+        val failedAt = System.nanoTime()
+        streamer.emit("run-1", RunStreamEvent.Result("run-1", RunStatus.ERROR, null, 1_000, null))
+        awaitUntil { seen.value?.finished == true }
+        assertThat((System.nanoTime() - failedAt) / 1_000_000).isLessThan(1_000)
+        assertThat(seen.value!!.status).isEqualTo(RunStatus.ERROR)
+        assertThat(seen.value!!.reply()).isEqualTo(reply(10))
         notification.cancel()
     }
 }

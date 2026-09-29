@@ -107,6 +107,12 @@ class LiveRunHub(
         val finished: Boolean = false,
         /** Stream events applied so far; zero means nothing has arrived for this run yet. */
         val eventCount: Int = 0,
+        /**
+         * Times the run moved on to something else — a tool call starting or ending, a status, a new message or
+         * thought — as opposed to adding words to the one under way. What a sampled subscriber hears at once (see
+         * [snapshots]).
+         */
+        val stepChanges: Int = 0,
         /** Best-effort start of the run: the caller's timestamp (run `createdAt`) or the first observation. */
         val startedAtMillis: Long,
         val result: RunStreamEvent.Result? = null,
@@ -174,6 +180,8 @@ class LiveRunHub(
         @Volatile var publishedAt = 0L
         /** A paced pass has applied events it has not published yet (see [publishPaced]). */
         val owed = MutableStateFlow(false)
+        /** [Snapshot.stepChanges] as applied, ahead of what is published. */
+        @Volatile var stepChanges = 0
         /** Between two looks (see [lookBaseMs]), with no connection open; for [stats]. */
         @Volatile var resting = false
         /** Set by [lookNow]: the next pause between looks (or the one under way) ends at once. */
@@ -259,9 +267,10 @@ class LiveRunHub(
      * says false until one opens). A run no watched collector follows is looked in on every so often instead of
      * streamed (see [lookBaseMs]); a collector that passes nothing always counts as watched.
      *
-     * [sampleMs] is for a collector that shows the run somewhere slower than the screen (the live notification): it
-     * hears at most one snapshot per period — the first at once, then the latest of each period — and a finished one
-     * without delay. A run only such collectors watch is published at that pace too, rather than rebuilt per event.
+     * [sampleMs] is for a collector that shows what the run is doing rather than every word of it (the live
+     * notification): it hears each step change (see [Snapshot.stepChanges]) and the finish at once, and the words
+     * streaming into the step under way at most once per period, the latest of it. A run only such collectors watch
+     * is published at that pace too, rather than rebuilt per token.
      */
     fun snapshots(agentId: String, runId: String, startedAtMillis: Long? = null, watched: StateFlow<Boolean>? = null, sampleMs: Long = 0L): Flow<Snapshot> = flow {
         val watcher = Watcher(watched ?: ALWAYS_WATCHED, sampleMs.coerceAtLeast(0L))
@@ -273,14 +282,19 @@ class LiveRunHub(
         }
     }
 
-    /** At most one snapshot per [periodMs]: the first at once, then the latest of each period at its end; a finished one at once. */
+    /**
+     * The first snapshot at once, then a step change, a new status or the finish at once, and words added to the step
+     * under way at most once per [periodMs], the latest of them when the period closes.
+     */
     private fun StateFlow<Snapshot>.sampled(periodMs: Long): Flow<Snapshot> = flow {
         var last: Snapshot? = null
         while (true) {
             val next = first { it !== last }
             emit(next)
             last = next
-            withTimeoutOrNull(periodMs) { first { it.finished && it !== next } }
+            withTimeoutOrNull(periodMs) {
+                first { it !== next && (it.finished || it.stepChanges != next.stepChanges || it.status != next.status) }
+            }
         }
     }
 
@@ -579,6 +593,7 @@ class LiveRunHub(
         var lastEventAt = 0L
         var atPosition = true
         var restOwed = false
+        var previous: RunStreamEvent? = null
         try {
             beats.collect { beat ->
                 if (!owns(entry, self)) return@collect
@@ -643,8 +658,11 @@ class LiveRunHub(
                     else -> {
                         if (event is RunStreamEvent.Assistant || event is RunStreamEvent.Thinking || event is RunStreamEvent.ToolCall) pass.progressed = true
                         live.apply(event)
+                        val step = changesStep(event, previous)
+                        if (event !is RunStreamEvent.Heartbeat) previous = event
+                        if (step) entry.stepChanges++
                         // Nobody watching: what a look brings is published once, when it rests (see [stream]).
-                        if (!historical && !unwatched) publishPaced(entry)
+                        if (!historical && !unwatched) publishPaced(entry, step)
                     }
                 }
             }
@@ -811,13 +829,22 @@ class LiveRunHub(
     }
 
     /**
-     * [publish], at most once per the period the run's watched subscribers asked for (see [snapshots]'s `sampleMs`):
-     * a run only the live notification watches is not rebuilt, list and reply, for every token. What is held back is
-     * owed, and goes out when the period is up (see [follow]).
+     * [publish] for an event [follow] applied. A [step] change goes out at once; words added to the step under way go
+     * out at most once per the period the run's watched subscribers asked for (see [snapshots]'s `sampleMs`), so a run
+     * only the live notification watches is not rebuilt, list and reply, for every token. What is held back is owed,
+     * and goes out when the period is up (see [follow]).
      */
-    private fun publishPaced(entry: Entry) {
+    private fun publishPaced(entry: Entry, step: Boolean) {
         val pace = entry.publishEveryMs()
-        if (pace == 0L || System.nanoTime() - entry.publishedAt >= pace * NANOS_PER_MS) publish(entry) else entry.owed.value = true
+        if (pace == 0L || step || System.nanoTime() - entry.publishedAt >= pace * NANOS_PER_MS) publish(entry) else entry.owed.value = true
+    }
+
+    /** Whether [event] moves the run on to something else, rather than adding words to what [previous] started. */
+    private fun changesStep(event: RunStreamEvent, previous: RunStreamEvent?): Boolean = when (event) {
+        is RunStreamEvent.Heartbeat -> false
+        is RunStreamEvent.Assistant -> previous !is RunStreamEvent.Assistant
+        is RunStreamEvent.Thinking -> previous !is RunStreamEvent.Thinking
+        else -> true
     }
 
     private fun publish(entry: Entry) {
@@ -830,7 +857,7 @@ class LiveRunHub(
         if (entry.fallback?.let { entry.live.applied >= it.applied } == true) entry.fallback = null
         entry.publishedAt = System.nanoTime()
         published.incrementAndGet()
-        entry.state.update { it.copy(items = entry.live.snapshot(), status = entry.live.status, eventCount = it.eventCount + 1, reconnecting = false) }
+        entry.state.update { it.copy(items = entry.live.snapshot(), status = entry.live.status, eventCount = it.eventCount + 1, stepChanges = entry.stepChanges, reconnecting = false) }
     }
 
     /**
