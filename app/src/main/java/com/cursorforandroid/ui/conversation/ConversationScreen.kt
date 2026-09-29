@@ -183,8 +183,72 @@ internal fun rememberCaptionFadeIn(shown: Boolean): Animatable<Float, AnimationV
     return fade
 }
 
+/** Whether the progress slot under the transcript is showing the caption, a live stretch's line, or nothing. */
+internal enum class ProgressSlotPhase { None, Working, Stretch }
+
+/**
+ * The working caption and a live stretch's first line share one list slot. The caption fades out completely before
+ * the stretch's line is composed there, so they are never drawn on top of each other while both are partly visible.
+ */
+@Composable
+internal fun rememberSequencedProgressSlot(
+    showWorking: Boolean,
+    liveStretch: TranscriptRow.Stretch?,
+): SequencedProgressSlot {
+    var phase by remember { mutableStateOf(ProgressSlotPhase.None) }
+    var stretch by remember { mutableStateOf<TranscriptRow.Stretch?>(null) }
+    val workingAlpha = remember { Animatable(0f) }
+
+    LaunchedEffect(showWorking, liveStretch?.key) {
+        when {
+            showWorking -> {
+                stretch = null
+                phase = ProgressSlotPhase.Working
+                workingAlpha.snapTo(0f)
+                workingAlpha.animateTo(1f, tween(CaptionFadeMillis))
+            }
+            liveStretch != null -> {
+                if (phase == ProgressSlotPhase.Working || workingAlpha.value > 0f) {
+                    workingAlpha.animateTo(0f, tween(CaptionFadeMillis))
+                }
+                stretch = liveStretch
+                phase = ProgressSlotPhase.Stretch
+            }
+            else -> {
+                if (phase == ProgressSlotPhase.Working) {
+                    workingAlpha.animateTo(0f, tween(CaptionFadeMillis))
+                }
+                phase = ProgressSlotPhase.None
+                stretch = null
+            }
+        }
+    }
+    LaunchedEffect(liveStretch) {
+        if (phase == ProgressSlotPhase.Stretch && liveStretch != null) stretch = liveStretch
+    }
+    return SequencedProgressSlot(phase, workingAlpha, stretch)
+}
+
+internal class SequencedProgressSlot(
+    val phase: ProgressSlotPhase,
+    val workingAlpha: Animatable<Float, AnimationVector1D>,
+    val stretch: TranscriptRow.Stretch?,
+) {
+    /** The slot stays in the list while the caption is still visible or a live stretch owns it. */
+    val inList: Boolean
+        get() = phase != ProgressSlotPhase.None
+
+    /** The stretch line is shown only after the caption has fully faded out. */
+    val showsStretch: Boolean
+        get() = phase == ProgressSlotPhase.Stretch && workingAlpha.value <= 0f && stretch != null
+
+    val showsCaption: Boolean
+        get() = workingAlpha.value > 0f
+}
+
 internal const val CaptionFadeMillis = 220
 internal const val WORKING_CAPTION_TAG = "working-caption"
+internal const val THINKING_PROGRESS_TAG = "thinking-progress"
 
 /**
  * One chat: a header of its controls (back, its pull request once it has one, the panel, the menu) with the agent's
@@ -378,6 +442,8 @@ fun ConversationScreen(
     // A live stretch says "Working" itself; the caption below the list is for a run with nothing on screen yet, and
     // for a connection being re-established, which only it can say.
     val showWorking = conversation.showsWorkingRow() && (conversation.isReconnecting || (rows.lastOrNull() as? TranscriptRow.Stretch)?.live != true)
+    val liveTailStretch = (rows.lastOrNull() as? TranscriptRow.Stretch)?.takeIf { it.live }
+    val progressSlot = rememberSequencedProgressSlot(showWorking, liveTailStretch)
     val canReadStores = capabilities.projects && !isDemo
     var openStorePath by rememberSaveable(agentId) { mutableStateOf<String?>(null) }
 
@@ -386,9 +452,12 @@ fun ConversationScreen(
     val showTraces = items.isNotEmpty() && conversation.traceStatus.let { it.pending + it.expired + it.failed > 0 }
     val loadingRow = conversation.isLoading && items.isEmpty()
     val emptyRow = !conversation.isLoading && items.isEmpty()
-    val captionIn = rememberCaptionFadeIn(showWorking)
-    // Everything the list holds, top to bottom: the rows between the items above them and the working caption below.
-    val order = remember(listedRows, showWorking, showTraces, hasOlder, loadingRow, emptyRow) {
+    val listedRowsForList = remember(listedRows, progressSlot.stretch, progressSlot.showsStretch) {
+        val tail = listedRows.lastOrNull() as? TranscriptRow.Stretch
+        if (progressSlot.showsStretch && tail != null && tail.key == progressSlot.stretch?.key) listedRows.dropLast(1) else listedRows
+    }
+    // Everything the list holds, top to bottom: the rows between the items above them and the progress slot below.
+    val order = remember(listedRowsForList, progressSlot.inList, showTraces, hasOlder, loadingRow, emptyRow) {
         TranscriptOrder(
             above = listOfNotNull(
                 LOADING_KEY.takeIf { loadingRow },
@@ -396,8 +465,8 @@ fun ConversationScreen(
                 OLDER_KEY.takeIf { hasOlder && items.isNotEmpty() },
                 TRACES_KEY.takeIf { showTraces },
             ),
-            rows = listedRows,
-            below = listOfNotNull(WORKING_KEY.takeIf { showWorking }),
+            rows = listedRowsForList,
+            below = listOfNotNull(WORKING_KEY.takeIf { progressSlot.inList }),
         )
     }
     val following = transcriptScroll.following
@@ -592,9 +661,25 @@ fun ConversationScreen(
                         // A dropped connection is not the run's problem: the agent keeps working while the stream
                         // is re-established, so the caption keeps shimmering and only its wording says what is
                         // going on, rolling from one wording to the next as a subagent's line does. The caption is
-                        // the whole indicator, as in the web chat: no glyph beside it.
+                        // the whole indicator, as in the web chat: no glyph beside it. When a live stretch lands,
+                        // its line takes this same slot only after the caption has faded out (see [rememberSequencedProgressSlot]).
                         Box(itemModifier.then(paneWidth)) {
-                            RollingText(conversation.workingCaption(), style = type.base, label = "working-caption", modifier = Modifier.testTag(WORKING_CAPTION_TAG))
+                            if (progressSlot.showsCaption) {
+                                Box(Modifier.graphicsLayer { alpha = progressSlot.workingAlpha.value }) {
+                                    RollingText(
+                                        conversation.workingCaption(),
+                                        style = type.base,
+                                        label = "working-caption",
+                                        modifier = Modifier.testTag(WORKING_CAPTION_TAG),
+                                    )
+                                }
+                            }
+                            if (progressSlot.showsStretch) {
+                                TranscriptRowView(
+                                    progressSlot.stretch!!,
+                                    Modifier.fillMaxWidth().testTag(THINKING_PROGRESS_TAG),
+                                )
+                            }
                         }
                     }
                     // Where the window's traces stand, when not every turn shown has its activity: the turns being
@@ -668,12 +753,17 @@ fun ConversationScreen(
                     // A following list is declared bottom-up, the newest row first (see TranscriptScroll). Each kind of
                     // item has one call site for both orders: a row declared from two would be a different group in
                     // each, and every switch would rebuild every row on screen and drop what the reader had opened.
-                    fun edge(key: String) = item(key) { edgeItem(key, if (key == WORKING_KEY) captionFade(captionIn) else Modifier) }
+                    fun edge(key: String) = item(key) {
+                        val slotFade = if (key == WORKING_KEY) {
+                            Modifier.animateItem(fadeInSpec = null, placementSpec = null, fadeOutSpec = tween(CaptionFadeMillis))
+                        } else Modifier
+                        edgeItem(key, slotFade)
+                    }
                     val (before, after) = if (following) order.below.asReversed() to order.above.asReversed() else order.above to order.below
                     before.forEach(::edge)
                     // Without a content type the lazy layout offers a scrolled-off user bubble's slot to an activity
                     // group, whose subtree shares nothing with it: the reuse always fails and costs more than it saves.
-                    items(if (following) listedRows.asReversed() else listedRows, key = { it.key }, contentType = ::transcriptContentType) { row -> TranscriptRowView(row, paneWidth.then(rowMotion(row, openStretches))) }
+                    items(if (following) order.rows.asReversed() else order.rows, key = { it.key }, contentType = ::transcriptContentType) { row -> TranscriptRowView(row, paneWidth.then(rowMotion(row, openStretches))) }
                     after.forEach(::edge)
                 }
                 SideEffect { transcriptScroll.orient(following, order) }
