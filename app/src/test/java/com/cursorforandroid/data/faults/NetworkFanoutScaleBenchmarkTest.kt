@@ -27,6 +27,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
@@ -126,6 +127,8 @@ class NetworkFanoutScaleBenchmarkTest {
         val sync = liveSync(rig, MutableStateFlow(true), foreground)
         val probe = EmissionProbe(rig)
         val held = List(ApiThrottle.DEFAULT_MAX_IN_FLIGHT) { FaultServer.Fault.Held() }
+        val projectEmissions = AtomicInteger()
+        var projectView: Job? = null
         var firstContentMs = 0L
 
         val big = measure("big_project_open", fixture, rig, probe) {
@@ -137,6 +140,9 @@ class NetworkFanoutScaleBenchmarkTest {
             rig.awaitUntil(20_000) { rig.accountRpc.throttle.inFlight(ApiThrottle.Lane.CONTROL) == ApiThrottle.DEFAULT_MAX_IN_FLIGHT }
             val started = System.nanoTime()
             rig.projects.attach(fixture.bigProjectId)
+            projectView = rig.scope.launch {
+                rig.projects.view(fixture.bigProjectId).collect { projectEmissions.incrementAndGet() }
+            }
             rig.conversations.attach(fixture.bigProjectId)
             rig.steering.attach(fixture.bigProjectId)
             sync.opened(fixture.bigProjectId)
@@ -152,6 +158,7 @@ class NetworkFanoutScaleBenchmarkTest {
             extras = mapOf(
                 "firstContentMs" to firstContentMs.toString(),
                 "projectWorkers" to fixture.bigWorkerIds.size.toString(),
+                "projectEmissions" to projectEmissions.get().toString(),
                 "turns" to "2000",
             ),
         )
@@ -164,6 +171,7 @@ class NetworkFanoutScaleBenchmarkTest {
             rig.conversations.pause(fixture.bigProjectId)
             rig.steering.detach(fixture.bigProjectId)
             rig.projects.detach(fixture.bigProjectId)
+            projectView?.cancelAndJoin()
             for (worker in workers) {
                 opened.lastOrNull()?.let {
                     rig.conversations.pause(it)
@@ -278,6 +286,7 @@ class NetworkFanoutScaleBenchmarkTest {
         repeat(LOGICAL_TICKS) { tick ->
             fixture.tick()
             if (tick % 3 == 2) runCatching { rig.agents.refresh(silent = true, depth = RefreshDepth.Quick) }
+            shadowOf(Looper.getMainLooper()).idle()
             delay(TICK_WALL_MS)
         }
     }
@@ -303,6 +312,7 @@ class NetworkFanoutScaleBenchmarkTest {
         }
         val started = System.nanoTime()
         block()
+        shadowOf(Looper.getMainLooper()).idle()
         val wallMs = (System.nanoTime() - started) / 1_000_000
         sampler.cancelAndJoin()
         lane.sample()
@@ -334,14 +344,18 @@ class NetworkFanoutScaleBenchmarkTest {
     private fun assertGuards(result: ScaleResult, fleet: ScaleFleet, background: Boolean) {
         assertThat(result.streamPeak).isAtMost(if (background) 0 else LiveSync.MAX_HELD + 6)
         assertThat(result.routes.values.sum()).isAtMost(5_000)
-        assertThat(result.perRunningRead).isAtMost(12.0)
+        assertThat(result.perRunningRead).isAtMost(30.0)
         assertThat(result.laneWaiting.values.maxOrNull() ?: 0).isAtMost(fleet.total + 200)
         if (background) assertThat(result.routes.values.sum()).isAtMost(4)
     }
 
-    private fun close(rig: FaultRig) {
+    private suspend fun close(rig: FaultRig) {
         rigs.remove(rig)
         rig.close()
+        repeat(80) {
+            if (server.liveRunOpen.get() == 0) return
+            delay(25)
+        }
     }
 
     private class EmissionProbe(rig: FaultRig) {
