@@ -24,7 +24,7 @@ import java.nio.ByteBuffer
 /**
  * The queue card's height, one 16 ms frame at a time on a held clock: what the transcript over the dock follows. A row
  * the reader takes off (removed, or taken back to edit) closes up over a spring rather than in the frame it went, as a
- * send opens one; a row the run takes hands its room to its bubble at once, the copy standing over it. The third send
+ * send opens one; a row the run takes folds away as its copy lifts off into the bubble. The third send
  * stacking the list into a deck settles the card's height without dipping below where it comes to rest.
  */
 @RunWith(AndroidJUnit4::class)
@@ -103,12 +103,12 @@ class QueueDeckHeightTest {
     }
 
     /**
-     * A row the run takes lifts off into its bubble, filed in the same frame: on the chat, the bubble's room opens in
-     * the transcript as the row's closes on the card, so the card gives it up at once and the transcript over it holds
-     * still (springing the card there would push the transcript up by the bubble and then glide it back down).
+     * A row the run takes lifts off into its bubble, filed in the same frame, and folds away over [QueueExitMillis] on
+     * the fold's curve, the one the transcript glides its bubble in on, so the two move as one rather than the card
+     * giving its room up in a frame.
      */
     @Test
-    fun `a delivery hands the row's room to its bubble at once, the copy standing over the leaving row`() {
+    fun `a delivery folds the row away over frames, the copy lifting off the leaving row`() {
         scene.queue += queued("Run the migration first", "Then reseed the fixtures")
         scene.show(motion)
         val leaving = checkNotNull(scene.flights.anchor("q-1").surface).boundsInWindow()
@@ -119,8 +119,11 @@ class QueueDeckHeightTest {
         }
         val one = heights.last()
         assertThat(one).isLessThan(heights.first() - 30 * dp)
-        // One step, in the frame the change is composed, and none after it.
-        assertThat(heights.zipWithNext { a, b -> a - b }.count { it > 1f }).isEqualTo(1)
+        val drop = heights.first() - one
+        val steps = heights.zipWithNext { a, b -> a - b }
+        assertWithMessage(heights.joinToString(" ") { it.toInt().toString() }).that(steps.count { it > 1f }).isAtLeast(4)
+        assertThat(steps.max()).isAtMost(drop / 2)
+        assertSmooth(heights, closing = true)
         assertThat(checkNotNull(flight).takeoff.composer).isEqualTo(leaving)
         scene.frames(SendMotion.FlightMillis + 400L)
         assertThat(motion.flight).isNull()

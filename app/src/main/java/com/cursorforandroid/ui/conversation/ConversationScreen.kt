@@ -330,6 +330,9 @@ fun ConversationScreen(
 
     // A sent message's bubble comes up from its sending fade on the screen's clock, over the server's copy of it too.
     val sentFades = rememberSentFades(agentId)
+    // A queued message the run takes flies from its card to its bubble, as a send flies from the composer; the
+    // transcript glides to that bubble as the card folds (see the list's scroll to its newest row below).
+    val queueFlights = rememberQueueFlights(agentId)
     LaunchedEffect(isActive) { if (!isActive) stopConfirmation.dismissFor(agentId) }
     ChatHaptics(agentId, runStatus, outgoing)
     // The steps of the stretches the reader has opened, listed after them as rows of their own (see StretchSteps):
@@ -351,7 +354,7 @@ fun ConversationScreen(
     // 2026-09-20). "Older messages" stays a tap away at rest (the paging itself is asked for by transcriptList).
     var olderArmed by remember(agentId) { mutableStateOf(false) }
     LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }.collect { scrolling -> if (scrolling) olderArmed = true }
+        snapshotFlow { listState.isScrollInProgress && !transcriptScroll.isJumping }.collect { scrolling -> if (scrolling) olderArmed = true }
     }
 
     // The right-side panel: the chat's files, changes, pull request, media, artifacts and usage, read off the same
@@ -553,9 +556,14 @@ fun ConversationScreen(
                 // Following, a new row lands past the bottom edge, where the list's keyed anchoring leaves it; the list
                 // is taken back to it. Pinned, it stays there. The jump button's glide aims at rows landing under way
                 // itself; taking the list there at once would cut it short, so this waits for it.
+                // A queued card that handed its message over in the frame these rows came in is folding: the list glides
+                // to the bubble on the fold's clock instead, the card's room and the new rows changing hands without a
+                // jump. The count is read as the rows compose, before that frame's delivery adds to it.
+                val handoversBefore = queueFlights.handovers
                 LaunchedEffect(listedRows.size, listedRows.lastOrNull()?.key, showWorking) {
                     snapshotFlow { transcriptScroll.isJumping }.first { !it }
-                    if (transcriptScroll.following) listState.requestScrollToItem(0)
+                    if (!transcriptScroll.following) return@LaunchedEffect
+                    if (queueFlights.handovers != handoversBefore) transcriptScroll.settleToNewest(scope) else listState.requestScrollToItem(0)
                 }
                 // The reader's scroll nearing the top pages the turns before the window in (see olderArmed).
                 LaunchedEffect(listState, hasOlder, isLoadingOlder) {
@@ -741,7 +749,6 @@ fun ConversationScreen(
         val sendMotion = LocalSendMotion.current
         val composerAnchor = remember(agentId) { ComposerAnchor() }
         val composerExpansion = rememberComposerExpansion()
-        val queueFlights = rememberQueueFlights(agentId)
         val arrival = rememberArrivalGlide(agentId)
         // Extended mode keeps the queue on the account, where the desktop and the web keep theirs; otherwise on this device.
         val accountQueue = capabilities.accountQueue && !isDemo
@@ -823,7 +830,6 @@ fun ConversationScreen(
                     onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
                     modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth),
                     gapBelow = 4.dp,
-                    delivered = { key -> queueFlights.delivered(key.substringAfter(':')) },
                 ) { index, face ->
                     if (index < queue.size) {
                         QueuedFollowUpCard(

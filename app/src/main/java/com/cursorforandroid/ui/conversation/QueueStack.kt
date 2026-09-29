@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
@@ -112,8 +113,6 @@ private class DeckMotion {
 /** A card gone from the stack's keys, still drawn as it goes: [progress] runs from 0 (where it stood) to 1 (gone). */
 private class Exit {
     val progress = Animatable(0f)
-    /** The card left for its bubble, which took its room in the same frame: nothing of it stays to fold. */
-    var handedOver = false
 }
 
 /**
@@ -157,9 +156,10 @@ private class Exits {
  *
  * A card that leaves [keys] does not blink out: its words are the delivery's flight (see `SendMotion`), and its surface
  * stays where it stood, fading and folding down onto its foot over [QueueExitMillis] while the cards around it spring
- * into their new places, so neither the stack nor the transcript over it jumps. A card [delivered] to its bubble is
- * the exception: the bubble takes its room in the same frame, so the stack gives it up at once and the transcript
- * moves once. [gapBelow] is the space under the stack while it holds anything, folded away with the last card.
+ * into their new places, so neither the stack nor the transcript over it jumps. That holds for a card the run takes
+ * or a steer files as well: the transcript glides its new bubble into view on the same clock and curve
+ * ([QueueExitEasing]; see `TranscriptScroll.settleToNewest`), the fold giving up the card's room as the bubble takes
+ * it. [gapBelow] is the space under the stack while it holds anything, folded away with the last card.
  */
 @Composable
 fun QueueStack(
@@ -172,12 +172,6 @@ fun QueueStack(
     animationSpec: AnimationSpec<Float> = StackSpring,
     /** How the deck's own height moves: settling without a dip, unless a test holds the cards part of the way. */
     heightSpec: AnimationSpec<Float> = if (animationSpec === StackSpring) DeckSpring else animationSpec,
-    /**
-     * Whether the card for a key just gone from [keys] left for the transcript, whose bubble takes the room it gave up
-     * in the same frame: the deck gives that room up at once too, so what stands above it holds still. Any other card
-     * that leaves folds away.
-     */
-    delivered: (key: String) -> Boolean = { false },
     gapBelow: Dp = 0.dp,
     card: @Composable (index: Int, face: QueueCardFace) -> Unit,
 ) {
@@ -231,7 +225,7 @@ fun QueueStack(
                 key(id) {
                     val exit = exits.leaving[id]
                     LaunchedEffect(exit) {
-                        exit?.progress?.animateTo(1f, tween(QueueExitMillis, easing = FastOutSlowInEasing))
+                        exit?.progress?.animateTo(1f, tween(QueueExitMillis, easing = QueueExitEasing))
                         exits.leaving.remove(id)
                         exits.tick++
                     }
@@ -281,15 +275,13 @@ fun QueueStack(
             if (shown(depth[k]) > 0f) top = minOf(top, y[k])
             if (shown(targetDepth[k]) > 0f) rest = minOf(rest, targetY[k])
         }
-        for (id in gone) if (delivered(id)) exits.leaving[id]?.handedOver = true
         // A leaving card holds the deck's top where it stood, and lets it down with its fold: its own height and the
-        // gap over the card under it; but for a card handed over to its bubble, which gives its room up at once.
+        // gap over the card under it.
         var stays = if (n > 0) 1f else 0f
         var folding = false
         for ((g, id) in gone.withIndex()) {
             val m = motions[id] ?: continue
             val exit = exits.leaving[id]
-            if (exit?.handedOver == true) continue
             val e = exit?.progress?.value ?: 1f
             if (shown(m.depthNow()) > 0f) top = minOf(top, (m.y?.value ?: 0f) + (ghosts[g].height + gap) * e)
             stays = maxOf(stays, 1f - e)
@@ -297,14 +289,10 @@ fun QueueStack(
         }
         // The cards that stay spring into their places with a touch of overshoot, which would dip the deck's top and
         // the transcript over the dock with it. The deck springs to where the cards will rest instead, never lower
-        // than where they are drawn, and without the cards' dip below it; but for a card handed over to its bubble.
-        // While a card folds, the fold alone lets the deck down, and the spring takes over from where it leaves it.
-        val handedOver = motions.keys.any { it !in ids && delivered(it) }
-        val floor = when {
-            handedOver -> Animatable(-rest)
-            folding -> Animatable(-top)
-            else -> deckMotion.height.springTo(-rest, live, scope, heightSpec)
-        }.also { deckMotion.height = it }
+        // than where they are drawn, and without the cards' dip below it. While a card folds, the fold alone lets the
+        // deck down — on the curve the transcript glides a delivered card's bubble in on — and the spring takes over
+        // from where it leaves it.
+        val floor = (if (folding) Animatable(-top) else deckMotion.height.springTo(-rest, live, scope, heightSpec)).also { deckMotion.height = it }
         val deck = maxOf(ceil(-top).toInt(), if (live) floor.value.roundToInt() else 0).coerceAtLeast(0)
         val share = handleShare.value
         val lead = (handle.height * share).roundToInt()
@@ -341,7 +329,7 @@ fun QueueStack(
             }
             for ((g, id) in gone.withIndex()) {
                 val m = motions[id] ?: continue
-                val exit = exits.leaving[id]?.takeUnless { it.handedOver } ?: continue
+                val exit = exits.leaving[id] ?: continue
                 val d = m.depthNow()
                 val scale = 1f - ScaleStep * d.coerceIn(0f, Peeks.toFloat())
                 // Over the cards, as it stood in front of whatever comes forward into its place, fading as it folds.
@@ -450,6 +438,9 @@ private val HandleHeight = 24.dp
 
 /** How long a card that left the stack takes to fade and fold away. */
 internal const val QueueExitMillis = 240
+
+/** The fold's curve, which the transcript's glide to a delivered card's bubble shares so the two move as one. */
+internal val QueueExitEasing: Easing = FastOutSlowInEasing
 
 /** Opening, closing and every change of place: a touch of overshoot, settled in about a third of a second. */
 internal val StackSpring = spring<Float>(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)

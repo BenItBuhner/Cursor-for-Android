@@ -22,6 +22,8 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +53,7 @@ import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import kotlinx.coroutines.flow.first
 import java.io.File
 import java.nio.ByteBuffer
 
@@ -60,11 +63,15 @@ import java.nio.ByteBuffer
  * device's queue card on the dock — with the screen's [QueueHandover] between the two publications the handover is
  * read from: the repository's queue, which drops the row once the server has the message, and the transcript's
  * presented frame, whose placement names the rows its bubbles were sent from ([QueuePlacement.filedQueueIds]). Each
- * publication is made at a frame the test picks, in either order, so the frames are the same on every run.
+ * publication is made at a frame the test picks, in either order, so the frames are the same on every run. The list
+ * is taken to its newest row as the screen takes it: gliding with the card's fold when a card handed over in the frame
+ * the rows came in ([TranscriptScroll.settleToNewest]), at once otherwise.
  *
- * In every frame exactly one of the two shows the message, and the frame the card is gone is the frame the bubble is
- * composed and laid out: the anchor bubble above them moves in that one frame and no other. Without the handover, the
- * same publications move it twice. With `QUEUE_HANDOVER_RUNS` set, each case runs that many times; with
+ * The card's words leave it in the frame that files the bubble; in no frame are they on the card and in the bubble
+ * both, and in every frame they are on one of the card, the delivery's flying copy or the bubble. The card folds away
+ * as the transcript glides its bubble in, so the anchor bubble above them moves one way only, a little each frame, and
+ * the card's height comes down the same way. Without the handover, the same publications move the anchor down with the
+ * fold and then jump it back up. With `QUEUE_HANDOVER_RUNS` set, each case runs that many times; with
  * `QUEUE_HANDOVER_FILM_DIR`, each frame of the first run is written there as a PNG.
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
@@ -130,8 +137,15 @@ class QueueHandoverFrameTest(private val run: Int) {
                             val queue = if (gated) remember(device, frame) { handover.standing(device, frame.placement.filedQueueIds) { filedNow } } else device
                             SideEffect { handover.composed(queue) }
                             val listState = rememberLazyListState()
-                            // As the screen takes a following list back to its newest row, which the keyed anchoring leaves past the edge.
-                            LaunchedEffect(frame.items.size, frame.items.lastOrNull()?.id) { listState.requestScrollToItem(0) }
+                            val scroll = rememberTranscriptScroll(listState, "handover")
+                            val scope = rememberCoroutineScope()
+                            // As the screen takes a following list back to its newest row, which the keyed anchoring
+                            // leaves past the edge: with the card's fold when a card handed over in this frame.
+                            val handoversBefore = flights.handovers
+                            LaunchedEffect(frame.items.size, frame.items.lastOrNull()?.id) {
+                                snapshotFlow { scroll.isJumping }.first { !it }
+                                if (gated && flights.handovers != handoversBefore) scroll.settleToNewest(scope) else listState.requestScrollToItem(0)
+                            }
                             Box(Modifier.weight(1f).fillMaxWidth()) {
                                 LazyColumn(
                                     state = listState,
@@ -158,7 +172,6 @@ class QueueHandoverFrameTest(private val run: Int) {
                                         onStackedChange = {},
                                         modifier = Modifier.padding(bottom = 4.dp),
                                         animate = { true },
-                                        delivered = { key -> flights.delivered(key.substringAfter(':')) },
                                     ) { index, face ->
                                         QueuedFollowUpCard(queue[index], index + 1, queue.size, emptyMap(), {}, {}, {}, flights, face)
                                     }
@@ -179,8 +192,8 @@ class QueueHandoverFrameTest(private val run: Int) {
         compose.waitForIdle()
     }
 
-    /** One frame as drawn: whether the card and the bubble show the delivered message, and where the anchor bubble stands. */
-    private data class Shot(val card: Boolean, val bubble: Boolean, val anchorTop: Float, val stackHeight: Float)
+    /** One frame as drawn: whether the card, the delivery's copy and the bubble show the message, and where the anchor bubble stands. */
+    private data class Shot(val card: Boolean, val copy: Boolean, val bubble: Boolean, val anchorTop: Float, val stackHeight: Float)
 
     private fun bounds(text: String, under: String): Rect? =
         compose.onAllNodes(hasText(text) and hasAnyAncestor(hasTestTag(under)), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()?.boundsInWindow
@@ -191,6 +204,7 @@ class QueueHandoverFrameTest(private val run: Int) {
         val stack = compose.onAllNodes(hasTestTag(QueueStackTag), useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()?.boundsInWindow
         return Shot(
             card = bounds(Delivered, QueueStackTag) != null,
+            copy = motion.flights.any { it.text == Delivered },
             bubble = bubble != null,
             anchorTop = checkNotNull(bounds(Anchor, Transcript)) { "the anchor bubble is off the list" }.top,
             stackHeight = stack?.height ?: 0f,
@@ -211,7 +225,7 @@ class QueueHandoverFrameTest(private val run: Int) {
             out += shot()
             film?.let { File(it, "f_%04d.png".format(f)).also(::draw) }
         }
-        println("QueueHandoverFrame run $run: " + out.withIndex().joinToString(" ") { (i, s) -> "$i:${if (s.card) "C" else "-"}${if (s.bubble) "B" else "-"}@${s.anchorTop.toInt()}/${s.stackHeight.toInt()}" })
+        println("QueueHandoverFrame run $run: " + log(out))
         return out
     }
 
@@ -235,48 +249,69 @@ class QueueHandoverFrameTest(private val run: Int) {
         presented = Frame(presented.items + UserMessage("local-1", Delivered), QueuePlacement(filedQueueIds = setOf("q-1")))
     }
 
-    /** Exactly one of card and bubble in every frame; the card gone in the frame the bubble lands; the anchor moving in that frame alone. */
-    private fun assertOneMovement(shots: List<Shot>) {
-        val log = shots.withIndex().joinToString(" ") { (i, s) -> "$i:${if (s.card) "C" else "-"}${if (s.bubble) "B" else "-"}@${s.anchorTop.toInt()}" }
+    private fun log(shots: List<Shot>) = shots.withIndex().joinToString(" ") { (i, s) ->
+        "$i:${if (s.card) "C" else "-"}${if (s.copy) "F" else "-"}${if (s.bubble) "B" else "-"}@${s.anchorTop.toInt()}/${s.stackHeight.toInt()}"
+    }
+
+    /** Frame to frame moves of [value] over [shots], those over half a pixel. */
+    private fun moves(shots: List<Shot>, value: (Shot) -> Float): List<Float> =
+        shots.zipWithNext { a, b -> value(b) - value(a) }.filter { kotlin.math.abs(it) > 0.5f }
+
+    /**
+     * The card's words leave it in the frame [filed] (the one the bubble is filed in) and are shown in every frame, by
+     * the card, the copy or the bubble, never by the card and the bubble both; the anchor above moves one way, no frame
+     * taking more than a share of the whole move, and the card comes down the same way.
+     */
+    private fun assertOneSmoothMovement(shots: List<Shot>, filed: Int) {
+        val log = log(shots)
         shots.forEachIndexed { i, s ->
-            assertWithMessage("frame $i shows the message ${if (s.card) "on the card and as the bubble" else "nowhere"}: $log").that(s.card).isNotEqualTo(s.bubble)
+            assertWithMessage("frame $i shows the message on the card and as the bubble: $log").that(s.card && s.bubble).isFalse()
+            assertWithMessage("frame $i shows the message nowhere: $log").that(s.card || s.copy || s.bubble).isTrue()
         }
-        val cardGone = shots.indexOfFirst { !it.card }
-        val bubbleIn = shots.indexOfFirst { it.bubble }
-        assertWithMessage("the card never left: $log").that(cardGone).isGreaterThan(0)
-        assertWithMessage("the frame the card goes is the frame the bubble lands: $log").that(cardGone).isEqualTo(bubbleIn)
-        val moves = shots.zipWithNext().withIndex().filter { (_, p) -> kotlin.math.abs(p.second.anchorTop - p.first.anchorTop) > 0.5f }.map { it.index + 1 }
-        assertWithMessage("the anchor moved in frames $moves: $log").that(moves).containsExactly(bubbleIn)
-        val deck = shots.zipWithNext().withIndex().filter { (_, p) -> kotlin.math.abs(p.second.stackHeight - p.first.stackHeight) > 0.5f }.map { it.index + 1 }
-        assertWithMessage("the card's height changed in frames $deck: $log").that(deck).containsExactly(bubbleIn)
+        assertWithMessage("the card's words leave it in the frame the bubble is filed: $log").that(shots.indexOfFirst { !it.card }).isEqualTo(filed)
+        assertWithMessage("the bubble shows by the end: $log").that(shots.last().bubble).isTrue()
+        val anchor = moves(shots) { it.anchorTop }
+        assertWithMessage("the anchor moved: $log").that(anchor).isNotEmpty()
+        val net = shots.last().anchorTop - shots.first().anchorTop
+        // A pixel back is the window bounds' rounding, not a move.
+        assertWithMessage("the anchor moves one way only: $anchor; $log").that(anchor.all { it * kotlin.math.sign(net) >= -1f }).isTrue()
+        val total = kotlin.math.abs(net)
+        assertWithMessage("no frame moves the anchor by more than half of its whole move ($total px): $anchor; $log").that(anchor.maxOf { kotlin.math.abs(it) }).isAtMost(total / 2f)
+        val deck = moves(shots) { it.stackHeight }
+        assertWithMessage("the card folds over several frames: $deck; $log").that(deck.size).isAtLeast(4)
+        assertWithMessage("the card only comes down: $deck; $log").that(deck.all { it < 0f }).isTrue()
+        val drop = shots.first().stackHeight - shots.last().stackHeight
+        assertWithMessage("no frame drops the card by more than half of its fold ($drop px): $deck; $log").that(deck.maxOf { -it }).isAtMost(drop / 2f)
     }
 
     @Test
     fun `the queue dropping the row first, the card stands until the frame that files the bubble`() {
-        assertOneMovement(filmHandover(changes = mapOf(3 to queueDrops, 9 to bubbleFiled)))
+        assertOneSmoothMovement(filmHandover(changes = mapOf(3 to queueDrops, 9 to bubbleFiled)), filed = 9)
     }
 
     @Test
     fun `the bubble filed first, the card goes in that frame and the queue's later drop moves nothing`() {
-        assertOneMovement(filmHandover(changes = mapOf(3 to bubbleFiled, 9 to queueDrops)))
+        assertOneSmoothMovement(filmHandover(changes = mapOf(3 to bubbleFiled, 9 to queueDrops)), filed = 3)
     }
 
     @Test
     fun `both in one frame, one movement`() {
-        assertOneMovement(filmHandover(changes = mapOf(3 to { queueDrops(); bubbleFiled() })))
+        assertOneSmoothMovement(filmHandover(changes = mapOf(3 to { queueDrops(); bubbleFiled() })), filed = 3)
     }
 
     @Test
     fun `the bubble filed the frame after the queue's drop, still one movement`() {
-        assertOneMovement(filmHandover(changes = mapOf(3 to queueDrops, 4 to bubbleFiled)))
+        assertOneSmoothMovement(filmHandover(changes = mapOf(3 to queueDrops, 4 to bubbleFiled)), filed = 4)
     }
 
     @Test
-    fun `without the handover the same publications move the transcript twice`() {
+    fun `without the handover the same publications move the transcript down with the fold, then jump it back up`() {
         gated = false
         val shots = filmHandover(changes = mapOf(3 to queueDrops, 9 to bubbleFiled))
-        val moves = shots.zipWithNext().count { (a, b) -> kotlin.math.abs(b.anchorTop - a.anchorTop) > 0.5f }
-        assertThat(moves).isEqualTo(2)
-        assertThat(shots.any { !it.card && !it.bubble }).isTrue()
+        val anchor = moves(shots) { it.anchorTop }
+        val log = log(shots)
+        assertWithMessage("the fold moves the transcript down: $anchor; $log").that(anchor.max()).isGreaterThan(2f)
+        assertWithMessage("filing the bubble jumps it back up: $anchor; $log").that(anchor.min()).isLessThan(-20f)
+        assertThat(shots.indexOfFirst { !it.card }).isEqualTo(3)
     }
 }

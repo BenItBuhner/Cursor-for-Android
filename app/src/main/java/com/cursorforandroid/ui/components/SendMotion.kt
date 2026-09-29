@@ -901,8 +901,12 @@ class QueueFlights {
     /** The rows as last composed, id to words, and the transcript's user messages then: what a delivery is told apart from. */
     internal var shown: Map<String, String> = emptyMap()
     internal var transcript: Set<String> = emptySet()
-    /** The rows that left the card for the transcript in the frame last composed. */
-    internal var delivering: Set<String> = emptySet()
+    /**
+     * How many frames have seen a row leave the card for the transcript: the transcript, whose new bubble lands past
+     * its edge in that frame, glides to it rather than jumping (see `TranscriptScroll.settleToNewest`).
+     */
+    var handovers = 0
+        internal set
 
     /** The anchor of the row for [id]. */
     fun anchor(id: String): ComposerAnchor = anchors.getOrPut(id) { ComposerAnchor() }
@@ -913,12 +917,6 @@ class QueueFlights {
     }
 
     internal fun leaving(id: String): ComposerAnchor? = anchors[id]?.takeIf { id !in dismissed }
-
-    /**
-     * Whether [id]'s row has just left the card for the transcript, lifting off into its bubble — which takes, in the
-     * same frame, the room the row gave up — rather than being taken off the card by the reader.
-     */
-    fun delivered(id: String): Boolean = id in delivering
 
     internal fun keepOnly(ids: Set<String>) {
         anchors.keys.retainAll(ids)
@@ -962,7 +960,7 @@ fun QueueDeliveries(flights: QueueFlights, rows: Map<String, String>, transcript
         flights.shown = rows
         flights.transcript = transcript
         flights.keepOnly(rows.keys)
-        flights.delivering = leaving.mapTo(HashSet()) { it.id }
+        if (leaving.isNotEmpty()) flights.handovers++
     }
 }
 
