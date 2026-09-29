@@ -28,6 +28,7 @@ import com.cursorforandroid.ui.agents.AgentsViewModel
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.Before
 import org.junit.Rule
@@ -67,14 +68,15 @@ class CustomizeSheetTest {
         graph = AppGraph(
             ApplicationProvider.getApplicationContext<Context>(),
             demo = CursorBackend(api, FakeRunStreamer(), isDemo = true),
+            agentListDispatcher = Dispatchers.Main,
         )
         graph.session.enterDemo()
     }
 
     /**
-     * Waits for [condition] on the semantics tree, whose every read idles the rule first. Wait for what is drawn, never
-     * for the view model's value: [AgentsViewModel.uiState] is set on `Dispatchers.Default` before the sheet is handed
-     * it on the main thread, so a state the view model already holds can be missing from the frame assertions read.
+     * Waits for [condition] on the semantics tree, whose every read idles the rule first: for what the sheet has drawn,
+     * which is what the assertions after it read. The list is organized on the main thread (see
+     * [AppGraph.agentListDispatcher]); from a background thread the sheet could miss a state and never draw it.
      */
     private fun awaitOnScreen(condition: () -> Boolean) = compose.waitUntil(timeoutMillis = 10_000, condition = condition)
 
