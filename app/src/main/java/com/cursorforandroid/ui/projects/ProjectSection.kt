@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -86,26 +87,49 @@ internal fun LazyListScope.projectSection(
     clock: State<Long>? = null,
     rows: ProjectRows = ProjectRows.of(state, local, nowMillis),
 ) {
+    val panel = ProjectPanel(state, rows)
+    projectSection(ProjectShape.of(panel), Fixed(panel), local, busy, actions, nowMillis, clock)
+}
+
+/**
+ * [projectSection] over a [panel] that changes as the Project's primaries move: the rows are laid out from [shape] alone —
+ * which rows there are, in which order — and each row reads what it draws from [panel] for itself. A list's rows are
+ * all composed again whenever what lays them out changes, so a primary's step, published many times a second across a
+ * busy Project, recomposes that primary's row (when it is on screen) and not every row on screen.
+ */
+internal fun LazyListScope.projectSection(
+    shape: ProjectShape,
+    panel: State<ProjectPanel>,
+    local: LocalAgentState,
+    busy: Boolean,
+    actions: ProjectActions,
+    nowMillis: Long,
+    clock: State<Long>?,
+) {
     sectionRow("project-summary") {
-        ProjectSummary(state, rows.running, rows.needsInput, nowMillis, clock, onEditAppearance = if (state.actionsAvailable) actions.onEditAppearance else null, enabled = !busy)
+        val summary by rememberPick(panel) { SummaryFacts(it.view.root, it.view.workers.size, it.rows.running, it.rows.needsInput) }
+        ProjectSummary(summary, nowMillis, clock, onEditAppearance = if (shape.actionsAvailable) actions.onEditAppearance else null, enabled = !busy)
     }
 
     sectionRow("project-primaries-label") {
-        SectionLabel(if (state.workers.isEmpty()) "Primaries" else "Primaries \u00B7 ${state.workers.size}", syncing = state.isSyncing)
+        val label by rememberPick(panel) { (if (it.view.workers.isEmpty()) "Primaries" else "Primaries \u00B7 ${it.view.workers.size}") to it.view.isSyncing }
+        SectionLabel(label.first, syncing = label.second)
     }
-    if (state.workers.isEmpty()) {
+    if (shape.workerIds.isEmpty()) {
         sectionRow("project-primaries-empty") {
+            val synced by rememberPick(panel) { it.view.hasSynced || it.view.isSyncing }
             Text(
-                if (state.hasSynced || state.isSyncing) "No primaries yet. The coordinator creates them as it delegates; you can start one below." else "Loading\u2026",
+                if (synced) "No primaries yet. The coordinator creates them as it delegates; you can start one below." else "Loading\u2026",
                 style = CursorTheme.typography.small, color = CursorTheme.colors.textQuaternary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             )
         }
     }
-    sectionRows(rows.workers, key = { "project-primary-${it.worker.agent.id}" }, contentType = { "project-primary" }) { line ->
-        WorkerRow(line.worker, line.row, nowMillis, clock, actionsAvailable = state.actionsAvailable, busy = busy, actions = actions)
+    sectionRows(shape.workerIds, key = { "project-primary-$it" }, contentType = { "project-primary" }) { id ->
+        val line by rememberPick(panel, id) { it.rows.byId[id] }
+        line?.let { WorkerRow(it.worker, it.row, nowMillis, clock, actionsAvailable = shape.actionsAvailable, busy = busy, actions = actions) }
     }
-    state.lineageNotice?.let { notice -> sectionRow("project-lineage-notice") { NoticeRow(notice) } }
-    if (state.actionsAvailable) {
+    shape.lineageNotice?.let { notice -> sectionRow("project-lineage-notice") { NoticeRow(notice) } }
+    if (shape.actionsAvailable) {
         sectionRow("project-new-primary") {
             ActionRow(CursorIcons.Plus, "New primary", "Start an agent under this Project", enabled = !busy, onClick = actions.onNewWorker, modifier = Modifier.testTag("project-new-primary"))
         }
@@ -114,21 +138,59 @@ internal fun LazyListScope.projectSection(
         }
     }
 
-    if (state.subagents.isNotEmpty()) {
-        sectionRow("project-subagents-label") { SectionLabel("Subagents \u00B7 ${state.subagents.size}") }
-        sectionRows(state.subagents.distinctBy { it.id }, key = { "project-subagent-${it.id}" }, contentType = { "project-subagent" }) { sub ->
-            AgentLine(sub, local, nowMillis, clock, subtitle = "Cloud subagent", onOpen = { actions.onOpenAgent(sub) })
+    if (shape.subagentIds.isNotEmpty()) {
+        sectionRow("project-subagents-label") {
+            val count by rememberPick(panel) { it.view.subagents.size }
+            SectionLabel("Subagents \u00B7 $count")
+        }
+        sectionRows(shape.subagentIds, key = { "project-subagent-$it" }, contentType = { "project-subagent" }) { id ->
+            val sub by rememberPick(panel, id) { p -> p.view.subagents.firstOrNull { it.id == id } }
+            sub?.let { AgentLine(it, local, nowMillis, clock, subtitle = "Cloud subagent", onOpen = { actions.onOpenAgent(it) }) }
         }
     }
 
     sectionRow("project-context-label") { SectionLabel("Context") }
-    contextItems(state.projectId, state.context, busy, actions)
+    contextItems(shape.projectId, shape.context, busy, actions)
 
     sectionRow("project-refresh") {
         ActionRow(CursorIcons.Refresh, "Refresh", "Re-read the primaries and the account's memberships", enabled = !busy, onClick = actions.onRefresh, modifier = Modifier.testTag("project-refresh"))
     }
     sectionRow("project-end") { Spacer(Modifier.fillMaxWidth().height(6.dp)) }
 }
+
+/**
+ * What lays the Project section's rows out: which rows there are and in which order, and the few facts that add or
+ * take one away. What a row draws is not here; a primary's step leaves the shape as it was.
+ */
+internal data class ProjectShape(
+    val projectId: String,
+    val workerIds: List<String>,
+    val subagentIds: List<String>,
+    val lineageNotice: String?,
+    val actionsAvailable: Boolean,
+    val context: ContextState,
+) {
+    companion object {
+        fun of(panel: ProjectPanel): ProjectShape = ProjectShape(
+            projectId = panel.view.projectId,
+            workerIds = panel.rows.workers.map { it.worker.agent.id },
+            subagentIds = panel.view.subagents.map { it.id }.distinct(),
+            lineageNotice = panel.view.lineageNotice,
+            actionsAvailable = panel.view.actionsAvailable,
+            context = panel.view.context,
+        )
+    }
+}
+
+/** What the summary row draws. */
+private data class SummaryFacts(val root: Agent?, val primaries: Int, val running: Int, val needsInput: Int)
+
+private class Fixed<T>(override val value: T) : State<T>
+
+/** What [pick] takes from [panel], read so that the row reading it recomposes when that changes and not on every publication. */
+@Composable
+private fun <T> rememberPick(panel: State<ProjectPanel>, vararg keys: Any?, pick: (ProjectPanel) -> T): State<T> =
+    remember(panel, *keys) { derivedStateOf { pick(panel.value) } }
 
 /** The screen's hands, passed down to the rows; see [projectSection]. */
 internal class ProjectActions(
@@ -153,10 +215,13 @@ internal class ProjectActions(
  * last moved — and, in Extended mode, the pencil that opens the Project editor (name, icon and colour).
  */
 @Composable
-private fun ProjectSummary(state: ProjectViewState, running: Int, needsInput: Int, nowMillis: Long, clock: State<Long>?, onEditAppearance: (() -> Unit)?, enabled: Boolean) {
+private fun ProjectSummary(facts: SummaryFacts, nowMillis: Long, clock: State<Long>?, onEditAppearance: (() -> Unit)?, enabled: Boolean) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
-    val root = state.root
+    val root = facts.root
+    val primaries = facts.primaries
+    val running = facts.running
+    val needsInput = facts.needsInput
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(32.dp).background(colors.projectTone(root?.projectAppearance?.colorId).copy(alpha = 0.14f), CircleShape), contentAlignment = Alignment.Center) {
             Icon(CursorIcons.project(root?.projectAppearance?.icon), "Project", tint = colors.projectTone(root?.projectAppearance?.colorId), modifier = Modifier.size(17.dp))
@@ -165,7 +230,7 @@ private fun ProjectSummary(state: ProjectViewState, running: Int, needsInput: In
         Column(Modifier.weight(1f)) {
             AgeLine(nowMillis, clock, type.small, colors.textQuaternary) { now ->
                 buildList {
-                    add("${state.workers.size} ${if (state.workers.size == 1) "primary" else "primaries"}")
+                    add("$primaries ${if (primaries == 1) "primary" else "primaries"}")
                     root?.let { add("updated ${TimeFormat.relativeShort(it.listedAtMillis, now)}") }
                 }.joinToString(" \u00B7 ")
             }
