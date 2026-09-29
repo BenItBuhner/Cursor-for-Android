@@ -8,12 +8,13 @@ import com.cursorforandroid.domain.SubagentRows
 import com.cursorforandroid.domain.TimelineItem
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.launch
 
 /**
  * Where a cloud subagent stands, for the row its parent's transcript draws for it: a Project's worker, or a task
@@ -51,8 +53,14 @@ class SubagentActivity(
     )
 
     /** The child [agentId] as its row and its live run say it, as it moves; null until anything is known of it. */
+    fun of(agentId: String): Flow<SubagentChild?> = of(agentId, ALWAYS)
+
+    /**
+     * [of], its run streamed only while [wanted] (and a place at [streams] is free) and looked in on every so often
+     * otherwise: for a line that draws one child's step and keeps the next current to take over, on the same stream.
+     */
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun of(agentId: String): Flow<SubagentChild?> = channelFlow {
+    fun of(agentId: String, wanted: StateFlow<Boolean>): Flow<SubagentChild?> = channelFlow {
         // Shared within this collection: both the row and the stream below follow it, and the read is one request.
         val agent = agent(agentId).shareIn(this, SharingStarted.Eagerly, replay = 1)
         val live: Flow<SubagentChild?> = agent
@@ -62,7 +70,7 @@ class SubagentActivity(
                 if (runId == null) {
                     flowOf(null)
                 } else {
-                    followed(agentId, runId)
+                    followed(agentId, runId, wanted)
                         .map<Run, SubagentChild?> { SubagentRows.withRun(SubagentChild(), it.items, it.finished, it.status) }
                         .onStart { emit(null) }
                 }
@@ -88,14 +96,22 @@ class SubagentActivity(
         return combine(listed, read) { l, r -> l ?: r }.distinctUntilChanged()
     }
 
-    /** [runId] of [agentId] for as long as it is collected, holding a place at [streams] throughout. */
-    private fun followed(agentId: String, runId: String): Flow<Run> = flow {
-        val ticket = streams.acquire()
-        try {
-            emitAll(run(agentId, runId, ticket.watched))
-        } finally {
-            streams.release(ticket)
+    /** [runId] of [agentId] for as long as it is collected, holding a place at [streams] while [wanted]. */
+    private fun followed(agentId: String, runId: String, wanted: StateFlow<Boolean>): Flow<Run> = channelFlow {
+        val watched = MutableStateFlow(false)
+        launch {
+            wanted.collectLatest { want ->
+                if (!want) return@collectLatest
+                val ticket = streams.acquire()
+                try {
+                    ticket.watched.collect { watched.value = it }
+                } finally {
+                    streams.release(ticket)
+                    watched.value = false
+                }
+            }
         }
+        run(agentId, runId, watched).collect { send(it) }
     }
 
     /** The list's word on the child, with its live run's over it: the run's status, step and action, and a question it waits on. */
@@ -109,5 +125,9 @@ class SubagentActivity(
             action = live.action ?: base.action,
             waiting = live.waiting || (base.waiting && status == SubagentChild.Status.Running),
         )
+    }
+
+    private companion object {
+        val ALWAYS: StateFlow<Boolean> = MutableStateFlow(true)
     }
 }

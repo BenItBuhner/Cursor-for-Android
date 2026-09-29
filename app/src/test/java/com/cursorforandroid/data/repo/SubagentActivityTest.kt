@@ -139,4 +139,35 @@ class SubagentActivityTest {
         assertThat(gate.counts()).isEqualTo(0 to 0)
         job.cancel()
     }
+
+    @Test
+    fun `a child on standby is looked in on without a place, and taken up on the same stream`() = runTest(UnconfinedTestDispatcher()) {
+        val gate = SubagentStreamGate(maxStreams = 1)
+        var subscriptions = 0
+        var watched: kotlinx.coroutines.flow.StateFlow<Boolean>? = null
+        val activity = SubagentActivity(
+            row = { MutableStateFlow(agent(RunStatus.RUNNING)) },
+            load = { error("the list holds it") },
+            run = { _, _, w -> subscriptions++; watched = w; MutableStateFlow(SubagentActivity.Run(emptyList(), finished = false, status = RunStatus.RUNNING)) },
+            models = MutableStateFlow(LiveModelCatalog.models),
+            streams = gate,
+        )
+        val wanted = MutableStateFlow(false)
+        val job = launch { activity.of("bc-w1", wanted).collect { } }
+        assertThat(watched!!.value).isFalse()
+        assertThat(gate.counts()).isEqualTo(0 to 0)
+
+        wanted.value = true
+        assertThat(watched!!.value).isTrue()
+        assertThat(gate.counts()).isEqualTo(1 to 0)
+
+        wanted.value = false
+        assertThat(watched!!.value).isFalse()
+        assertThat(gate.counts()).isEqualTo(0 to 0)
+
+        wanted.value = true
+        job.cancel()
+        assertThat(gate.counts()).isEqualTo(0 to 0)
+        assertThat(subscriptions).isEqualTo(1)
+    }
 }

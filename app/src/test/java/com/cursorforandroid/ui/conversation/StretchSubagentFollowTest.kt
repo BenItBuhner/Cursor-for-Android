@@ -24,6 +24,8 @@ import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.onCompletion
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,13 +59,17 @@ class StretchSubagentFollowTest {
     private val live = ids.associateWith { id -> MutableStateFlow<SubagentChild?>(SubagentChild(SubagentChild.Status.Running, action = "Editing ${id.removePrefix("bc-")}.kt")) }
     private val listed = ids.associateWith { MutableStateFlow<SubagentChild?>(SubagentChild(SubagentChild.Status.Running)) }
     private val followed = mutableListOf<String>()
+    private val wanted = mutableMapOf<String, StateFlow<Boolean>>()
+
+    private fun streamed(id: String) = wanted[id]?.value == true
 
     private fun show(coordinatorMode: Boolean, items: List<TimelineItem> = turn) {
         val rows = TranscriptRows.of(items, coordinatorMode = coordinatorMode)
         val controls = TranscriptControls(
             coordinatorMode = coordinatorMode,
             subagents = SubagentRows.index(rows),
-            subagentActivity = { id -> followed += id; live.getValue(id) },
+            subagentActivity = { id -> error("a stretch follows $id through subagentFollowed") },
+            subagentFollowed = { id, want -> followed += id; wanted[id] = want; live.getValue(id).onCompletion { wanted.remove(id) } },
             subagentListed = { id -> listed.getValue(id) },
         )
         compose.setContent {
@@ -86,19 +92,25 @@ class StretchSubagentFollowTest {
         show(coordinatorMode = true)
         compose.onNodeWithText("6 Working").assertIsDisplayed()
         compose.onNodeWithText("Editing t6.kt").assertIsDisplayed()
-        assertThat(followed.toSet()).containsExactly("bc-t5", "bc-t6")
+        assertThat(followed).containsExactly("bc-t5", "bc-t6")
+        // Only the newest is streamed; the one before it is on standby, looked in on, holding no place at the gate.
+        assertThat(ids.filter(::streamed)).containsExactly("bc-t6")
 
-        // The newest ends on its stream before its row says so: the one before it, already followed, has the line at once.
+        // The newest ends on its stream before its row says so: the one on standby has the line at once, and is
+        // taken up on the stream it already had.
         live.getValue("bc-t6").value = SubagentChild(SubagentChild.Status.Succeeded)
         compose.waitForIdle()
         compose.onNodeWithText("5 Working").assertIsDisplayed()
         compose.onNodeWithText("Editing t5.kt").assertIsDisplayed()
         assertThat(compose.onAllNodesWithText(SubagentRows.PLANNING).fetchSemanticsNodes()).isEmpty()
+        assertThat(ids.filter(::streamed)).containsExactly("bc-t5")
+        assertThat(followed).containsExactly("bc-t5", "bc-t6")
 
         // Its row agrees: the next newest joins, and the one that ended is let go.
         listed.getValue("bc-t6").value = SubagentChild(SubagentChild.Status.Succeeded)
         compose.waitForIdle()
         assertThat(followed.toSet()).containsExactly("bc-t4", "bc-t5", "bc-t6")
+        assertThat(ids.filter(::streamed)).containsExactly("bc-t5")
         finish("bc-t5")
         compose.waitForIdle()
         compose.onNodeWithText("4 Working").assertIsDisplayed()
@@ -135,5 +147,6 @@ class StretchSubagentFollowTest {
             compose.onNodeWithText(action).assertIsDisplayed()
         }
         assertThat(followed.toSet()).containsExactlyElementsIn(ids)
+        assertThat(ids.filter(::streamed)).containsExactlyElementsIn(ids)
     }
 }
