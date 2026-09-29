@@ -769,9 +769,8 @@ class ConversationRepository(
                 // The run the account named when it took the message, once this device knows it: the message is that
                 // run's prompt, filed there the moment the run has started — its echo standing in until the transcript
                 // has its copy — and not before, bar a transcript carrying that copy already, the card being its place
-                // while it waits. One the account has let go
-                // of before that run started went another way (sent into the turn under way from the card): the
-                // transcript says where, below.
+                // while it waits. One the account has let go of before that run started went another way (sent into
+                // the turn under way from the card): the transcript says where, below.
                 val named = a.runId?.let { id -> ordered.firstOrNull { it.id == id } }
                 if (named != null && (a.queuedOnAccount || hasStarted(named.id, a.behindRunId))) {
                     // The account writes the prompt into the conversation only on delivery: a transcript holding its
