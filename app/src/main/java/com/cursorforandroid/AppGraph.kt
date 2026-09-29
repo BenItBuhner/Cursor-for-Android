@@ -24,6 +24,7 @@ import com.cursorforandroid.data.api.ConnectRepositoryBranchesApi
 import com.cursorforandroid.data.api.RepositoryBranchesApi
 import com.cursorforandroid.data.api.ConnectAgentStartApi
 import com.cursorforandroid.data.api.ApiThrottle
+import com.cursorforandroid.data.api.HostPause
 import com.cursorforandroid.data.api.ConnectJsonClient
 import com.cursorforandroid.data.api.ConnectProjectCreationApi
 import com.cursorforandroid.data.api.ConnectPromptUploadApi
@@ -153,9 +154,11 @@ import com.cursorforandroid.domain.SlashCatalog
 import com.cursorforandroid.domain.SlashCommand
 import com.cursorforandroid.domain.SteerOutcome
 import com.cursorforandroid.domain.QueuedFollowUp
+import com.cursorforandroid.domain.ReleaseNotes
 import com.cursorforandroid.domain.ToolPayload
 import com.cursorforandroid.domain.TranscriptDiagnostics
 import com.cursorforandroid.domain.TranscriptPresenters
+import com.cursorforandroid.domain.UpdateState
 import com.cursorforandroid.domain.WorkerMembership
 import com.cursorforandroid.domain.WorkerSpawnKind
 import com.cursorforandroid.domain.WorkspaceTree
@@ -172,11 +175,15 @@ import com.cursorforandroid.update.allocatableBytes
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -304,13 +311,16 @@ class AppGraph(
         if (lazyNewChatDrafts.isInitialized()) newChatDrafts.flush()
     }
 
+    /** The pause each host asked for with a `429`, held by the REST calls, the run streams and the account's Connect calls alike. */
+    private val hostPauses = HostPause()
+
     /** The connection pool and threads every OkHttp client below is built on (see [CursorApiFactory.newRoot]). */
     private val httpRoot = lazy { CursorApiFactory.newRoot() }
 
     /** The account's API: one client, with the SSE stream sharing its dispatcher and connection pool. */
     private val realParts = lazy {
-        val client = CursorApiFactory.okHttp(httpRoot.value) { keyStore.apiKey() }
-        CursorApiFactory.retrofit(client) to SseRunStreamer(CursorApiFactory.sseClient(client), { keyStore.apiKey() })
+        val client = CursorApiFactory.okHttp(httpRoot.value, hostPauses) { keyStore.apiKey() }
+        CursorApiFactory.retrofit(client) to SseRunStreamer(CursorApiFactory.sseClient(client), { keyStore.apiKey() }, pauses = hostPauses)
     }
     private val realBackend = real ?: CursorBackend(isDemo = false, parts = realParts)
     /** Seeded when the demo is entered, so a launch into a real account never pays for the dataset. */
@@ -355,7 +365,7 @@ class AppGraph(
      * chats' streams, where no call timeout runs yet.
      */
     private val lazyAccountClient = lazy { CursorApiFactory.loginClient(httpRoot.value).also { it.dispatcher.maxRequestsPerHost = ApiThrottle.ON_THE_WIRE + 2 } }
-    private val lazyAccountRpc = lazy { ConnectJsonClient(lazyAccountClient.value, CursorLoginEndpoints.API_URL) }
+    private val lazyAccountRpc = lazy { ConnectJsonClient(lazyAccountClient.value, CursorLoginEndpoints.API_URL, throttle = ApiThrottle(pauses = hostPauses)) }
 
     /** How long the account's calls are still held off by a pause the server asked for (a `429`, see `ApiThrottle`); 0 when none, or before any call. */
     fun accountPauseMillis(): Long {
@@ -924,7 +934,7 @@ class AppGraph(
     }
     val storeFiles: StoreFileRepository get() = lazyStoreFiles.value
 
-    private val lazyMedia = lazy { MediaLoader(app, lazyMediaClient.value, artifacts, stores = { storeFiles }, files = { agentFileReads }) }
+    private val lazyMedia = lazy { MediaLoader(app, { lazyMediaClient.value }, artifacts, stores = { storeFiles }, files = { agentFileReads }) }
     val media: MediaLoader get() = lazyMedia.value
 
     /** The media viewer's saves to the gallery: the process's, so a save runs on past the viewer's close and shows when it opens again. */
@@ -968,9 +978,21 @@ class AppGraph(
             // The background service streaming a run is the one thing a silent self-update would cut off; a monitor
             // this process never built is holding no stream, and asking is not worth building one.
             agentsRunning = { lazyRunMonitor.isInitialized() && runMonitor.isRunning },
-        )
+        ).also { builtUpdates.value = it }
     }
     val updates: UpdateManager get() = lazyUpdates.value
+
+    private val builtUpdates = MutableStateFlow<UpdateManager?>(null)
+
+    /**
+     * [UpdateManager.state] for the sidebar's hint, without building the updater: Idle until something has — the
+     * deferred startup, Settings — which is all the updater itself says before then, as it restores on first use.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val updateState: Flow<UpdateState> = builtUpdates.flatMapLatest { it?.state ?: flowOf(UpdateState.Idle) }
+
+    /** What [updateState] says right now, for a composition's first frame. */
+    fun currentUpdateState(): UpdateState = builtUpdates.value?.state?.value ?: UpdateState.Idle
 
     /**
      * The installed version's release notes — the What's new page, its row in Settings and its card in the sidebar.
@@ -982,9 +1004,18 @@ class AppGraph(
             prefs = prefs,
             cache = JsonDiskCache(File(app.cacheDir, "whats-new")),
             installedVersionName = appVersion,
-        )
+        ).also { builtWhatsNew.value = it }
     }
     val whatsNew: WhatsNewRepository get() = lazyWhatsNew.value
+
+    private val builtWhatsNew = MutableStateFlow(releaseNotes)
+
+    /**
+     * [WhatsNewRepository.unread] for the sidebar's card, without building the repository: null until something has
+     * (the deferred startup's refresh, Settings), which is all it says itself before its first refresh.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val whatsNewUnread: Flow<ReleaseNotes?> = builtWhatsNew.flatMapLatest { it?.unread ?: flowOf(null) }
 
     private val swept = AtomicBoolean(false)
 
