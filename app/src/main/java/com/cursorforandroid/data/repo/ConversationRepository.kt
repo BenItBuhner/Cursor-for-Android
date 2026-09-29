@@ -5548,6 +5548,15 @@ class ConversationRepository(
     }
 
     /**
+     * A word of this device's under the account's row for [followupId] (see [QueuePlacement.returned]): a steer from the
+     * device's card the account took into its queue but would not promote, which now waits there. Goes with the row.
+     */
+    fun noteQueuedNote(agentId: String, followupId: String, note: String) {
+        val e = synchronized(entries) { entries[agentId] } ?: return
+        e.publish(mutate = { returned = returned + (followupId to note) })
+    }
+
+    /**
      * The reader edited a queued message on the card and the account holds the new words: the copy waited for — and
      * filed under the run the account starts on it, its attachments with it — carries them, and the copies of the new
      * words the transcript holds now are the baseline its own is counted beyond.

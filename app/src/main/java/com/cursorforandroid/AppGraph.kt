@@ -865,7 +865,8 @@ class AppGraph(
             },
             accountQueueAvailable = { capabilities().accountQueue && !session.isDemo },
             // A waiting card's up arrow mid-turn: the message filed with the account's queue and promoted into the turn
-            // under way, as an account row's steer is — the queue read once, by the promote, so the card never shows it twice.
+            // under way, as an account row's steer is — the queue read once, by the promote; the card stands for the
+            // account's row of it until the transcript shows it (see FollowUpRepository.steerNow).
             accountSteering = object : FollowUpRepository.AccountSteering {
                 override suspend fun handOff(agentId: String, item: QueuedFollowUp): FollowUpRepository.AccountHandoff {
                     val followup = accountFollowupOf(item)
@@ -874,6 +875,9 @@ class AppGraph(
 
                 override suspend fun promote(agentId: String, followupId: String): SteerOutcome =
                     steering.promotePending(agentId, followupId).onFailure { steering.refreshQueue(agentId) }.getOrThrow()
+
+                override suspend fun withdraw(agentId: String, followupId: String): Boolean =
+                    steering.deletePending(agentId, followupId).isSuccess
             },
             store = followUpStore,
             persist = { !session.isDemo },
