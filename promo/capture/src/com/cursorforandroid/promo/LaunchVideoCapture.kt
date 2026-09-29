@@ -300,6 +300,7 @@ class LaunchVideoCapture {
         private fun until(what: String, seconds: Double, condition: () -> Boolean) {
             try {
                 d.until(what, seconds, condition)
+                d.mark(what)
                 if (probing) println("promo: $what at +${elapsed()}ms")
             } catch (e: IllegalStateException) {
                 if (!probing) throw e
@@ -403,8 +404,8 @@ class LaunchVideoCapture {
         const val FOLLOW_UP_AT = 6_300L
         const val STEER_AT = 8_900L
         const val LATEST_AT = 9_900L
-        const val SHIP_AT = 23_000L
-        const val PULL_REQUEST_AT = 24_000L
-        const val END_AT = 27_000L
+        const val SHIP_AT = 22_400L
+        const val PULL_REQUEST_AT = 23_300L
+        const val END_AT = 26_000L
     }
 }
