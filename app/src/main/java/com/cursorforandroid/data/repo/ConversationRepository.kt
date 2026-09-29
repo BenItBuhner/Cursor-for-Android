@@ -2896,6 +2896,9 @@ class ConversationRepository(
             if (pendingPublish?.isActive != true) {
                 pendingPublish = scope.launch {
                     delay(PUBLISH_COALESCE_MS)
+                    // Let go before publishing: a delta mutated in after [publish] has read the entry, while this job
+                    // is still active, must schedule a publication of its own or it waits for the next delta.
+                    synchronized(this@publishCoalesced) { if (pendingPublish === coroutineContext[Job]) pendingPublish = null }
                     publish()
                 }
             }
