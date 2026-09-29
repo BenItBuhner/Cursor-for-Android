@@ -921,7 +921,7 @@ class FollowUpRepositoryTest {
 
     @Test
     fun `steering while the chat is still being created waits for its first turn rather than stopping the launch`() = runBlocking<Unit> {
-        val request = LaunchRequest(prompt = "Do the thing", repoUrl = "https://github.com/acme/app", ref = "main", modelId = "auto-smart", modelParams = emptyList(), autoCreatePr = false, planMode = false)
+        val request = LaunchRequest(prompt = "Do the thing", repoUrl = "https://github.com/acme/app", ref = "main", modelId = "auto-smart", modelParams = emptyList(), planMode = false)
             .let { it.copy(agentId = LaunchIdempotency.agentId(it, "nonce")) }
         val id = request.agentId!!
         api.createGate = CompletableDeferred()
@@ -1122,6 +1122,104 @@ class FollowUpRepositoryTest {
         assertThat(state.queue.map { it.text }).containsExactly("Half-typed", "Second").inOrder()
         // The displaced draft keeps the taken message's place, with its own id.
         assertThat(state.queue.first().id).isNotEqualTo(first.id)
+    }
+
+    @Test
+    fun `a draft queued in place of a failed head it was edited from goes out`() = runBlocking<Unit> {
+        api.addIdleAgent("bc-1", "Agent", "run-0")
+        agents.refresh()
+        val followUps = repository()
+        api.failCreateRun = true
+        val failed = followUps.enqueue("bc-1", "Fails once")
+        awaitUntil { followUps.state("bc-1").value.queue.singleOrNull()?.error != null }
+        awaitUntil { !FollowUpRepositoryTestHelper.dispatcherActive(followUps, "bc-1") }
+        api.failCreateRun = false
+        val before = sent().size
+        followUps.setDraftText("bc-1", "Fresh words")
+
+        followUps.takeForEdit("bc-1", failed.id)
+
+        awaitUntil { sent().drop(before) == listOf("Fresh words") && followUps.state("bc-1").value.queue.isEmpty() }
+        assertThat(followUps.state("bc-1").value.draft.text).isEqualTo("Fails once")
+    }
+
+    @Test
+    fun `a draft queued in place of a held message starts fresh on the composer's own model and mode`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val followUps = repository()
+        val held = followUps.enqueue("bc-1", "Queued on GPT", modelId = "gpt-5", modelDisplayName = "GPT-5", planMode = true, refusedAsBusy = true)
+        followUps.setDraftText("bc-1", "Fresh words on the chat's model")
+
+        followUps.takeForEdit("bc-1", held.id)
+
+        val displaced = followUps.state("bc-1").value.queue.single()
+        assertThat(displaced.text).isEqualTo("Fresh words on the chat's model")
+        assertThat(displaced.queuedAtMillis).isEqualTo(now)
+        assertThat(displaced.isHeld).isFalse()
+        assertThat(displaced.heldSinceMillis).isNull()
+        assertThat(displaced.busyRefusals).isEqualTo(0)
+        assertThat(displaced.notBeforeMillis).isNull()
+        assertThat(displaced.throttleRefusals).isEqualTo(0)
+        assertThat(displaced.serverReason).isNull()
+        assertThat(displaced.holdReason).isNull()
+        assertThat(displaced.modelId).isNull()
+        assertThat(displaced.modelParams).isEmpty()
+        assertThat(displaced.modelDisplayName).isNull()
+        assertThat(displaced.planMode).isNull()
+    }
+
+    @Test
+    fun `a draft queued in place of a message that may have been sent is not asked to be confirmed`() = runBlocking<Unit> {
+        api.addIdleAgent("bc-1", "Agent", "run-0")
+        agents.refresh()
+        val orphan = QueuedFollowUp(id = "queued-orphan", text = "Sent just before the process died", queuedAtMillis = now - 60_000, sendStartedAtMillis = now - 55_000)
+        store.write("bc-1", FollowUpDraft.EMPTY, listOf(orphan))
+        val followUps = repository(persist = true)
+        followUps.state("bc-1").first { it.restored }
+        awaitUntil { followUps.state("bc-1").value.queue.singleOrNull()?.needsConfirmation == true }
+        followUps.setDraftText("bc-1", "A brand-new message")
+
+        followUps.takeForEdit("bc-1", orphan.id)
+
+        awaitUntil { sent() == listOf("A brand-new message") && followUps.state("bc-1").value.queue.isEmpty() }
+    }
+
+    @Test
+    fun `a draft queued in place of a message carries the composer's own pick and pill`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val followUps = repository()
+        followUps.state("bc-1").first { it.restored }
+        val queued = followUps.enqueue("bc-1", "Queued plainly")
+        val picked = DraftModel("composer-2.5", listOf(ModelParam("fast", "true")), "Composer 2.5")
+        followUps.setDraftText("bc-1", "Typed with a pick")
+        followUps.setDraftMode("bc-1", AgentMode.PLAN)
+        followUps.setDraftModel("bc-1", picked)
+
+        followUps.takeForEdit("bc-1", queued.id)
+
+        val displaced = followUps.state("bc-1").value.queue.single()
+        assertThat(displaced.planMode).isTrue()
+        assertThat(displaced.modelId).isEqualTo("composer-2.5")
+        assertThat(displaced.modelParams).containsExactly(ModelParam("fast", "true"))
+        assertThat(displaced.modelDisplayName).isEqualTo("Composer 2.5")
+    }
+
+    @Test
+    fun `a message taken back to edit brings its model and Plan mode into the composer`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val followUps = repository()
+        followUps.state("bc-1").first { it.restored }
+        val queued = followUps.enqueue("bc-1", "Queued on GPT", modelId = "gpt-5", modelParams = listOf(ModelParam("effort", "high")), modelDisplayName = "GPT-5", planMode = true)
+
+        followUps.takeForEdit("bc-1", queued.id)
+
+        val draft = followUps.state("bc-1").value.draft
+        assertThat(draft.text).isEqualTo("Queued on GPT")
+        assertThat(draft.mode).isEqualTo(AgentMode.PLAN)
+        assertThat(draft.model).isEqualTo(DraftModel("gpt-5", listOf(ModelParam("effort", "high")), "GPT-5"))
     }
 
     @Test

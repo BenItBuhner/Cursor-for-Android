@@ -159,14 +159,17 @@ fun HomeScreen(
     // lists never disagree about which chats are visible; the cards are newest first.
     val blocks = remember(home, listState, projectsAvailable) { homeBlocks(home, listState, projectsAvailable) }
     val projectGrid = remember { ProjectGridState() }
-    val blockActions = HomeBlockActions(
-        onOpenAgent = onOpenAgent,
-        rowActions = rowActions,
-        onNewProject = onNewProject,
-        onOpenSettings = onOpenSettings,
-        projectGrid = projectGrid,
-        onReorderProjects = onReorderProjects,
-    )
+    // Kept across recompositions so the cards skip while the prompt is typed: the class compares by identity.
+    val blockActions = remember(onOpenAgent, rowActions, onNewProject, onOpenSettings, onReorderProjects) {
+        HomeBlockActions(
+            onOpenAgent = onOpenAgent,
+            rowActions = rowActions,
+            onNewProject = onNewProject,
+            onOpenSettings = onOpenSettings,
+            projectGrid = projectGrid,
+            onReorderProjects = onReorderProjects,
+        )
+    }
     // The "+" menu's two pickers: the gallery — images alone in the default mode, images and videos as real files in
     // Extended mode — and, in Extended mode, the document picker for files of any type.
     val counts = AttachmentCounts.of(state.attachments, state.files)
@@ -330,12 +333,8 @@ fun HomeScreen(
             models = state.models,
             selectedModel = state.selectedModel,
             selectedVariant = state.selectedVariant,
-            planMode = state.planMode,
-            autoCreatePr = state.autoCreatePr,
             loading = state.isLoadingModels,
             unavailable = state.modelsUnavailable,
-            onPlanMode = viewModel::setPlanMode,
-            onAutoCreatePr = viewModel::setAutoCreatePr,
             onRefresh = viewModel::refreshModels,
             onSelect = viewModel::selectModel,
             onDismiss = { modelSheet = false },

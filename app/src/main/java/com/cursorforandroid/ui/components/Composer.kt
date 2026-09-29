@@ -115,7 +115,6 @@ import androidx.compose.ui.unit.lerp
 import com.cursorforandroid.data.media.MediaLoader
 import com.cursorforandroid.domain.ModelChoice
 import com.cursorforandroid.domain.ModelOption
-import com.cursorforandroid.domain.ModelSearch
 import com.cursorforandroid.domain.SlashCatalog
 import com.cursorforandroid.domain.SlashCommand
 import com.cursorforandroid.domain.SlashCommands
@@ -365,14 +364,15 @@ fun ComposerBox(
         ModePills.Pill.entries.filter { ModePills.pillFor(it.command, planEnabled = onModePill != null, extended = extendedModes) != null }
     }
     val pickableModels = if (onPickModel != null) models else emptyList()
-    val phrase = if (focused) SlashTokens.phraseAt(field.text.toString(), field.selection) else null
-    val phraseNamesModel = remember(phrase?.query, pickableModels) { phrase != null && ModelSearch.search(pickableModels, phrase.query).isNotEmpty() }
-    val slashToken = if (focused) SlashTokens.at(field.text.toString(), field.selection) ?: phrase?.takeIf { phraseNamesModel } else null
+    val wornPill = wornMode ?: ModePills.Pill.Multitask.takeIf { presented.multitask }
+    val offer = remember(offeredModes, wornPill, pickableModels, currentModel) { SlashOffer(offeredModes, wornPill, pickableModels, currentModel) }
+    val fieldText = if (focused) field.text.toString() else ""
+    val phrase = if (focused) SlashTokens.phraseAt(fieldText, field.selection) else null
+    val phraseNamesModel = remember(phrase?.query, offer) { phrase != null && offer.modelSearch.search(phrase.query).isNotEmpty() }
+    val slashToken = if (focused) SlashTokens.at(fieldText, field.selection) ?: phrase?.takeIf { phraseNamesModel } else null
     var dismissedToken by remember { mutableStateOf<SlashToken?>(null) }
     val recentSkills = plusMenu?.recentSkills.orEmpty()
     val popoverToken = slashToken?.takeIf { it != dismissedToken }
-    val wornPill = wornMode ?: ModePills.Pill.Multitask.takeIf { presented.multitask }
-    val offer = remember(offeredModes, wornPill, pickableModels, currentModel) { SlashOffer(offeredModes, wornPill, pickableModels, currentModel) }
     val slash = rememberSlashSuggestions(popoverToken, commands, recentSkills, offer)
     val slashOpen = slashPopoverOpen(popoverToken, slash, commands)
     // The app's shortcuts are read before this field sees a key; while the popover is up, Esc, Ctrl+N and Ctrl+K are
