@@ -1,0 +1,47 @@
+name: Idle diagnostics (temporary)
+
+on:
+  push:
+    branches: [cursor/deterministic-ci-flakes-e046]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  shard:
+    name: Diag ${{ matrix.shard }} copy ${{ matrix.copy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/6"]
+        copy: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+      - uses: ./.github/actions/android-toolchain
+      - name: Run shard
+        timeout-minutes: 26
+        run: >
+          ./gradlew :app:testDebugUnitTest -Papp.skipScreenshotTests=true -Papp.testShard=${{ matrix.shard }}
+          -Papp.testForks=1
+      - name: Idle dumps
+        if: always()
+        run: |
+          find app/build/test-results -name 'output.bin' -exec strings {} \; | grep -a 'IDLEDUMP' | head -400 || true
+          grep -l 'IDLEDUMP' app/build/test-results/testDebugUnitTest/*.xml 2>/dev/null | head || true
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diag-${{ matrix.copy }}
+          path: app/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 5
