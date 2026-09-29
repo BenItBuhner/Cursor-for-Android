@@ -42,7 +42,7 @@
     <string name="spotlight_action">Spotlight</string>
     <string name="spotlight_action_stop">Stop Spotlight</string>
     <string name="spotlight_connecting">Connecting…</string>
-    <string name="spotlight_notifications_off">Turn on notifications to use Spotlight</string>
+
 
     <!-- Home-screen widget -->
     <string name="widget_label">Chats</string>
