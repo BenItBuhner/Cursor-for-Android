@@ -141,7 +141,9 @@ class JumpToBottomScreenTest {
                 }
             }
         }
-        compose.waitUntil(120_000) { graph.conversations.state(agentId).value.let { !it.isLoading && it.isStreaming && it.traceStatus.pending == 0 } }
+        // Read off what the screen was handed, not the repository: the presenter runs off the main thread, so the
+        // repository settles ahead of the rows drawn from it, and waitForIdle does not wait for the presenter.
+        compose.waitUntil(120_000) { presentation().state.let { !it.isLoading && it.isStreaming && it.traceStatus.pending == 0 } }
         compose.waitUntil(60_000) { runCatching { summary("${reads(TURNS - 1)} files") }.isSuccess }
         compose.waitForIdle()
     }
@@ -185,7 +187,9 @@ class JumpToBottomScreenTest {
     /** When the stream moved on from the agent's thinking (in the collapsed live stretch) to its reply, if it has. */
     private var replyFromMs: Int? = null
 
-    private fun presented() = ViewModelProvider(compose.activity)["conversation-$agentId", ConversationViewModel::class.java].presented.value.items
+    private fun presentation() = ViewModelProvider(compose.activity)["conversation-$agentId", ConversationViewModel::class.java].presented.value
+
+    private fun presented() = presentation().items
 
     private fun presentedReply(): String = presented().filterIsInstance<AssistantMessage>().lastOrNull()?.markdown.orEmpty()
 
