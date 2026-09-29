@@ -841,9 +841,24 @@ class AgentRepository(
             }
             // Every publication ends with the classification pass: whatever [transform] did to the rows — merged a
             // page, folded in a record, restored the disk — each row is placed by what is known of its lineage.
-            _state.value = transform(_state.value).classified()
+            val previous = _state.value
+            _state.value = transform(previous).classified()
+            publishCounts.passes.incrementAndGet()
+            if (_state.value !== previous) publishCounts.changes.incrementAndGet()
             true
         }
+
+    /**
+     * What the list's publications have cost, counted: every pass of [classified] ([passes]) and every publication
+     * that changed the list its collectors see ([changes]; the flow keeps the list it holds when an equal one is
+     * published). For the benchmarks: each change is a pass of every collector of [state].
+     */
+    internal class PublishCounts {
+        val passes = AtomicInteger()
+        val changes = AtomicInteger()
+    }
+
+    internal val publishCounts = PublishCounts()
 
     /**
      * Places every row the desktop's way (see [AgentsWindowList]): the parent link is the record's own
