@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cursorforandroid.domain.EnvironmentFilter
+import kotlinx.coroutines.Dispatchers
 import com.cursorforandroid.domain.FilterKind
 import com.cursorforandroid.domain.GitFilter
 import com.cursorforandroid.domain.GroupBy
@@ -82,7 +83,8 @@ import kotlinx.coroutines.launch
 fun CustomizeSheet(viewModel: AgentsViewModel, onDismiss: () -> Unit) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // On the main dispatcher so a list emission from Default cannot land on a worker under the test harness (see ShareDestinationScreenTest).
+    val state by viewModel.uiState.collectAsStateWithLifecycle(context = Dispatchers.Main.immediate)
     val scope = rememberCoroutineScope()
     var page by remember { mutableStateOf<FilterKind?>(null) }
     // Seekable so a back gesture scrubs the drill-in page out and the root page in; committed on release.
