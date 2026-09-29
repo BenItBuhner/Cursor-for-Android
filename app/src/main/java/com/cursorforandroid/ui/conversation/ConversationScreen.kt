@@ -382,17 +382,6 @@ fun ConversationScreen(
     val following = transcriptScroll.following
     // The order the list was last measured in, which is what its scroll bounds are in: the fades read the two together.
     val listReversed by remember(listState) { derivedStateOf { listState.layoutInfo.reverseLayout } }
-    // The chat opens on its newest turns; the ones before them are paged in when the reader scrolls up to them:
-    // nearing the top is having only a few items above the top-most one in view — and only the reader's scroll asks:
-    // a gesture arms one page, a fling under way keeps asking as its rows come into reach, and a transcript short
-    // enough to show its oldest row at rest asks for nothing until the reader moves it. Until 0.3.47 the list asked
-    // whenever its end was in view: a coordinator's turns fold into a few rows, so a Project of 240 turns paged itself
-    // in whole, page after page, every turn's log replayed behind it, and again on every reopen (Bennett,
-    // 2026-09-20). "Older messages" stays a tap away at rest (the paging itself is asked for by transcriptList).
-    var olderArmed by remember(agentId) { mutableStateOf(false) }
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }.collect { scrolling -> if (scrolling) olderArmed = true }
-    }
 
     // The right-side panel: the chat's files, changes, pull request, media, artifacts and usage, read off the same
     // repositories as the transcript plus the documented reads only it needs. Opened by the header button or a drag
@@ -598,17 +587,10 @@ fun ConversationScreen(
                     snapshotFlow { transcriptScroll.isJumping }.first { !it }
                     if (transcriptScroll.following) listState.requestScrollToItem(0)
                 }
-                // The reader's scroll nearing the top pages the turns before the window in (see olderArmed).
-                LaunchedEffect(listState, hasOlder, isLoadingOlder) {
-                    if (!hasOlder || isLoadingOlder) return@LaunchedEffect
-                    snapshotFlow { listState.layoutInfo.let { info -> TranscriptScroll.itemsAbove(info) to info.totalItemsCount } }
-                        .collect { (above, total) ->
-                            if ((olderArmed || listState.isScrollInProgress) && total > 0 && above < OlderTurnsPrefetchRows) {
-                                olderArmed = false
-                                viewModel.loadOlder()
-                            }
-                        }
-                }
+                // The chat opens on its newest turns; the ones before them are paged in by what the list draws — until a
+                // reply is shown and a screen and a half lies above the viewport, at rest as the chat opens and ahead of
+                // the reader's scroll up (see OlderPaging). "Older messages" is only the fallback of a page that did not come.
+                OlderPagingEffect(agentId, listState, listedRows, canPage = hasOlder && !isLoadingOlder && items.isNotEmpty(), loadOlder = viewModel::loadOlder)
                 TranscriptHitScroll(agentId, rows, conversation, transcriptScroll, viewModel)
                 val subagents = presentedTranscript.subagents
                 val subagentRuns = conversation.subagentRuns
@@ -663,8 +645,8 @@ fun ConversationScreen(
                         // this time (with a Retry). Above the oldest turn shown, where the missing activity would be
                         // noticed; nothing when every turn is whole.
                         TRACES_KEY -> TraceStatusRow(conversation.traceStatus, onRetry = viewModel::retryTraces, modifier = paneWidth)
-                        // Past the oldest turn shown: the turns before it, being paged in, or a tap away when the
-                        // reader's scroll did not reach far enough to ask for them.
+                        // Past the oldest turn shown: the turns before it, being paged in, or a tap away when a page
+                        // did not come.
                         OLDER_KEY -> OlderTurnsRow(isLoading = isLoadingOlder, onLoad = viewModel::loadOlder, modifier = paneWidth)
                         EMPTY_KEY -> {
                             val failure = conversation.error ?: conversation.transcriptError?.let { "Couldn't load the transcript: $it" }
@@ -1056,13 +1038,6 @@ private val TranscriptGutter = 16.dp
 private val JumpButtonGap = 10.dp
 
 /**
- * How many rows from the oldest one shown the reader may be before the turns before it are asked for: about a
- * screen's worth, so a page is on its way while the reader is still reading the one above it rather than when they
- * have reached its end (the insert above them costs nothing to what they are looking at; see [TranscriptPresenter]).
- */
-private const val OlderTurnsPrefetchRows = 6
-
-/**
  * A load that did not go through: the server's words, Retry, and "Share diagnostics" — the redacted load block
  * (window bounds, runs and their order, each turn's trace state, the live follow, the last errors) handed to the
  * share sheet, so a chat that would not load can be reported from where it failed. A card over the composer
@@ -1153,8 +1128,8 @@ internal fun TraceStatusRow(status: TraceStatus, onRetry: () -> Unit, modifier: 
 
 /**
  * The row past the oldest turn shown, while the chat has older ones: "Loading older…" while they are being paged in
- * (their run records fetched, their traces read or replayed), else a line that asks for them — for a reader whose
- * scroll stopped just short of where the list asks by itself.
+ * (their run records fetched, their traces read or replayed), else a line that asks for them — only when a page did
+ * not come, or the list stopped asking at rest (see [OlderPaging]).
  */
 @Composable
 internal fun OlderTurnsRow(isLoading: Boolean, onLoad: () -> Unit, modifier: Modifier = Modifier) {
