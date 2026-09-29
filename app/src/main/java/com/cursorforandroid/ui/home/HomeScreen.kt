@@ -47,6 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -94,8 +96,6 @@ import com.cursorforandroid.ui.components.rememberFilePicker
 import com.cursorforandroid.ui.components.rememberMediaPicker
 import com.cursorforandroid.ui.components.scrollEdgeFade
 import com.cursorforandroid.ui.components.stylusWriting
-import com.cursorforandroid.ui.components.Haptic
-import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.share.ShareTarget
 import com.cursorforandroid.ui.compose.LaunchRefusedHaptic
 import com.cursorforandroid.ui.compose.NewAgentUiState
@@ -370,7 +370,7 @@ fun RecentChatRow(
     var menuOpen by remember { mutableStateOf(false) }
     var menuAt by remember { mutableStateOf<IntOffset?>(null) }
     val interaction = remember { MutableInteractionSource() }
-    val haptics = rememberHaptics()
+    val haptics = LocalHapticFeedback.current
     Box(modifier) {
     Row(
         Modifier
@@ -384,7 +384,7 @@ fun RecentChatRow(
                             interactionSource = interaction,
                             indication = ripple(color = colors.base),
                             onClick = onClick,
-                            onLongClick = { haptics.perform(Haptic.LongPress); menuAt = null; menuOpen = true },
+                            onLongClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); menuAt = null; menuOpen = true },
                         )
                 } else {
                     Modifier.pressable(onClick, shape)
@@ -424,7 +424,7 @@ fun RecentChatRow(
             }
         }
     }
-        if (actions != null) ChatRowMenu(row = row, expanded = menuOpen, onDismiss = { menuOpen = false }, actions = actions, at = menuAt)
+        if (actions != null && menuOpen) ChatRowMenu(row = row, expanded = true, onDismiss = { menuOpen = false }, actions = actions, at = menuAt)
     }
 }
 
