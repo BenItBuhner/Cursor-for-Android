@@ -127,6 +127,7 @@ class SharedAnimationTickerBenchmarkTest {
     fun `sixty running rows share one draw-only animation ticker`() {
         SharedAnimationTickerTestHooks.onFrame = { callbacks.incrementAndGet() }
         val recompositions = Recompositions()
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             val root = currentComposer.composition
             remember(root) { root.observe(recompositions) }
@@ -141,7 +142,6 @@ class SharedAnimationTickerBenchmarkTest {
             }
         }
         compose.waitForIdle()
-        compose.mainClock.autoAdvance = false
         measure(10, recompositions)
 
         val idle = measure(IDLE_FRAMES, recompositions)
