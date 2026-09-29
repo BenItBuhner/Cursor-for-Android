@@ -10,7 +10,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.domain.ActivityGroup
+import com.cursorforandroid.domain.Agent
+import com.cursorforandroid.domain.AgentLifecycle
 import com.cursorforandroid.domain.AssistantMessage
+import com.cursorforandroid.domain.EnvType
 import com.cursorforandroid.domain.RunFooter
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.domain.SubagentChild
@@ -139,9 +142,23 @@ class StretchViewTest {
         RunFooter("f1", "run-1", RunStatus.FINISHED, 38_000, emptyList()),
     )
 
+    private fun runningTaskAgent() = Agent(
+        id = "bc-cb1", name = "Chart task", lifecycle = AgentLifecycle.ACTIVE, runStatus = RunStatus.RUNNING, envType = EnvType.CLOUD,
+        envName = null, url = "https://cursor.com/agents/bc-cb1", createdAtMillis = 1L, updatedAtMillis = 2L, latestRunId = "run-child", repoUrl = null, startingRef = null,
+    )
+
     /** [items] with the task's child standing as [child] says. */
-    private fun showTurn(coordinatorMode: Boolean, child: MutableStateFlow<SubagentChild?>, items: List<TimelineItem> = taskTurn) {
-        val controls = TranscriptControls(coordinatorMode = coordinatorMode, subagentActivity = { child })
+    private fun showTurn(
+        coordinatorMode: Boolean,
+        child: MutableStateFlow<SubagentChild?>,
+        items: List<TimelineItem> = taskTurn,
+        listAgent: Agent? = runningTaskAgent(),
+    ) {
+        val controls = TranscriptControls(
+            coordinatorMode = coordinatorMode,
+            subagentActivity = { child },
+            agentById = { id -> listAgent?.takeIf { it.id == id } },
+        )
         compose.setContent {
             CursorTheme(mode = ThemeMode.Dark) {
                 CompositionLocalProvider(LocalTranscriptControls provides controls) {
@@ -156,7 +173,7 @@ class StretchViewTest {
         val stale = taskTurn.map { item ->
             if (item !is ActivityGroup) item else item.copy(steps = item.steps.map { step -> if (step is ToolCall && step.callId == "t1") step.copy(status = ToolCall.STATUS_RUNNING) else step })
         }
-        showTurn(coordinatorMode = true, MutableStateFlow(null), stale)
+        showTurn(coordinatorMode = true, MutableStateFlow(null), stale, listAgent = null)
         compose.onNodeWithText("Worked 38s").assertIsDisplayed()
         assertThat(compose.onAllNodesWithText("1 Working").fetchSemanticsNodes()).isEmpty()
         assertThat(compose.onAllNodesWithText(com.cursorforandroid.domain.SubagentRows.PLANNING).fetchSemanticsNodes()).isEmpty()
@@ -172,6 +189,7 @@ class StretchViewTest {
         assertThat(compose.onAllNodesWithText("Implement bidirectional hover linking").fetchSemanticsNodes()).isEmpty()
         // Open, the row reads where the task stands, between the reads it came between.
         compose.onNodeWithText("1 working").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Implement bidirectional hover linking").fetchSemanticsNodes().isNotEmpty() }
         val tops = listOf("Chart.tsx", "CursorBench chart hover highlight", "Legend.tsx").map { compose.onNodeWithText(it).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top }
         assertThat(tops).isInStrictOrder()
         compose.onNodeWithText("Implement bidirectional hover linking").assertIsDisplayed()
@@ -182,16 +200,14 @@ class StretchViewTest {
     }
 
     @Test
-    fun `in a Project's chat a closed stretch says where its newest working subagent stands`() {
+    fun `in a Project's chat a closed stretch counts a working subagent but does not stream its live line`() {
         val child = MutableStateFlow<SubagentChild?>(SubagentChild(SubagentChild.Status.Running, action = "Editing Chart.tsx"))
         showTurn(coordinatorMode = true, child)
         compose.onNodeWithText("1 Working").assertIsDisplayed()
-        compose.onNodeWithText("Editing Chart.tsx").assertIsDisplayed()
+        assertThat(compose.onAllNodesWithText("Editing Chart.tsx").fetchSemanticsNodes()).isEmpty()
         assertThat(compose.onAllNodes(hasTestTag("subagent-row")).fetchSemanticsNodes()).isEmpty()
-        // Waiting on the reader still counts; the line says so.
-        child.value = SubagentChild(SubagentChild.Status.Running, waiting = true)
-        compose.waitUntil(5_000) { compose.onAllNodesWithText(com.cursorforandroid.domain.SubagentRows.WAITING).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("1 Working").assertIsDisplayed()
+        compose.onNodeWithText("1 Working").performClick()
+        compose.onNodeWithText("Editing Chart.tsx").assertIsDisplayed()
     }
 
     @Test
