@@ -1531,6 +1531,13 @@ class ConversationRepository(
         }
 
         /**
+         * The documented path's run records reach fewer than [RUN_LOOKAHEAD_TURNS] turns past the window, with older
+         * pages still to read: the next scroll up or two would widen onto prompts whose runs are not in hand.
+         */
+        fun wantsRunsAhead(): Boolean =
+            recordWindow == null && !runsComplete && olderRunsCursor != null && runs.size < MAX_LISTED_RUNS && allRuns().size < window + RUN_LOOKAHEAD_TURNS
+
+        /**
          * The window's turn that is [prompt]'s — the record has caught up with the prompt sent from here — or null.
          *
          * Until 0.3.33 the record held a prompt when its text was among the window's newest `local.size + 1` turns.
@@ -4280,21 +4287,24 @@ class ConversationRepository(
     private class NewestRuns(val page: ListRunsResponseDto, val ascending: Boolean, val endKnown: Boolean, val latestFetched: Boolean)
 
     /**
-     * Pages the rest of the run records behind the newest page, oldest last, so the transcript's prompts pair with
-     * their own runs and the older turns are ready to be built when the reader scrolls up to them. The records are
-     * small; what is dear — replaying the runs' logs — waits for the window to reach them. Bounded: a chat longer
-     * than [MAX_RUN_PAGES] pages has turns whose logs expired long ago, and its oldest prompts are shown without runs.
-     * Once the records are in, the window's traces are asked for again: the runs the window pairs with can have
-     * changed with the count.
+     * Pages the run records behind the newest page, oldest last, so the transcript's prompts pair with their own runs
+     * and the older turns are ready to be built when the reader scrolls up to them. On the documented path only as
+     * far as [RUN_LOOKAHEAD_TURNS] past the window (see [Entry.wantsRunsAhead]) — a page of a hundred, not the whole
+     * list, on a cold open — and topped up as the window widens (see [loadOlderNow]); on the record's, as far as its
+     * window reaches. The records are small; what is dear — replaying the runs' logs — waits for the window to reach
+     * them. Bounded: a chat longer than [MAX_LISTED_RUNS] runs has turns whose logs expired long ago, and its oldest
+     * prompts are shown without runs. Once the records are in, the window's traces are asked for again: the runs the
+     * window pairs with can have changed with the count.
      */
     private fun pageOlderRuns(e: Entry, agentId: String) {
         synchronized(e) {
             if (e.runPagingJob?.isActive == true || e.runsComplete || e.olderRunsCursor == null) return
+            if (e.recordWindow == null && !e.wantsRunsAhead()) return
             e.runPagingJob = e.scope.launch {
                 val pages = pageOlderRunsNow(e, agentId, pages = MAX_RUN_PAGES)
                 // The bound was reached with a cursor still in hand: the list is as complete as it will be read, so
                 // the prompts beyond it stand without runs rather than waiting for pages nobody asks for.
-                if (pages >= MAX_RUN_PAGES) {
+                if (synchronized(e) { if (e.recordWindow == null) e.runs.size >= MAX_LISTED_RUNS else pages >= MAX_RUN_PAGES }) {
                     e.publish(mutate = { if (!runsComplete && olderRunsCursor != null) runsComplete = true })
                     persist(e, session.current)
                 }
@@ -4315,14 +4325,18 @@ class ConversationRepository(
         val tokens = cacheTokens()
         var fetched = 0
         for (i in 0 until pages) {
-            // In Extended mode the pages serve the record's window: enough of them to cover it, no more.
-            val cursor = synchronized(e) { e.olderRunsCursor.takeUnless { e.runsComplete || (e.recordWindow != null && !e.recordNeedsRuns()) } } ?: break
+            // In Extended mode the pages serve the record's window: enough of them to cover it, no more. Past the
+            // first, the documented path's serve the look-ahead the same way.
+            val cursor = synchronized(e) {
+                e.olderRunsCursor.takeUnless { e.runsComplete || (e.recordWindow != null && !e.recordNeedsRuns()) || (e.recordWindow == null && i > 0 && !e.wantsRunsAhead()) }
+            } ?: break
             val page = runCatching { net(agentId, "runs"); backend.api.listRuns(agentId, limit = RUN_PAGE_SIZE, cursor = cursor) }.getOrElse { t ->
                 if (t is CancellationException) throw t
                 onFailure(t)
                 break
             }
             fetched++
+            var cleared = false
             e.publish(
                 mutate = {
                     val known = runs.mapTo(HashSet()) { it.id }
@@ -4330,7 +4344,11 @@ class ConversationRepository(
                     olderRunsCursor = page.nextCursor?.takeIf { it.isNotBlank() && page.items.isNotEmpty() }
                     runsComplete = olderRunsCursor == null
                     pruneLocal()
+                    // The page a scroll up could not read went through, whoever asked again (see [loadOlderNow]).
+                    cleared = olderPageFailed
+                    olderPageFailed = false
                 },
+                transform = { if (cleared) copy(transcriptError = null) else this },
             )
         }
         if (fetched > 0) persist(e, backend, tokens)
@@ -4401,12 +4419,16 @@ class ConversationRepository(
             // ask again; what is shown stands, and the cursor stays where it was for the next scroll up, which
             // clears the word when it goes through.
             if (needsRecords) {
-                val fetched = pageOlderRunsNow(e, e.agentId, pages = 1) { t -> e.publish(mutate = { olderPageFailed = true }, transform = { copy(transcriptError = t.userMessage()) }) }
-                if (fetched > 0 && synchronized(e) { e.olderPageFailed }) e.publish(mutate = { olderPageFailed = false }, transform = { copy(transcriptError = null) })
+                pageOlderRunsNow(e, e.agentId, pages = 1) { t -> e.publish(mutate = { olderPageFailed = true }, transform = { copy(transcriptError = t.userMessage()) }) }
             }
-            e.publish(mutate = { window += WINDOW_RUNS })
+            e.publish(mutate = {
+                window += WINDOW_RUNS
+                // As far as the list is read (see [pageOlderRuns]): the prompts beyond stand without runs.
+                if (!runsComplete && olderRunsCursor != null && runs.size >= MAX_LISTED_RUNS) runsComplete = true
+            })
             persist(e, session.current)
             loadTraces(e, e.agentId, e.shownRuns().filter { it.statusEnum().isTerminal })
+            pageOlderRuns(e, e.agentId)
         } finally {
             e.publish(mutate = { loadingOlder = false }, transform = { copy(isLoadingOlder = false) })
         }
@@ -6312,6 +6334,8 @@ class ConversationRepository(
         const val LOST_REPLY_ATTEMPTS = 2
         /** Pages of older run records read past the first: beyond them the oldest prompts are shown without runs. */
         const val MAX_RUN_PAGES = 8
+        /** Run records the documented path reads at most, the first page and [MAX_RUN_PAGES] behind it (see [pageOlderRuns]). */
+        const val MAX_LISTED_RUNS = FIRST_RUN_PAGE + MAX_RUN_PAGES * RUN_PAGE_SIZE
         /** Pages of a list read oldest first that are read to reach its end, at most (see [newestRuns]): four thousand runs. */
         const val MAX_ASCENDING_RUN_PAGES = 40
         /** How close two publications may come before the second waits for the burst (see [publishCoalesced]). */
@@ -6349,6 +6373,8 @@ class ConversationRepository(
         const val RECONCILE_AFTER_LOAD_MS = 30_000L
         /** How many of the newest runs a chat opens on, and by how many the window widens each time the reader scrolls up to its end. */
         const val WINDOW_RUNS = 10
+        /** Turns past the window the documented path keeps run records in hand for: two scrolls up (see [Entry.wantsRunsAhead]). */
+        const val RUN_LOOKAHEAD_TURNS = 2 * WINDOW_RUNS
         /** The widest window the disk copy reopens on: the runs whose traces are read before the first frame. */
         const val MAX_RESTORED_WINDOW = 30
         /** How many of an ordinary chat's newest turns a cold open of the blob-backed record paints first, the rest of the window read behind them (see [loadFromRecord], [runBlobWork]). */
