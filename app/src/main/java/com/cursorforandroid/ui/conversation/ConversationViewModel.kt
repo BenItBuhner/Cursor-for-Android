@@ -221,7 +221,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         // The newest rows are what the first frame composes: their markdown is parsed here, not on that frame.
         presented.rows.asReversed().asSequence().take(PRIMED_ROWS).forEach { row ->
             when (row) {
-                is TranscriptRow.Message -> (row.call.payload as? ToolPayload.CoordinatorMessage)?.message?.let(MarkdownCache::prime)
+                is TranscriptRow.Message -> if (!row.call.isRunning) (row.call.payload as? ToolPayload.CoordinatorMessage)?.message?.let(MarkdownCache::prime)
                 is TranscriptRow.Item -> when (val item = row.item) {
                     is UserMessage -> MarkdownCache.prime(item.text)
                     is AssistantMessage -> if (!item.isStreaming) MarkdownCache.prime(item.markdown)
@@ -318,7 +318,6 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     init {
         outgoing.listener = outgoingListener
         graph.conversations.attach(agentId)
-        graph.steering.attach(agentId)
         viewModelScope.launch { graph.prefs.markTouchedHere(agentId) }
         viewModelScope.launch { loadModels() }
         viewModelScope.launch {
@@ -390,7 +389,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         // The sends go on in the graph's scope; only this composer stops hearing of them.
         if (outgoing.listener === outgoingListener) outgoing.listener = null
         graph.conversations.detach(agentId)
-        graph.steering.detach(agentId)
+        if (steeringAttached) graph.steering.detach(agentId)
         graph.followUps.flush(agentId)
         super.onCleared()
     }
@@ -480,9 +479,6 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         }
     }
 
-    /** The model sheet's plan toggle: on is plan mode, off asks for agent mode explicitly. */
-    fun setPlanMode(value: Boolean) = setMode(if (value) AgentMode.PLAN else AgentMode.AGENT)
-
     /** The composer's pill: Plan, Ask or Debug on; the cross (null) puts the next run back to agent mode explicitly. */
     fun setModePill(pill: ModePills.Pill?) = setMode(pill?.agentMode ?: AgentMode.AGENT)
 
@@ -570,8 +566,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     private fun composerIsEmpty(): Boolean = draft.value.isEmpty() && attachments.value.isEmpty() && files.value.isEmpty()
 
     /**
-     * Puts the repository's draft in the composer: a restored one, or a queued message taken back for editing. The
-     * previews are decoded off the main thread first; with [unlessWrittenInto], a composer written into meanwhile —
+     * Puts the repository's draft in the composer: a restored one. The previews are decoded off the main thread first; with [unlessWrittenInto], a composer written into meanwhile —
      * a word typed, a file attached — keeps what it has, and the restored draft stays on disk for the next time.
      * Nor is a draft that is no longer the repository's put back: [saved] was read before the decode (and the
      * repository's draft is the composer's own as typed), so an empty composer by now may be one a send emptied.
@@ -767,14 +762,38 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         graph.attachmentUploads.forget(attached.map { it.id })
     }
 
-    /** Takes a queued follow-up back into the composer; a draft already there is queued in its place, so nothing is lost. */
+    /**
+     * Takes a queued follow-up back into the composer; a draft already there is queued in its place, so nothing is lost.
+     * Its text and chips are the composer's before this returns: a send the moment after acts on them, never on the
+     * draft just queued (which went out a second time, and emptied the repository's copy of the edited text). Only the
+     * chips' previews wait on a decode off the main thread, filled in once it is done.
+     */
     fun editQueued(id: String) {
         val displaced = !draft.value.isBlank() || attachments.value.isNotEmpty() || files.value.isNotEmpty()
         graph.followUps.takeForEdit(agentId, id) ?: return
-        viewModelScope.launch {
-            adoptDraft(graph.followUps.state(agentId).value.draft)
-            if (displaced) toast.value = "Your draft was queued in its place."
+        val taken = graph.followUps.state(agentId).value.draft
+        picker.update { it.adopting(taken) }
+        draft.value = taken.text
+        val images = taken.images.map { PendingAttachment(it.id, it.image, thumbnails.value[it.id]) }
+        val takenFiles = taken.files.map { PendingFile(it.id, it.file) }
+        attachments.value = images
+        files.value = takenFiles
+        // A file that came back with its reference is up already; one without goes up now.
+        takenFiles.forEach { graph.attachmentUploads.start(it.id, it.file) }
+        keepModesExclusive(taken.text)
+        if (displaced) toast.value = "Your draft was queued in its place."
+        if (images.isNotEmpty() || takenFiles.isNotEmpty()) viewModelScope.launch { fillPreviews(images, takenFiles) }
+    }
+
+    /** The thumbnails of chips put in the composer without one, decoded off the main thread, onto the chips still there. */
+    private suspend fun fillPreviews(images: List<PendingAttachment>, taken: List<PendingFile>) {
+        val decoded = withContext(Dispatchers.Default) { images.map { PendingAttachment.of(it.image, it.id, it.thumbnail) } }
+        val decodedFiles = withContext(Dispatchers.Default) { taken.map { PendingFile.of(it.file, it.id) } }
+        thumbnails.update { cache -> cache + decoded.mapNotNull { a -> a.thumbnail?.let { a.id to it } } }
+        attachments.value = attachments.value.map { a ->
+            decoded.firstOrNull { it.id == a.id }?.thumbnail?.takeIf { a.thumbnail == null }?.let { PendingAttachment(a.id, a.image, it) } ?: a
         }
+        files.value = files.value.map { f -> decodedFiles.firstOrNull { it.id == f.id }?.let { f.withPreview(it.thumbnail, null) } ?: f }
     }
 
     fun removeQueued(id: String) = graph.followUps.remove(agentId, id)
@@ -958,11 +977,31 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      */
     suspend fun loadDiagnosticsReport(): String = graph.transcriptDiagnosticsReport(agentId)
 
-    /** The screen is back in the foreground: pick the run back up and catch up on what it did while away. */
-    fun resume() = graph.conversations.resume(agentId)
+    private var steeringAttached = false
 
-    /** The screen stopped. The run keeps going — the notification service is what watches it now. */
-    fun pause() = graph.conversations.pause(agentId)
+    /**
+     * The screen is back in the foreground: pick the run back up and catch up on what it did while away, and read the
+     * account's queue again (and keep reading it) while the chat is on screen.
+     */
+    fun resume() {
+        graph.conversations.resume(agentId)
+        if (!steeringAttached) {
+            steeringAttached = true
+            graph.steering.attach(agentId)
+        }
+    }
+
+    /**
+     * The screen stopped. The run keeps going — the notification service is what watches it now — and the account's
+     * queue is no longer polled for a chat nobody can see.
+     */
+    fun pause() {
+        graph.conversations.pause(agentId)
+        if (steeringAttached) {
+            steeringAttached = false
+            graph.steering.detach(agentId)
+        }
+    }
 
     fun togglePinned() = viewModelScope.launch {
         // The pin is applied either way; the toast only says when the account has not been told yet.
