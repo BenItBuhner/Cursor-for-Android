@@ -28,18 +28,6 @@ import kotlin.random.Random
  */
 class IncrementalLeftOutTest {
 
-    /**
-     * The legacy scan's keys, or null when it throws — a run with two calls under one key, one of them drawn before
-     * and the other not, is a `getValue` on a call never drawn — after checking that [incremental] throws the same.
-     */
-    private fun legacyOrThrown(items: List<TimelineItem>, label: String, incremental: () -> Unit): Set<String>? {
-        val thrown = runCatching { LegacyLeftOut.leftOut(items) }.fold({ return it }, { it })
-        val ours = runCatching(incremental).exceptionOrNull()
-        assertWithMessage("$label throws as before").that(ours).isInstanceOf(thrown.javaClass)
-        assertWithMessage("$label throws as before").that(ours!!.message).isEqualTo(thrown.message)
-        return null
-    }
-
     /** Every key a call or an item of [items] could be left out under. */
     private fun candidateKeys(items: List<TimelineItem>): Set<String> = items.flatMapTo(HashSet()) { item ->
         listOf(CoordinatorTranscript.itemKey(item)) + ((item as? ActivityGroup)?.calls?.map { CoordinatorTranscript.messageKey(item, it) } ?: emptyList())
@@ -47,7 +35,7 @@ class IncrementalLeftOutTest {
 
     /** The whole scan says what it said, value and order included, and a scan resumed at any footer leaves out the same keys. */
     private fun assertScanParity(items: List<TimelineItem>, label: String) {
-        val legacy = legacyOrThrown(items, label) { CoordinatorTranscript.leftOut(items) } ?: return
+        val legacy = LegacyLeftOut.leftOut(items)
         assertWithMessage("$label repeatedMessages").that(CoordinatorTranscript.repeatedMessages(items).toList()).containsExactlyElementsIn(LegacyLeftOut.repeatedMessages(items).toList()).inOrder()
         assertWithMessage("$label replayedActivity").that(CoordinatorTranscript.replayedActivity(items).toList()).containsExactlyElementsIn(LegacyLeftOut.replayedActivity(items).toList()).inOrder()
         assertWithMessage("$label leftOut").that(CoordinatorTranscript.leftOut(items).toList()).containsExactlyElementsIn(legacy.toList()).inOrder()
@@ -71,13 +59,12 @@ class IncrementalLeftOutTest {
 
     /**
      * The incremental presenter's answer is the full-scan presenter's, fed the same history: the same rows and items,
-     * the same turns rebuilt and reused, the same failure; and, where [whole], the whole presentation's with the legacy keys.
+     * the same turns rebuilt and reused; and, where [whole], the whole presentation's with the legacy keys.
      */
     private fun assertPresenterParity(presenter: TranscriptPresenter, full: FullScanTranscriptPresenter, items: List<TimelineItem>, coordinatorMode: Boolean, runActive: Boolean, label: String, whole: Boolean) {
-        val expected = runCatching { full.present(items, coordinatorMode, runActive) }
-        val legacy = legacyOrThrown(items, label) { presenter.present(items, coordinatorMode, runActive) } ?: return assertWithMessage("$label full scan throws").that(expected.isFailure).isTrue()
+        val before = full.present(items, coordinatorMode, runActive)
+        val legacy = LegacyLeftOut.leftOut(items)
         val presented = presenter.present(items, coordinatorMode, runActive)
-        val before = expected.getOrThrow()
         assertWithMessage("$label mode").that(presented.coordinatorMode).isEqualTo(before.coordinatorMode)
         assertWithMessage("$label items").that(presented.items).isEqualTo(before.items)
         assertWithMessage("$label rows").that(presented.rows).isEqualTo(before.rows)

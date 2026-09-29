@@ -235,14 +235,22 @@ object CoordinatorTranscript {
             // First pass: which calls of this run were drawn before, and whether any call is the run's own.
             var own = false
             val replayed = HashSet<String>()
+            var ownKeys: HashSet<String>? = null
             for (item in run) {
                 if (item !is ActivityGroup) continue
                 for (step in item.steps) {
                     if (step !is ToolCall || step.callId.isBlank()) continue
                     val key = callKey(step)
-                    if (seenCall(key) != null) replayed += messageKey(item, step) else own = true
+                    if (seenCall(key) != null) replayed += messageKey(item, step)
+                    else {
+                        own = true
+                        (ownKeys ?: HashSet<String>().also { ownKeys = it }) += messageKey(item, step)
+                    }
                 }
             }
+            // Calls are left out by their message key, and a key can come round within a run: one a replay shares
+            // with a call of the run's own is drawn, or the run's own call would go with the replay.
+            ownKeys?.let { replayed.removeAll(it) }
             // Second pass: the calls and items left out, and what this run adds to what has been drawn.
             for (item in run) {
                 when (item) {
@@ -279,7 +287,7 @@ object CoordinatorTranscript {
             if (seenCall(key) == null) seenCalls[key] = runName
         }
 
-        /** The run the call [key] was first drawn in; as `Map.getValue`, a call never drawn throws. */
+        /** The run the call [key] was first drawn in; every call left out as a replay was, and one never drawn throws. */
         private fun drawnIn(key: String): String = seenCall(key) ?: throw NoSuchElementException("Key $key is missing in the map.")
     }
 
