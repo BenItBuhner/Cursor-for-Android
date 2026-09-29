@@ -13,7 +13,7 @@ const OUT = 14;
 const SCRIM_OUT = 16;
 
 const SCRIM = {
-  side: "linear-gradient(90deg, rgba(8,7,6,0.88) 0%, rgba(8,7,6,0.72) 30%, rgba(8,7,6,0.38) 42%, rgba(8,7,6,0) 60%)",
+  side: "linear-gradient(90deg, rgba(8,7,6,0.92) 0%, rgba(8,7,6,0.8) 26%, rgba(8,7,6,0.62) 34%, rgba(8,7,6,0.38) 42%, rgba(8,7,6,0) 60%)",
   below: "linear-gradient(0deg, rgba(8,7,6,0.85) 0%, rgba(8,7,6,0.5) 20%, rgba(8,7,6,0) 42%)",
   top: "linear-gradient(180deg, rgba(8,7,6,0.85) 0%, rgba(8,7,6,0.55) 16%, rgba(8,7,6,0) 32%)",
 };
@@ -75,7 +75,7 @@ export const Captions: React.FC<{ t: number; framing: Framing }> = ({ t, framing
           fontFamily: SANS,
           textAlign: look.align,
           // A halo that only shows where the words sit over a screen's own text.
-          textShadow: "0 0 26px rgba(8,7,6,0.9), 0 2px 10px rgba(8,7,6,0.7)",
+          textShadow: "0 0 36px rgba(8,7,6,0.95), 0 0 16px rgba(8,7,6,0.9), 0 2px 8px rgba(8,7,6,0.75)",
           opacity: 1 - out,
           transform: `translateY(${-14 * out}px)`,
           ...look.box,
