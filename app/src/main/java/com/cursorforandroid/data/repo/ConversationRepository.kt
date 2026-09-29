@@ -225,13 +225,15 @@ class StagedFollowUp internal constructor(
     /** The message the echo stands for, kept so a bubble not shown ahead can be shown once the server accepts. */
     internal val message: V0ConversationMessageDto,
     internal val placeholder: RunDto,
+    /** The device queue's row the message is sent from ([com.cursorforandroid.domain.QueuedFollowUp.id]); null for any other send. */
+    internal val queuedId: String? = null,
 ) {
     /** The same message with its attachments where they are now (see `AttachmentStore.committed`). */
-    internal fun withAttachments(attachments: StagedAttachments): StagedFollowUp = StagedFollowUp(localId, text, attachments, stagedAt, shown, message, placeholder)
+    internal fun withAttachments(attachments: StagedAttachments): StagedFollowUp = StagedFollowUp(localId, text, attachments, stagedAt, shown, message, placeholder, queuedId)
     /** The same message with its words changed (the reader edited it on the card while it waited). */
-    internal fun withText(text: String): StagedFollowUp = StagedFollowUp(localId, text, attachments, stagedAt, shown, message.copy(text = text), placeholder)
+    internal fun withText(text: String): StagedFollowUp = StagedFollowUp(localId, text, attachments, stagedAt, shown, message.copy(text = text), placeholder, queuedId)
     /** The same message, its bubble now on screen (a queued message the account would not take; see `ConversationRepository.unqueue`). */
-    internal fun asShown(): StagedFollowUp = StagedFollowUp(localId, text, attachments, stagedAt, shown = true, message, placeholder)
+    internal fun asShown(): StagedFollowUp = StagedFollowUp(localId, text, attachments, stagedAt, shown = true, message, placeholder, queuedId)
 }
 
 /**
@@ -334,6 +336,11 @@ class ConversationRepository(
          * composer leaves the account's row for it out while the bubble stands (see [Entry.queuePlacement]).
          */
         val followupId: String? = null,
+        /**
+         * The device queue's row the prompt was sent from (see [StagedFollowUp.queuedId]): the card stands for it until
+         * the frame that shows its bubble, and leaves in that frame (see [QueuePlacement.filedQueueIds]).
+         */
+        val queuedId: String? = null,
     ) {
         /** True once the server has answered with the real run; until then [run] is the placeholder named after the prompt. */
         val filed: Boolean get() = run.id != message.id
@@ -697,7 +704,17 @@ class ConversationRepository(
          */
         fun queuePlacement(items: List<TimelineItem>): QueuePlacement {
             val bubbles = local.filter { !it.filed }
-            if (delivered.isEmpty() && returned.isEmpty() && awaiting.isEmpty() && bubbles.isEmpty()) return QueuePlacement.NONE
+            val fromQueue = local.filter { it.queuedId != null }
+            if (delivered.isEmpty() && returned.isEmpty() && awaiting.isEmpty() && bubbles.isEmpty() && fromQueue.isEmpty()) return QueuePlacement.NONE
+            val onScreen by lazy(LazyThreadSafetyMode.NONE) { items.asSequence().filterIsInstance<UserMessage>().mapTo(HashSet()) { it.id } }
+            // A message sent from the device's queue: its card goes in the frame that shows its bubble — its echo, or
+            // the prompt the pairing gives its run once the transcript carries it — and not a frame before or after.
+            val filedQueueIds = fromQueue.mapNotNullTo(HashSet()) { prompt ->
+                // Newest first: the bubble is at the transcript's foot, a few rows up at most.
+                val echo = items.asReversed().any { it is UserMessage && it.id == prompt.message.id }
+                val own = echo || pairing().turns.firstOrNull { it.run?.id == prompt.run.id }?.prompt?.id?.let { it in onScreen } == true
+                prompt.queuedId.takeIf { own }
+            }
             val ids = HashSet<String>()
             val texts = HashSet<String>()
             val waiting = ArrayList<PendingFollowup>()
@@ -713,7 +730,6 @@ class ConversationRepository(
                 // prompt its run was started by, or its echo standing in until the transcript carries it (a steer's
                 // echo among the run's rows) — which is every frame, bar a conversation rewound past it, when the
                 // account's list (which still names it) is the place it is.
-                val onScreen = items.asSequence().filterIsInstance<UserMessage>().mapTo(HashSet()) { it.id }
                 val turns = pairing().turns
                 for (d in delivered) {
                     val own = d.localMessageId in onScreen ||
@@ -738,8 +754,17 @@ class ConversationRepository(
                     attachments = carried,
                 )
             }
-            if (ids.isEmpty() && texts.isEmpty() && returned.isEmpty() && waiting.isEmpty() && shownIds.isEmpty() && shownTexts.isEmpty()) return QueuePlacement.NONE
-            return QueuePlacement(deliveredIds = ids, deliveredTexts = texts, returned = returned, waiting = waiting, shownIds = shownIds, shownTexts = shownTexts, sendingIds = sendingIds)
+            if (ids.isEmpty() && texts.isEmpty() && returned.isEmpty() && waiting.isEmpty() && shownIds.isEmpty() && shownTexts.isEmpty() && filedQueueIds.isEmpty()) return QueuePlacement.NONE
+            return QueuePlacement(
+                deliveredIds = ids,
+                deliveredTexts = texts,
+                returned = returned,
+                waiting = waiting,
+                shownIds = shownIds,
+                shownTexts = shownTexts,
+                sendingIds = sendingIds,
+                filedQueueIds = filedQueueIds,
+            )
         }
 
         /**
@@ -5405,9 +5430,11 @@ class ConversationRepository(
          * refusal does not flash a bubble on and off (see `FollowUpRepository`).
          */
         showEcho: Boolean = true,
+        /** The device queue's row being sent, for the card to leave in the frame the bubble is filed (see [StagedFollowUp.queuedId]). */
+        queuedId: String? = null,
     ): Result<RunDto> {
         if (text.isBlank()) return Result.failure(IllegalArgumentException("Type a follow-up first."))
-        val staged = stageFollowUp(agentId, text, images, show = showEcho)
+        val staged = stageFollowUp(agentId, text, images, show = showEcho, queuedId = queuedId)
         return sendStaged(agentId, staged, images, mcpServers, planMode, modelId, modelParams, modelDisplayName)
             .onFailure { t ->
                 // Refused as busy, the message is not lost: the caller queues it for the end of the turn. That is
@@ -5454,7 +5481,14 @@ class ConversationRepository(
      * [sendFollowUp] so a queued message that is steered can be on screen while the turn it interrupts is still being
      * cancelled.
      */
-    suspend fun stageFollowUp(agentId: String, text: String, images: List<PromptImage> = emptyList(), files: List<PromptFile> = emptyList(), show: Boolean = true): StagedFollowUp {
+    suspend fun stageFollowUp(
+        agentId: String,
+        text: String,
+        images: List<PromptImage> = emptyList(),
+        files: List<PromptFile> = emptyList(),
+        show: Boolean = true,
+        queuedId: String? = null,
+    ): StagedFollowUp {
         val e = entry(agentId)
         val trimmed = text.trim()
         val now = AppClock.now()
@@ -5468,13 +5502,13 @@ class ConversationRepository(
         if (show) {
             e.publish(
                 mutate = {
-                    local = local + LocalPrompt(message, placeholder)
+                    local = local + LocalPrompt(message, placeholder, queuedId = queuedId)
                     if (staged.attachments.isNotEmpty()) promptImages = promptImages + (localId to staged.attachments)
                 },
                 transform = { copy(error = null) },
             )
         }
-        return StagedFollowUp(localId, trimmed, staged, now, shown = show, message = message, placeholder = placeholder)
+        return StagedFollowUp(localId, trimmed, staged, now, shown = show, message = message, placeholder = placeholder, queuedId = queuedId)
     }
 
     /**
@@ -6006,7 +6040,11 @@ class ConversationRepository(
                 // same: [Entry.items] shows the server's copy of the turn once the transcript has it, and ours
                 // for as long as only the run list does; the next load prunes it once both have caught up. A
                 // prompt not shown ahead of the request (a queued message's) is shown now, filed under its run.
-                local = if (local.any { it.run.id == localId }) local.map { if (it.run.id == localId) it.copy(run = run) else it } else local + LocalPrompt(staged.message, run)
+                local = if (local.any { it.run.id == localId }) {
+                    local.map { if (it.run.id == localId) it.copy(run = run, queuedId = staged.queuedId ?: it.queuedId) else it }
+                } else {
+                    local + LocalPrompt(staged.message, run, queuedId = staged.queuedId)
+                }
                 promptImages = (promptImages - localId).let { if (kept.isEmpty()) it else it + (run.id to kept) }
                 inputsUpdatedAt = maxOf(inputsUpdatedAt, staged.stagedAt)
             },
