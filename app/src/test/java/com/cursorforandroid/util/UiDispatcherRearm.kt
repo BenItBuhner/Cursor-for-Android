@@ -1,6 +1,7 @@
 package com.cursorforandroid.util
 
 import android.os.Handler
+import android.view.Choreographer
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.platform.AndroidUiDispatcher
 import androidx.test.espresso.IdlingRegistry
@@ -19,10 +20,12 @@ import org.robolectric.pluginapi.TestEnvironmentLifecyclePlugin
  * sends to a channel, and a coroutine on [AndroidUiDispatcher.Main] receives and calls `Snapshot.sendApplyNotifications`.
  * Both are started once per JVM (per Robolectric sandbox), and neither recovers:
  *
- * - The dispatcher runs its queue from one Handler message and records that it is posted (`scheduledTrampolineDispatch`),
- *   so later dispatches only queue behind it. Robolectric empties the main looper's queue for the next test but leaves
- *   the flag set: a write landing after a test's final idle (a worker that outlived its test) leaves the dispatcher
- *   counting on a message that is gone, or one timed before the clock went back, and it never posts again.
+ * - The dispatcher runs its queue from one Handler message and its frame work from one Choreographer callback, and
+ *   records that each is posted (`scheduledTrampolineDispatch`, `scheduledFrameDispatch`) so later work only queues
+ *   behind it. Robolectric empties both queues for the next test but leaves the flags set: a write landing after a
+ *   test's final idle (a worker that outlived its test) leaves the dispatcher counting on a message or frame that is
+ *   gone, or one timed before the clock went back, and it never posts again - nor does an activity's own recomposer,
+ *   which waits for its frames there.
  * - The receiving coroutine dies with the first exception out of `sendApplyNotifications`: a worker writing while the
  *   test harness resumes the recomposer inline (its `ApplyingContinuationInterceptor` applies again on every resume)
  *   ends in a `StackOverflowError` there. The channel is cancelled with it, the manager stays "started", and its write
@@ -48,13 +51,21 @@ class UiDispatcherRearm : TestEnvironmentLifecyclePlugin {
         override fun getName() = "UiDispatcherRearm"
         override fun registerIdleTransitionCallback(callback: IdlingResource.ResourceCallback?) = Unit
         override fun isIdleNow(): Boolean {
-            rearmDispatcher()
-            restartSnapshotManager()
+            mend()
             return true
         }
     }
 
-    private companion object {
+    companion object {
+        /**
+         * The mending itself, on the main thread: for a test that runs the main looper by hand instead of through
+         * Espresso (`shadowOf(mainLooper).idle()`), where the idling resource is never asked.
+         */
+        fun mend() {
+            rearmDispatcher()
+            restartSnapshotManager()
+        }
+
         private fun <T> reflect(what: String, find: () -> T): T = runCatching(find).getOrElse {
             throw IllegalStateException("$what is gone (a Compose update?): UiDispatcherRearm needs a new look", it)
         }
@@ -66,34 +77,41 @@ class UiDispatcherRearm : TestEnvironmentLifecyclePlugin {
         private const val MANAGER = "androidx.compose.ui.platform.GlobalSnapshotManager"
         private const val SNAPSHOTS = "androidx.compose.runtime.snapshots.SnapshotKt"
 
-        val mainDelegate = field(DISPATCHER, "Main\$delegate")
-        val dispatcherLock = field(DISPATCHER, "lock")
-        val handler = field(DISPATCHER, "handler")
-        val dispatchCallback = field(DISPATCHER, "dispatchCallback")
-        val trampolineScheduled = field(DISPATCHER, "scheduledTrampolineDispatch")
+        private val mainDelegate = field(DISPATCHER, "Main\$delegate")
+        private val dispatcherLock = field(DISPATCHER, "lock")
+        private val handler = field(DISPATCHER, "handler")
+        private val dispatchCallback = field(DISPATCHER, "dispatchCallback")
+        private val trampolineScheduled = field(DISPATCHER, "scheduledTrampolineDispatch")
+        private val frameScheduled = field(DISPATCHER, "scheduledFrameDispatch")
+        private val toRunOnFrame = field(DISPATCHER, "toRunOnFrame")
 
-        val manager: Any = field(MANAGER, "INSTANCE").get(null)
-        val started = field(MANAGER, "started").get(null) as AtomicBoolean
-        val sent = field(MANAGER, "sent").get(null) as AtomicBoolean
-        val ensureStarted: Method = reflect("$MANAGER.ensureStarted") { Class.forName(MANAGER).getMethod("ensureStarted") }
-        val managerObserverChannel = field("$MANAGER\$ensureStarted\$2", "\$channel")
-        val globalWriteObservers = field(SNAPSHOTS, "globalWriteObservers")
-        val snapshotLock: Any = field(SNAPSHOTS, "lock").get(null)
+        private val manager: Any = field(MANAGER, "INSTANCE").get(null)
+        private val started = field(MANAGER, "started").get(null) as AtomicBoolean
+        private val sent = field(MANAGER, "sent").get(null) as AtomicBoolean
+        private val ensureStarted: Method = reflect("$MANAGER.ensureStarted") { Class.forName(MANAGER).getMethod("ensureStarted") }
+        private val managerObserverChannel = field("$MANAGER\$ensureStarted\$2", "\$channel")
+        private val globalWriteObservers = field(SNAPSHOTS, "globalWriteObservers")
+        private val snapshotLock: Any = field(SNAPSHOTS, "lock").get(null)
 
-        fun rearmDispatcher() {
+        private fun rearmDispatcher() {
             if (!(mainDelegate.get(null) as Lazy<*>).isInitialized()) return
             val dispatcher = AndroidUiDispatcher.Main[kotlin.coroutines.ContinuationInterceptor] as AndroidUiDispatcher
             synchronized(dispatcherLock.get(dispatcher)) {
-                if (!trampolineScheduled.getBoolean(dispatcher)) return
-                // Posted whether or not the queue holds one already: a message posted during the reset keeps its
-                // time from before the clock went back, and waits for a time the paused clock will not reach. A
-                // second run finds nothing queued and does nothing; only a lost run is harmful.
-                (handler.get(dispatcher) as Handler).post(dispatchCallback.get(dispatcher) as Runnable)
+                // Posted whether or not the queues hold one already: a message or frame callback posted during the
+                // reset keeps its time from before the clock went back, and waits for a time the paused clock will
+                // not reach. A second run finds nothing queued and does nothing; only a lost run is harmful.
+                val callback = dispatchCallback.get(dispatcher)
+                if (trampolineScheduled.getBoolean(dispatcher)) (handler.get(dispatcher) as Handler).post(callback as Runnable)
+                // The frame side only when a frame is awaited (a window recomposer's `withFrameNanos`): posting on
+                // every idle would keep a frame pending for no one.
+                if (frameScheduled.getBoolean(dispatcher) && (toRunOnFrame.get(dispatcher) as List<*>).isNotEmpty()) {
+                    dispatcher.choreographer.postFrameCallback(callback as Choreographer.FrameCallback)
+                }
             }
         }
 
         @OptIn(DelicateCoroutinesApi::class)
-        fun restartSnapshotManager() {
+        private fun restartSnapshotManager() {
             val dead = (globalWriteObservers.get(null) as List<*>).filter { observer ->
                 observer != null && managerObserverChannel.declaringClass.isInstance(observer) &&
                     (managerObserverChannel.get(observer) as SendChannel<*>).isClosedForSend
