@@ -513,6 +513,8 @@ class ConversationRepository(
         val state = observed?.also { it.value = ConversationState(agentId) } ?: MutableStateFlow(ConversationState(agentId))
         /** The legacy transcript as the server returned it (or as the disk remembered it). */
         var messages: List<V0ConversationMessageDto> = emptyList()
+        /** The read of [messages] under way for [fillTextFromTranscript]: callers meanwhile wait on it rather than read again. */
+        var transcriptRead: Deferred<List<V0ConversationMessageDto>?>? = null
         /**
          * The v1 runs as the server returned them (or as the disk remembered them): the newest ones first of all, and
          * the older ones behind them as far as the list has been paged (see [runsComplete]).
@@ -5022,10 +5024,16 @@ class ConversationRepository(
             }.map { it.value }
         }
         if (wanting.isEmpty()) return
-        val messages = synchronized(e) { e.messages }.takeIf { it.isNotEmpty() }
-            ?: runCatching { net(agentId, "transcript"); session.current.api.conversationV0(agentId).messages }.onFailure { if (it is CancellationException) throw it }.getOrNull()
-            ?: return
-        synchronized(e) { if (e.messages.isEmpty()) e.messages = messages }
+        // Read once however many passes want it at the same moment: the open's, the window's widening, a trace pass.
+        val read = synchronized(e) {
+            if (e.messages.isNotEmpty()) null
+            else e.transcriptRead?.takeIf { it.isActive } ?: e.scope.async {
+                runCatching { net(agentId, "transcript"); session.current.api.conversationV0(agentId).messages }
+                    .onFailure { if (it is CancellationException) throw it }.getOrNull()
+                    ?.also { messages -> synchronized(e) { if (e.messages.isEmpty()) e.messages = messages } }
+            }.also { e.transcriptRead = it }
+        }
+        val messages = (if (read == null) synchronized(e) { e.messages } else read.await())?.takeIf { it.isNotEmpty() } ?: return
         // The transcript's turns: each prompt with the replies up to the next.
         val turns = ArrayList<Pair<String, List<V0ConversationMessageDto>>>()
         var prompt: String? = null
