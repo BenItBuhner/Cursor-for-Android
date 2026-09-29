@@ -74,7 +74,8 @@ internal fun StretchView(stretch: TranscriptRow.Stretch, modifier: Modifier = Mo
     var toggled by rememberSaveable(stretch.key) { mutableStateOf(false) }
     val expanded = openStretches?.isOpen(stretch.key) ?: toggled
     val coordinator = LocalTranscriptControls.current.coordinatorMode
-    val subagents = subagentStates(stretch)
+    // Open here, the stretch draws its steps itself, each subagent's row reading its state from the line's.
+    val subagents = subagentStates(stretch, followAll = openStretches == null && expanded, coordinator = coordinator)
     val working = subagents.mapNotNull { (entry, state) -> state.look.takeIf { SubagentRows.isWorking(entry.subagent!!, it, state.child, stretch.live) } }
     val summary = if (working.isEmpty()) stretch.summary else remember(stretch, working, coordinator) { StretchSummary.of(stretch, working, coordinator) }
     CompositionLocalProvider(LocalSubagentStates provides subagents.associate { (entry, state) -> entry.call.callId to state }) {
@@ -97,10 +98,28 @@ internal fun StretchView(stretch: TranscriptRow.Stretch, modifier: Modifier = Mo
     }
 }
 
-/** Where each subagent of [stretch] stands, in order, followed once here whether or not the stretch is open. */
+/**
+ * Where each subagent of [stretch] stands, in order. The line counts the ones at work, which their list rows say,
+ * and draws where one stands only in a Project's chat — the newest at work — so only the subagents whose step it can
+ * draw are followed live: [FOLLOWED_FOR_LINE] newest at work, the one before the newest ready to take over the moment
+ * the newest ends. [followAll] follows every one, for steps drawn from these states.
+ */
 @Composable
-private fun subagentStates(stretch: TranscriptRow.Stretch): List<Pair<TranscriptRow.Entry.Call, SubagentState>> =
-    stretch.subagents.map { entry -> key(entry.key) { entry to rememberSubagentState(entry.call, entry.subagent!!) } }
+private fun subagentStates(stretch: TranscriptRow.Stretch, followAll: Boolean, coordinator: Boolean): List<Pair<TranscriptRow.Entry.Call, SubagentState>> {
+    if (followAll) return stretch.subagents.map { entry -> key(entry.key) { entry to rememberSubagentState(entry.call, entry.subagent!!) } }
+    val listed = stretch.subagents.map { entry -> key(entry.key) { entry to rememberSubagentState(entry.call, entry.subagent!!, live = false) } }
+    if (!coordinator) return listed
+    val followed = listed.filter { (entry, state) -> SubagentRows.isWorking(entry.subagent!!, state.look, state.child, stretch.live) }
+        .takeLast(FOLLOWED_FOR_LINE)
+        .mapTo(HashSet()) { it.first.key }
+    return listed.map { pair ->
+        val entry = pair.first
+        if (entry.key !in followed) pair else key(entry.key, FOLLOWED) { entry to rememberSubagentState(entry.call, entry.subagent!!) }
+    }
+}
+
+private const val FOLLOWED_FOR_LINE = 2
+private const val FOLLOWED = "followed"
 
 /** One entry of an open stretch, as Cursor lists a step. */
 @Composable

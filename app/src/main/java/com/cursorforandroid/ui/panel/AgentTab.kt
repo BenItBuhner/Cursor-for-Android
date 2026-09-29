@@ -162,6 +162,7 @@ private fun AgentTranscript(graph: AppGraph, agentId: String, agent: Agent?, act
             subagents = presented.subagents,
             placement = placement,
             subagentActivity = graph.subagentActivity::of,
+            subagentListed = graph.subagentActivity::listed,
             subagentRuns = conversation.subagentRuns,
         )
     }

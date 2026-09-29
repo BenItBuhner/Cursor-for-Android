@@ -80,6 +80,12 @@ data class TranscriptControls(
      */
     val subagentActivity: (agentId: String) -> Flow<SubagentChild?> = { flowOf(null) },
     /**
+     * A cloud child's state as its list row alone says it, with no stream behind it: for a stretch's line, which
+     * counts the children at work but draws the step of one at most. Null where the rows are rendered without the
+     * app, and [subagentActivity] stands in.
+     */
+    val subagentListed: ((agentId: String) -> Flow<SubagentChild?>)? = null,
+    /**
      * The in-VM subagents the account's record of this chat tracks (Extended mode on the Beta engine), by the id
      * of the task call that started each: its status, and the step it last announced.
      */

@@ -42,7 +42,7 @@ class SubagentActivityTest {
         val activity = SubagentActivity(
             row = { row },
             load = { error("the list holds it") },
-            run = { _, runId -> followed += runId; stream },
+            run = { _, runId, _ -> followed += runId; stream },
             models = MutableStateFlow(LiveModelCatalog.models),
         )
         val seen = mutableListOf<SubagentChild?>()
@@ -78,7 +78,7 @@ class SubagentActivityTest {
         val activity = SubagentActivity(
             row = { flowOf(null) },
             load = { loads++; agent(RunStatus.ERROR) },
-            run = { _, _ -> error("a finished run is not streamed") },
+            run = { _, _, _ -> error("a finished run is not streamed") },
             models = MutableStateFlow(emptyList<ModelOption>()),
         )
         val seen = mutableListOf<SubagentChild?>()
@@ -86,6 +86,57 @@ class SubagentActivityTest {
         assertThat(seen.last()!!.status).isEqualTo(SubagentChild.Status.Failed)
         assertThat(seen.last()!!.name).isEqualTo("Usage events aggregation")
         assertThat(loads).isEqualTo(1)
+        job.cancel()
+    }
+
+    @Test
+    fun `followers past the gate's cap are looked in on until a place frees, and every place is given back`() = runTest(UnconfinedTestDispatcher()) {
+        val gate = SubagentStreamGate(maxStreams = 2)
+        val rows = (1..3).associate { i -> "bc-w$i" to MutableStateFlow<Agent?>(agent(RunStatus.RUNNING).copy(id = "bc-w$i")) }
+        val watched = mutableMapOf<String, kotlinx.coroutines.flow.StateFlow<Boolean>>()
+        val activity = SubagentActivity(
+            row = { id -> rows.getValue(id) },
+            load = { error("the list holds it") },
+            run = { agentId, _, w -> watched[agentId] = w; MutableStateFlow(SubagentActivity.Run(emptyList(), finished = false, status = RunStatus.RUNNING)) },
+            models = MutableStateFlow(LiveModelCatalog.models),
+            streams = gate,
+        )
+        val jobs = rows.keys.associateWith { id -> launch { activity.of(id).collect { } } }
+        assertThat(watched.mapValues { it.value.value }).containsExactly("bc-w1", true, "bc-w2", true, "bc-w3", false)
+        assertThat(gate.counts()).isEqualTo(2 to 1)
+
+        // The first row leaves the screen: the one that waited takes its place, and the second keeps its own.
+        jobs.getValue("bc-w1").cancel()
+        assertThat(watched.getValue("bc-w3").value).isTrue()
+        assertThat(watched.getValue("bc-w2").value).isTrue()
+        assertThat(gate.counts()).isEqualTo(2 to 0)
+
+        // A run that ends lets go of its stream, and of its place with it.
+        rows.getValue("bc-w2").value = agent(RunStatus.FINISHED).copy(id = "bc-w2")
+        assertThat(gate.counts()).isEqualTo(1 to 0)
+        jobs.getValue("bc-w2").cancel()
+        jobs.getValue("bc-w3").cancel()
+        assertThat(gate.counts()).isEqualTo(0 to 0)
+    }
+
+    @Test
+    fun `a child read off its list row alone is never streamed`() = runTest(UnconfinedTestDispatcher()) {
+        val row = MutableStateFlow<Agent?>(agent(RunStatus.RUNNING))
+        val gate = SubagentStreamGate()
+        val activity = SubagentActivity(
+            row = { row },
+            load = { error("the list holds it") },
+            run = { _, _, _ -> error("a listed child is not streamed") },
+            models = MutableStateFlow(LiveModelCatalog.models),
+            streams = gate,
+        )
+        val seen = mutableListOf<SubagentChild?>()
+        val job = launch { activity.listed("bc-w1").collect { seen += it } }
+        assertThat(seen.last()!!.status).isEqualTo(SubagentChild.Status.Running)
+        assertThat(seen.last()!!.model?.label).isEqualTo("Composer 2.5")
+        row.value = agent(RunStatus.FINISHED)
+        assertThat(seen.last()!!.status).isEqualTo(SubagentChild.Status.Succeeded)
+        assertThat(gate.counts()).isEqualTo(0 to 0)
         job.cancel()
     }
 }
