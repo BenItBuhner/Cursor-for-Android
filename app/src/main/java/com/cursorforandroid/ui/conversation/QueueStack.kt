@@ -223,7 +223,7 @@ fun QueueStack(
         // A card that leaves takes its springs with it, so the cards alone would drop the deck's top in one frame, and
         // the transcript over the dock with it. The deck springs to where the cards will rest instead, never lower
         // than where they are drawn, and without the cards' dip below it; but for a card handed over to its bubble.
-        val handedOver = motions.keys.any { it !in ids && delivered(it) }
+        val handedOver = ids.any { delivered(it) } || motions.keys.any { it !in ids && delivered(it) }
         val floor = (if (handedOver) Animatable(-rest) else deckMotion.height.springTo(-rest, live, scope, heightSpec)).also { deckMotion.height = it }
         val deck = maxOf(ceil(-top).toInt(), if (live) floor.value.roundToInt() else 0)
         val share = handleShare.value

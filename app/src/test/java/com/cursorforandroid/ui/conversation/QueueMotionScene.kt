@@ -22,6 +22,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -124,18 +125,30 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
                             }
                             Spacer(Modifier.weight(1f))
                             val card = ConversationControls(queue = account.toList()).placed(QueuePlacement(waiting = waiting.toList(), sendingIds = sending.toSet()))
+                            val stillOnCard = remember(card.queue, waiting) {
+                                card.queue.mapTo(HashSet()) { it.id } + waiting.mapTo(HashSet()) { it.id }
+                            }
+                            val stillOnCardTexts = remember(card.queue, waiting) {
+                                card.queue.mapTo(HashSet()) { QueuePlacement.textKey(it.text) } +
+                                    waiting.mapTo(HashSet()) { QueuePlacement.textKey(it.text) }
+                            }
+                            val deviceHandoff = rememberDeviceQueueHandoff(queue.toList(), messages.toList(), flights, stillOnCard, stillOnCardTexts)
+                            val queuedRows = LinkedHashMap<String, String>().apply {
+                                deviceHandoff.rowsForFlight.forEach { (id, text) -> put(id, text) }
+                                card.queue.forEach { put(it.id, it.previewText) }
+                            }
+                            val transcriptKeys = messages.mapTo(HashSet()) { QueuePlacement.textKey(it.text) }
                             QueueDeliveries(
                                 flights = flights,
-                                rows = LinkedHashMap<String, String>().apply {
-                                    queue.forEach { put(it.id, it.previewText) }
-                                    card.queue.forEach { put(it.id, it.previewText) }
-                                },
+                                rows = queuedRows,
                                 transcript = messages.mapTo(HashSet()) { it.id },
+                                transcriptTexts = transcriptKeys,
+                                stillOnCardTexts = stillOnCardTexts,
                                 scrolledAway = { scrolledAway },
                             )
-                            val device = queue.toList()
+                            val device = deviceHandoff.standing
                             val onCard = card.queue
-                            if (device.isNotEmpty() || onCard.isNotEmpty()) key(generation) {
+                            if (device.isNotEmpty() || onCard.isNotEmpty() || flights.delivering.isNotEmpty()) key(generation) {
                                 QueueStack(
                                     keys = device.map { "device:${it.id}" } + onCard.map { "account:${it.id}" },
                                     stacked = stacked,
@@ -320,6 +333,14 @@ class QueueMotionScene(private val compose: AndroidComposeTestRule<ActivityScena
      * the run (`commitFiled`: the bubble names them there a frame on, a path read in between following the move);
      * returns what the bubble lists at the end.
      */
+    /** Repository drops the row one frame before the presenter files the bubble — the gap that caused the double jump. */
+    fun deliverQueueBeforeBubble(id: String, bubble: String, text: String = queue.firstOrNull { it.id == id }?.previewText ?: accountRows.first { it.id == id }.previewText) {
+        compose.runOnUiThread { queue.removeAll { it.id == id }; account.removeAll { it.id == id }; waiting.removeAll { it.id == id }; sending.remove(id) }
+        frame()
+        compose.runOnUiThread { messages += UserMessage(bubble, text) }
+        frame()
+    }
+
     fun deliver(id: String, bubble: String, filedAfter: Long = 0L, attachments: List<MessageAttachment> = emptyList()): List<MessageAttachment> {
         val text = queue.firstOrNull { it.id == id }?.previewText ?: accountRows.first { it.id == id }.previewText
         val set = staged.remove(id)
