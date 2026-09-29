@@ -174,6 +174,7 @@ import com.cursorforandroid.ui.settings.DIAGNOSTICS_DIR
 import com.cursorforandroid.update.AndroidUpdatePlatform
 import com.cursorforandroid.update.allocatableBytes
 import com.cursorforandroid.util.AppClock
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -242,6 +243,13 @@ class AppGraph(
     repositoryBranchesApi: RepositoryBranchesApi? = null,
     /** Injectable for tests only: the account's transcription, so the composer's voice input can be driven against a scripted account. */
     transcriptionApi: TranscriptionApi? = null,
+    /**
+     * Where the agent list is organized for its screens (see [com.cursorforandroid.ui.agents.AgentsViewModel.uiState]).
+     * Injectable for tests only: the Compose test rule runs a screen's collectors on whichever thread publishes to
+     * them, and a state written from a background thread while the main thread composes can go unseen, leaving the
+     * screen on the state before it.
+     */
+    val agentListDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val app = context.applicationContext
 

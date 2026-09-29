@@ -25,7 +25,6 @@ import com.cursorforandroid.domain.SortOrder
 import com.cursorforandroid.domain.SourceFilter
 import com.cursorforandroid.domain.StatusFilter
 import com.cursorforandroid.util.AppClock
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -254,7 +253,7 @@ class AgentsViewModel(
     }
         // Grouping, filtering and sorting a few hundred rows is cheap, but not free on every keystroke of the search
         // field or every streamed patch; it runs off the main thread and only the result reaches the UI.
-        .flowOn(Dispatchers.Default)
+        .flowOn(graph.agentListDispatcher)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentListUiState())
 
     init {
