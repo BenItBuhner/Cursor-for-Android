@@ -159,11 +159,14 @@ class LiveRunHubSamplingTest {
         // once, so the hub stays on its way back long enough to be seen there.
         streamer.dropNextConnection("run-1", "upstream_error", "Run stream failed", afterEvents = 5)
         repeat(6) { streamer.dropNextConnection("run-1", "upstream_error", "Run stream failed", afterEvents = 0) }
-        stream(count = 4, spacingMs = 0)
+        // The notification first: a pass that starts with only an unwatched subscriber is looked in on, not paced.
+        val notification = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 60_000).collect { } }
+        awaitUntil { hub.current("bc-1", "run-1")?.eventCount == 1 }
         // Unwatched, so it sets no pace, and hears every publication as it is made.
         val published = CopyOnWriteArrayList<LiveRunHub.Snapshot>()
         val observer = scope.launch { hub.snapshots("bc-1", "run-1", watched = MutableStateFlow(false)).collect { published += it } }
-        val notification = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 60_000).collect { } }
+        awaitUntil { published.isNotEmpty() }
+        stream(count = 4, spacingMs = 0)
         awaitUntil { published.any { it.reconnecting } }
         assertThat(published.first { it.reconnecting }.reply()).isEqualTo(reply(4))
         observer.cancel()
