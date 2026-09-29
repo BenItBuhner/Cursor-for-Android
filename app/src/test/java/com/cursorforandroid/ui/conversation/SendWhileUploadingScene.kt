@@ -124,7 +124,10 @@ internal class SendWhileUploadingScene(
         }
         val placeholder = if (running) "Follow up (queues on your account)…" else "Follow up…"
         compose.waitUntil(30_000) { compose.onAllNodes(hasText(placeholder)).fetchSemanticsNodes().isNotEmpty() }
-        if (running) compose.waitUntil(30_000) { graph.followUps.decide(AGENT).busy }
+        if (running) {
+            compose.waitUntil(30_000) { graph.followUps.decide(AGENT).busy }
+            compose.waitUntil(30_000) { compose.onAllNodes(hasText("Reading the startup path first.", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        }
         compose.waitUntil(15_000) { viewModel.capabilities.value.promptFiles }
         if (!running) {
             waitFor(30_000, describe = { "the finished turn's activity" }) {
