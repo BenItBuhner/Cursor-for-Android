@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -53,9 +54,7 @@ import com.cursorforandroid.ui.agents.DraftRow
 import com.cursorforandroid.ui.agents.Sidebar
 import com.cursorforandroid.ui.agents.SidebarCallbacks
 import com.cursorforandroid.ui.agents.SidebarDestination
-import com.cursorforandroid.ui.agents.SidebarGroup
 import com.cursorforandroid.ui.agents.SidebarShortLists
-import com.cursorforandroid.ui.agents.sidebarGroups
 import com.cursorforandroid.ui.components.CursorDrawer
 import com.cursorforandroid.ui.components.rememberCursorDrawerState
 import com.cursorforandroid.ui.conversation.ConversationScreen
@@ -204,8 +203,12 @@ internal fun AppShell(
     // Read coarse, so a drag at either edge resizes the panes without recomposing the shell.
     val railShown by remember(panes) { derivedStateOf { panes.widths.railShown } }
     val pinnable by remember(panes) { derivedStateOf { panes.widths.pinnable } }
-    // The drawer on a wide window: the rail over the chat, where the window has no room for it beside the chat.
-    val flyoutOpen by remember(drawerState) { derivedStateOf { drawerState.isOpen || drawerState.fraction > 0f } }
+    // The drawer on screen, or on its way. Read coarse, so a drag recomposes the shell only as it starts and ends. On a
+    // wide window the drawer is the rail over the chat, where the window has no room for it beside the chat.
+    val drawerShown by remember(drawerState) { derivedStateOf { drawerState.isOpen || drawerState.fraction > 0f } }
+    // The phone drawer's chats with their nested chats listed, kept here so that Ctrl+1 … Ctrl+0 with the drawer shut
+    // reach the rows it would show on opening.
+    val drawerExpansion = rememberSaveable { mutableStateOf(emptyList<String>()) }
 
     /**
      * Slides the drawer to [value]. A key's slide ([ShellShortcuts.keyed]) is set off before the next frame is drawn,
@@ -417,10 +420,7 @@ internal fun AppShell(
     // A list surface is actually on screen: the New Chat pane's recent cards, the drawer pulled open, or the
     // permanent sidebar of a wide window. Polling runs while one of them is, and not merely while the app is —
     // a chat or Settings with the drawer shut has nothing the list would keep current.
-    val listOnScreen = topScreen == Screen.Home ||
-        drawerState.isOpen ||
-        drawerState.fraction > 0f ||
-        (wide && railShown)
+    val listOnScreen = topScreen == Screen.Home || drawerShown || (wide && railShown)
     LifecycleStartEffect(listOnScreen) {
         val polling = if (listOnScreen) agentsViewModel.pollWhileVisible() else null
         onStopOrDispose { polling?.cancel() }
@@ -463,7 +463,7 @@ internal fun AppShell(
         Screen.Settings -> SidebarDestination.Settings
         Screen.WhatsNew, Screen.KeyboardShortcuts, is Screen.Agent -> null
     }
-    val updateState by graph.updates.state.collectAsStateWithLifecycle()
+    val updateState by graph.updateState.collectAsStateWithLifecycle(initialValue = graph.currentUpdateState())
     val updateHint = when (val s = updateState) {
         is UpdateState.Available -> if (s.signatureMismatch) null else UpdateCopy.available(s.release)
         is UpdateState.Downloaded -> "Update ready to install · ${s.release.versionName}"
@@ -471,13 +471,19 @@ internal fun AppShell(
         else -> null
     }
     // The installed version's notes, until the page has been opened once; the Settings row reads the same flow.
-    val whatsNewUnread by graph.whatsNew.unread.collectAsStateWithLifecycle(initialValue = null)
+    val whatsNewUnread by graph.whatsNewUnread.collectAsStateWithLifecycle(initialValue = null)
     val whatsNewHint = whatsNewUnread?.let { WhatsNewCopy.title(it.versionName) }
 
     @Composable
-    fun sidebar(inDrawer: Boolean, modifier: Modifier = Modifier) {
+    fun sidebar(
+        inDrawer: Boolean,
+        modifier: Modifier = Modifier,
+        state: AgentListUiState = listState,
+        expansion: MutableState<List<String>>? = null,
+        animateRows: Boolean = true,
+    ) {
         Sidebar(
-            state = listState,
+            state = state,
             user = user,
             isDemo = isDemo,
             selectedAgentId = selectedAgentId,
@@ -488,6 +494,8 @@ internal fun AppShell(
             onQueryChange = agentsViewModel::setQuery,
             drafts = draftRows,
             shortLists = shortLists,
+            expansion = expansion,
+            animateRows = animateRows,
             searchRequests = searchRequests,
             callbacks = SidebarCallbacks(
                 onNewChat = ::startNewChat,
@@ -630,12 +638,13 @@ internal fun AppShell(
             ShortcutAction.ToggleSidebar -> toggleSidebar()
             ShortcutAction.TogglePanel -> return chatOnTop()?.togglePanel() == true
             is ShortcutAction.OpenRailItem -> {
-                // A collapsed rail is not composed, so has told nothing: its rows are what it would show on opening.
-                val rows = if (wide && !railShown && !flyoutOpen) {
-                    val current = (stack.top.screen as? Screen.Agent)?.id
-                    SidebarGroup.numbered(sidebarGroups(listState, listState.query, emptyList(), current, shortLists))
-                } else {
-                    shortcuts.railRows
+                // A collapsed rail is not composed, so has told nothing, and a shut drawer holds an older list: their
+                // rows are what they would show on opening.
+                val current = (stack.top.screen as? Screen.Agent)?.id
+                val rows = when {
+                    drawerShown || (wide && railShown) -> shortcuts.railRows
+                    wide -> ShellShortcuts.railRows(listState, emptyList(), current, shortLists)
+                    else -> ShellShortcuts.railRows(listState, drawerExpansion.value, current, shortLists)
                 }
                 rows.getOrNull(action.position)?.let { openFromKeyboard(it.agent.id, focusComposer = true) }
             }
@@ -720,11 +729,11 @@ internal fun AppShell(
                     // it shows.
                     CursorDrawer(
                         state = drawerState,
-                        drawerWidth = if (flyoutOpen) panes.flyoutWidth else CursorDimens.sidebarWidth,
-                        gesturesEnabled = flyoutOpen,
+                        drawerWidth = if (drawerShown) panes.flyoutWidth else CursorDimens.sidebarWidth,
+                        gesturesEnabled = drawerShown,
                         containerColor = colors.sidebar,
                         contentColor = colors.textPrimary,
-                        drawerContent = { if (flyoutOpen) sidebar(inDrawer = true, modifier = Modifier.fillMaxSize()) },
+                        drawerContent = { if (drawerShown) sidebar(inDrawer = true, modifier = Modifier.fillMaxSize()) },
                     ) {
                         WidePanes(
                             panes = panes,
@@ -741,7 +750,22 @@ internal fun AppShell(
                         drawerWidth = CursorDimens.sidebarWidth,
                         containerColor = colors.sidebar,
                         contentColor = colors.textPrimary,
-                        drawerContent = { sidebar(inDrawer = true, modifier = Modifier.fillMaxSize()) },
+                        drawerContent = {
+                            // Shut, the drawer keeps its sidebar composed, rows and all from the list's first load, so a
+                            // finger pulling it out has it on screen in the drag's first frame rather than composed from
+                            // nothing in it; but on the list it last showed, so nothing behind the screen recomposes it
+                            // as the list changes. It catches up in the frame it starts to show.
+                            val held = remember { HeldList(listState) }
+                            val animateRows = held.hold(listState, shown = drawerShown)
+                            if (!animateRows) SideEffect { held.settle() }
+                            sidebar(
+                                inDrawer = true,
+                                state = held.list,
+                                expansion = drawerExpansion,
+                                animateRows = animateRows,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        },
                     ) {
                         detailHost(Modifier.fillMaxSize(), pane)
                     }
@@ -810,3 +834,28 @@ private class DetailPane(
     val composerFocus: Screen?,
     val onComposerFocused: () -> Unit,
 )
+
+/** The list a shut drawer's sidebar last showed (see the phone's drawer in [AppShell]). */
+private class HeldList(initial: AgentListUiState) {
+    var list = initial
+        private set
+    private var shown = false
+    private var settles by mutableIntStateOf(0)
+
+    /**
+     * Takes [latest] while the drawer is [shown], and until the list first loads. Returns whether the rows are to move as
+     * they come and go: not in the composition that catches up with a list held behind the screen, whose changes land
+     * where they belong rather than sliding there as the sheet comes in. [settle] after that composition composes the
+     * sidebar again (the count is read here), and from then on the rows move as they always do.
+     */
+    fun hold(latest: AgentListUiState, shown: Boolean): Boolean {
+        val catchingUp = shown && !this.shown && latest !== list
+        this.shown = shown
+        if (shown || !list.hasLoaded) list = latest
+        return settles >= 0 && !catchingUp
+    }
+
+    fun settle() {
+        settles++
+    }
+}

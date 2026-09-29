@@ -177,4 +177,37 @@ class ApiThrottleTest {
         assertThat(plain.await().isFailure).isTrue()
         assertThat(plainAttempts).isEqualTo(1)
     }
+
+    /** A pause past the refused call's own patience: the caller hears it at once, and the whole pause — not 15 s of it — holds everyone, the host's other clients too. */
+    @Test
+    fun `a long pause is handed to the refused caller at once and held in full, shared by the host`() = runTest {
+        val pauses = HostPause { testScheduler.currentTime }
+        val throttle = ApiThrottle(maxInFlight = 3, now = { testScheduler.currentTime }, pauses = pauses, host = "api2.example")
+        var attempts = 0
+        val refused = async {
+            runCatching { throttle.call<String> { attempts++; throw ConnectRpcException(429, "resource_exhausted", "Rate limited.", retryAfterMillis = 40_000L) } }
+        }
+        runCurrent()
+        assertThat((refused.await().exceptionOrNull() as ConnectRpcException).retryAfterMillis).isEqualTo(40_000L)
+        assertThat(attempts).isEqualTo(1)
+        assertThat(throttle.pausedUntil()).isEqualTo(40_000L)
+        assertThat(pauses.remainingMs("api2.example")).isEqualTo(40_000L)
+
+        var otherRan = -1L
+        val other = async { throttle.call { otherRan = testScheduler.currentTime } }
+        advanceTimeBy(39_999)
+        runCurrent()
+        assertThat(otherRan).isEqualTo(-1L)
+        advanceTimeBy(2)
+        runCurrent()
+        other.await()
+        assertThat(otherRan).isEqualTo(40_000L)
+
+        // A pause another client of the host heard holds this one's callers as well.
+        pauses.pause("api2.example", 5_000L)
+        val start = testScheduler.currentTime
+        var sharedRan = -1L
+        async { throttle.call { sharedRan = testScheduler.currentTime } }.await()
+        assertThat(sharedRan - start).isEqualTo(5_000L)
+    }
 }

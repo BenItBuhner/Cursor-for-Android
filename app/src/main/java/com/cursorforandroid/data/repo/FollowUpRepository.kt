@@ -352,8 +352,9 @@ class FollowUpRepository(
     }
 
     /**
-     * Hands a queued follow-up back to the composer to be reworked: it leaves the queue, and whatever the composer
-     * held takes its place in line so nothing typed is lost. Returns null when the message is gone or in flight.
+     * Hands a queued follow-up back to the composer to be reworked: it leaves the queue with its model and mode, and
+     * whatever the composer held takes its place in line — a new message on the composer's own model and mode — so
+     * nothing typed is lost. Returns null when the message is gone or in flight.
      */
     fun takeForEdit(agentId: String, id: String): QueuedFollowUp? {
         val e = entry(agentId)
@@ -363,13 +364,36 @@ class FollowUpRepository(
                 val item = queue.firstOrNull { it.id == id && !it.isSending && !it.isSteered } ?: return@update this
                 taken = item
                 val displaced = draft.takeUnless { it.isBlank }?.let { d ->
-                    item.copy(id = "queued-" + UUID.randomUUID(), text = d.text.trim(), images = d.images, files = d.files, queuedAtMillis = AppClock.now(), error = null)
+                    QueuedFollowUp(
+                        id = "queued-" + UUID.randomUUID(),
+                        text = d.text.trim(),
+                        images = d.images,
+                        files = d.files,
+                        queuedAtMillis = AppClock.now(),
+                        planMode = when (d.mode) {
+                            AgentMode.PLAN -> true
+                            AgentMode.AGENT -> false
+                            else -> null
+                        },
+                        modelId = d.model?.id,
+                        modelParams = d.model?.params.orEmpty(),
+                        modelDisplayName = d.model?.label,
+                    )
                 }
+                // A message queued on the chat's own model and mode leaves the composer's picks as they are.
+                val mode = when (item.planMode) {
+                    true -> AgentMode.PLAN
+                    false -> AgentMode.AGENT
+                    null -> draft.mode
+                }
+                val model = item.modelId?.let { DraftModel(it, item.modelParams, item.modelDisplayName) } ?: draft.model
                 copy(
-                    draft = draft.copy(text = item.text, images = item.images, files = item.files),
+                    draft = draft.copy(text = item.text, images = item.images, files = item.files, mode = mode, model = model),
                     queue = queue.flatMap { q -> if (q.id != id) listOf(q) else listOfNotNull(displaced) },
                 )
             }
+            // The dispatcher stops once only failed or unconfirmed messages are left: one taken off the head may leave a sendable one.
+            if (taken != null && e.state.value.queue.any { it.error == null && !it.needsConfirmation }) e.ensureDispatcher()
         }
         e.scheduleSave()
         return taken
