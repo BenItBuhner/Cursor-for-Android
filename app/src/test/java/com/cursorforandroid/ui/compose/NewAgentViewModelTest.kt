@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
+import com.cursorforandroid.data.api.ComposerSnapshot
 import com.cursorforandroid.data.api.CursorApi
 import com.cursorforandroid.data.api.CursorApiException
 import com.cursorforandroid.data.api.CursorJson
@@ -20,15 +21,18 @@ import com.cursorforandroid.data.repo.CursorBackend
 import com.cursorforandroid.data.repo.LaunchIdempotency
 import com.cursorforandroid.data.repo.LaunchRequest
 import com.cursorforandroid.data.repo.NewChatDrafts
+import com.cursorforandroid.domain.AccountModel
 import com.cursorforandroid.domain.AgentMode
 import com.cursorforandroid.domain.DeviceTarget
 import com.cursorforandroid.domain.ModelChoice
 import com.cursorforandroid.domain.PromptImage
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.domain.UserMessage
+import com.cursorforandroid.fixtures.LiveModelCatalog
 import com.cursorforandroid.ui.agents.DraftRow
 import com.cursorforandroid.ui.components.ModePills
 import com.cursorforandroid.ui.components.PendingAttachment
+import com.cursorforandroid.ui.conversation.ConversationViewModel
 import com.cursorforandroid.util.AppClock
 import com.cursorforandroid.util.HeldDispatcher
 import com.cursorforandroid.util.MainDispatcherRule
@@ -1200,5 +1204,55 @@ class NewAgentViewModelTest {
         assertThat(request.env?.type).isEqualTo("machine")
         assertThat(request.env?.name).isEqualTo("bennett")
         assertThat(request.repos?.single()?.url).isEqualTo(codexUrl)
+    }
+
+    /**
+     * Fast turned on, then the chat started from scratch: the create carries `fast=true` as a repository's does, and
+     * the chat and the next composer keep Fast on once the account's record lands naming the model alone
+     * (`model_details`, or a `requested_model` without parameters) — whose nearest variant, the catalogue's default,
+     * has Fast off. The record is dated after the pick, as the server's clock may date it.
+     */
+    @Test
+    fun `Fast turned on for a chat started from scratch goes out and stays on once the account's record names the model alone`() {
+        launchWithFastAndSeeItStay(scratch = true)
+    }
+
+    @Test
+    fun `Fast turned on for a chat on a repository goes out and stays on once the account's record names the model alone`() {
+        launchWithFastAndSeeItStay(scratch = false)
+    }
+
+    private fun launchWithFastAndSeeItStay(scratch: Boolean) = runBlocking<Unit> {
+        announcedModels = listOf(LiveModelCatalog.items.first { it.id == "claude-opus-5.5" })
+        val vm = loadedWithAgents()
+        if (vm.state.value.models.none { it.id == "claude-opus-5.5" }) vm.refreshModels()
+        awaitUntil { vm.state.value.models.any { it.id == "claude-opus-5.5" } }
+        val opus = vm.state.value.models.first { it.id == "claude-opus-5.5" }
+        assertThat(opus.defaultVariant?.param("fast")).isEqualTo("false")
+        vm.selectModel(opus, opus.defaultVariant)
+        vm.selectModel(opus, opus.variantWith(vm.state.value.selectedVariant, "fast", "true"))
+        if (scratch) vm.selectRepo(null) else vm.selectRepo(vm.repo("cesium"))
+        assertThat(vm.state.value.noRepo).isEqualTo(scratch)
+        val fastOn = mapOf("effort" to "high", "fast" to "true")
+
+        val id = vm.launchAndWait("Fast, please")
+        awaitUntil { accepted(id) }
+        val sent = created.last()
+        if (scratch) assertThat(sent.repos).isEmpty() else assertThat(sent.repos?.single()?.url).contains("cesium")
+        assertThat(sent.model?.id).isEqualTo("claude-opus-5.5")
+        assertThat(sent.model?.params?.associate { it.id to it.value }).isEqualTo(fastOn)
+
+        graph.agents.applyAccountSnapshots(listOf(ComposerSnapshot(id, model = AccountModel("claude-opus-5.5"))))
+        graph.agents.patch(id) { it.copy(createdAtMillis = AppClock.now() + 60_000) }
+        assertThat(graph.agents.agent(id)?.accountModel).isEqualTo(AccountModel("claude-opus-5.5"))
+
+        val chat = ConversationViewModel(graph, id)
+        val picker = withTimeout(10_000) { chat.modelPicker.first { it.current?.model?.id == "claude-opus-5.5" } }
+        assertThat(picker.currentAssumed).isFalse()
+        assertThat(picker.selected?.params?.associate { it.id to it.value }).isEqualTo(fastOn)
+
+        val next = loaded()
+        assertThat(next.state.value.selectedModel?.id).isEqualTo("claude-opus-5.5")
+        assertThat(next.state.value.selectedVariant?.params?.associate { it.id to it.value }).isEqualTo(fastOn)
     }
 }

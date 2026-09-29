@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.update.UpdateJobService
+import com.cursorforandroid.util.UiDispatcherRearm
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -64,7 +65,7 @@ class DeferredStartupTest {
 
     @Test
     fun `the shell's first frames build neither the updater, the release notes nor the image loader's client`() {
-        DeferredStartup.settleMs = 60_000
+        DeferredStartup.settleMs = 10 * 60_000
         val graph = app.appGraph
         runBlocking { graph.prefs.setDemoMode(true) }
         activity = Robolectric.buildActivity(MainActivity::class.java).setup()
@@ -73,25 +74,38 @@ class DeferredStartupTest {
         // The shell is up and its image loader provided; the updater and the release notes wait for the deferred startup.
         assertThat(graph.builtParts()).containsNoneOf("releases", "updates", "whatsNew", "storeFiles")
 
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(61))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(DeferredStartup.settleMs))
         idleUntil { graph.builtParts().containsAll(listOf("releases", "updates")) }
     }
 
+    /**
+     * Frame by frame on the main looper's clock until [condition], for at most [BUDGET] of that clock - far short of the
+     * settle, so nothing deferred is reached by waiting. Mended each frame: this test drives the looper itself, where
+     * Espresso's idling resources are never asked (see [UiDispatcherRearm]).
+     */
     private fun idleUntil(condition: () -> Boolean) {
-        val deadline = System.nanoTime() + 20_000_000_000L
-        while (!condition()) {
-            check(System.nanoTime() < deadline) { "never settled; built: ${app.appGraph.builtParts()}" }
-            shadowOf(Looper.getMainLooper()).idle()
+        val looper = shadowOf(Looper.getMainLooper())
+        repeat((BUDGET.toMillis() / FRAME.toMillis()).toInt()) {
+            if (condition()) return
+            UiDispatcherRearm.mend()
+            looper.idleFor(FRAME)
+            // A frame's worth of the disk's threads for each frame of the clock's.
+            Thread.sleep(1)
+        }
+        check(condition()) { "not settled after $BUDGET of the main looper's clock; built: ${app.appGraph.builtParts()}" }
+    }
+
+    private fun idle() {
+        val looper = shadowOf(Looper.getMainLooper())
+        repeat(20) {
+            UiDispatcherRearm.mend()
+            looper.idle()
             Thread.sleep(5)
         }
     }
 
-    private fun idle() {
-        val deadline = System.nanoTime() + 20_000_000_000L
-        repeat(20) {
-            if (System.nanoTime() > deadline) return
-            shadowOf(Looper.getMainLooper()).idle()
-            Thread.sleep(5)
-        }
+    private companion object {
+        val FRAME: Duration = Duration.ofMillis(16)
+        val BUDGET: Duration = Duration.ofMinutes(1)
     }
 }
