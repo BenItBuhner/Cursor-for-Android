@@ -1288,6 +1288,7 @@ class AgentRepository(
             pending.show()
             publish(backend, startedIn) { it.copy(isLoadingMore = true, loadMoreError = null) }
             scope.launch {
+                var followRecords = false
                 try {
                     // A refresh in flight lands the cursors this page reads from; the account's page places the rows.
                     synchronized(this@AgentRepository) { inFlight?.job?.takeIf { it.isActive } }?.join()
@@ -1302,18 +1303,21 @@ class AgentRepository(
                     }
                     accountRead?.let { awaitAccountWord(it) }
                     fetchMore(backend, startedIn, cursor, synchronized(publishLock) { legacyCursor })
+                    followRecords = pageLanded(startedIn)
                 } finally {
+                    // Registered before the page's own work ends, so the two meet with nothing between them (see [followWithRecords]).
+                    if (followRecords) followWithRecords(startedIn, accountRead)
                     pending.end(work)
                     publish(backend, startedIn) { s -> if (s.isLoadingMore) s.copy(isLoadingMore = false) else s }
                 }
             }.also { loadingMore = it }
         }
         job.join()
-        val landed = synchronized(publishLock) { generation.get() == startedIn && !_state.value.isLoadingMore && _state.value.loadMoreError == null }
-        if (!landed) return RefreshOutcome.Failed
-        followWithRecords(startedIn, accountRead)
-        return RefreshOutcome.Refreshed
+        return if (pageLanded(startedIn)) RefreshOutcome.Refreshed else RefreshOutcome.Failed
     }
+
+    private fun pageLanded(startedIn: Int): Boolean =
+        synchronized(publishLock) { generation.get() == startedIn && !_state.value.isLoadingMore && _state.value.loadMoreError == null }
 
     private suspend fun fetchMore(backend: CursorBackend, startedIn: Int, cursor: String, legacy: String?) {
         val api = backend.api
@@ -1407,13 +1411,6 @@ class AgentRepository(
     }
 
     /**
-     * The rows still without their account record, asked for it by id once the list's work is over (see
-     * [materializeRecords]): its own job, so neither the fetch nor the page that landed the rows — nor a pull, a
-     * page asked for, a pin sync waiting on them — waits on the account service; each record is merged as it lands.
-     * After [prime] (the account's list or page read alongside the public one) has landed or failed: it brings most
-     * records at once, and when the list failed the records by id are not asked either (see [accountListUnread]).
-     */
-    /**
      * The account's list was read again (the pin round's read, or a fetch's): the rows it left bare while it was
      * refused or unanswered are asked for their records by id again (see [accountListUnread]).
      */
@@ -1423,11 +1420,27 @@ class AgentRepository(
         followWithRecords(token())
     }
 
+    /**
+     * The rows still without their account record, asked for it by id once the list's work is over (see
+     * [materializeRecords]): its own job, so neither the fetch nor the page that landed the rows — nor a pull, a
+     * page asked for, a pin sync waiting on them — waits on the account service; each record is merged as it lands.
+     * After [prime] (the account's list or page read alongside the public one) has landed or failed: it brings most
+     * records at once, and when the list failed the records by id are not asked either (see [accountListUnread]).
+     *
+     * The pass is one item of the list's work in flight ([pending]) from the moment nothing stands before it — the
+     * call, or the moment [prime] ends — and not only from inside the pass once its job has been dispatched and its
+     * lock taken: the list's work never reads as over between the work that asked for the pass and the pass, so
+     * the tail's row does not drop and come back, and nothing waiting for the list to settle takes it for settled
+     * while records are about to land. The wait for [prime] is not registered: an account list that stalls holds
+     * the tail's row no longer than the list's own work does.
+     */
     private fun followWithRecords(startedIn: Int, prime: Job? = null) {
-        scope.launch {
-            prime?.join()
-            stats.timed("account records by id", calls = { n: Int -> n }) { materializeRecords(startedIn) }
+        fun start() {
+            val work = pending.begin("account records by id (follow-up)")
+            scope.launch { stats.timed("account records by id", calls = { n: Int -> n }) { materializeRecords(startedIn) } }
+                .invokeOnCompletion { pending.end(work) }
         }
+        if (prime == null) start() else prime.invokeOnCompletion { start() }
     }
 
     private suspend fun fetch(silent: Boolean, depth: RefreshDepth) {
@@ -1594,13 +1607,14 @@ class AgentRepository(
                 s.copy(isRefreshing = false, hasLoaded = true, error = if (keepQuiet) s.error else t.userMessage())
             }
         } finally {
+            // Started, not waited for: neither the fetch nor its item of work waits on the account. Registered before
+            // that item ends, so the two meet with nothing between them (see [followWithRecords]).
+            if (followRecords) followWithRecords(startedIn, prime)
             pending.end(work)
             // A fetch that ends any other way — cut short with the indicator up — lets the indicator go with it: an
             // indicator is a fetch in flight, never a flag left behind by one that is not.
             publish(backend, startedIn, skipUnchanged = true) { s -> if (s.isRefreshing) s.copy(isRefreshing = false) else s }
         }
-        // Started once the fetch's own work has ended: neither the fetch nor its item of work waits on the account.
-        if (followRecords) followWithRecords(startedIn, prime)
     }
 
     /**

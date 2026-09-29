@@ -322,6 +322,8 @@ class AgentRepositoryTest {
         val repo = repository()
         repo.refresh()
         assertThat(repo.state.value.agents).hasSize(100)
+        // The refresh's account records by id, which run on after it returns, are over before the page is asked for.
+        awaitUntil { repo.pending.items.isEmpty() }
 
         api.failListAgents = CursorApiException(429, "rate_limited", "Too many requests from this key.")
         assertThat(repo.loadMore()).isEqualTo(RefreshOutcome.Failed)
