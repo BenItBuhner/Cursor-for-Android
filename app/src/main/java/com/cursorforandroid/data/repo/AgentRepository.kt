@@ -372,9 +372,10 @@ class AgentRepository(
     private val capabilities: suspend () -> Capabilities = { Capabilities.EXTENDED },
     /**
      * One chat's account record by id (Extended mode), for a pinned chat the public API will not give: the row is
-     * stood in from the record so the pin is never blank. Null (the default) when there is no account to ask.
+     * stood in from the record so the pin is never blank. Null (the default) when there is no account to ask: then no
+     * row is held back for a record and no pass by id follows a fetch, since none could ever land.
      */
-    private val recordOf: suspend (String) -> ComposerSnapshot? = { null },
+    private val recordOf: (suspend (String) -> ComposerSnapshot?)? = null,
     /**
      * Whether the account service's throttle is holding every call for a pause the server asked for (a `429`, see
      * `ApiThrottle.pausedUntil`): a record asked for by id meanwhile would wait the pause out and most likely be
@@ -893,7 +894,7 @@ class AgentRepository(
      * the socket's read timeout, which every other pass by id — the next refresh's among them — would queue behind.
      */
     private suspend fun recordById(id: String): ComposerSnapshot? = try {
-        withTimeout(RECORD_BY_ID_TIMEOUT_MS) { recordOf(id) }
+        recordOf?.let { ask -> withTimeout(RECORD_BY_ID_TIMEOUT_MS) { ask(id) } }
     } catch (e: TimeoutCancellationException) {
         throw java.io.InterruptedIOException("The account record of $id did not arrive in time.").apply { initCause(e) }
     }
@@ -1340,7 +1341,7 @@ class AgentRepository(
                 // An older page's row whose public `updatedAt` is newer than the stretch the page covers claims
                 // activity its place in the list does not show — a sweep's bump, as often as not: held until its
                 // record dates it, rather than drawn under Today on the public time.
-                val holdNew = !backend.isDemo && capabilities().accountSession
+                val holdNew = !backend.isDemo && recordOf != null && capabilities().accountSession
                 val landed = publish { s ->
                     if (holdNew && s.agents.isNotEmpty()) holdNewRows(s, page.items.filter { parseIsoMillis(it.updatedAt) > ceiling }, startedIn)
                     (if (page.items.isNotEmpty()) s.withPage(page.items) else s)
@@ -1407,13 +1408,6 @@ class AgentRepository(
     }
 
     /**
-     * The rows still without their account record, asked for it by id once the list's work is over (see
-     * [materializeRecords]): its own job, so neither the fetch nor the page that landed the rows — nor a pull, a
-     * page asked for, a pin sync waiting on them — waits on the account service; each record is merged as it lands.
-     * After [prime] (the account's list or page read alongside the public one) has landed or failed: it brings most
-     * records at once, and when the list failed the records by id are not asked either (see [accountListUnread]).
-     */
-    /**
      * The account's list was read again (the pin round's read, or a fetch's): the rows it left bare while it was
      * refused or unanswered are asked for their records by id again (see [accountListUnread]).
      */
@@ -1423,11 +1417,24 @@ class AgentRepository(
         followWithRecords(token())
     }
 
+    /**
+     * The rows still without their account record, asked for it by id once the list's work is over (see
+     * [materializeRecords]): its own job, so neither the fetch nor the page that landed the rows — nor a pull, a
+     * page asked for, a pin sync waiting on them — waits on the account service; each record is merged as it lands.
+     * After [prime] (the account's list or page read alongside the public one) has landed or failed: it brings most
+     * records at once, and when the list failed the records by id are not asked either (see [accountListUnread]).
+     *
+     * Registered in [pending] before it is launched and until it is over, the wait for [prime] and for another pass's
+     * [recordMutex] included: otherwise the list reads as idle with a pass still to come, and a row it holds back
+     * until placed (see [holdUntilPlaced]) is drawn by a record that lands after whatever trusted the idle list.
+     */
     private fun followWithRecords(startedIn: Int, prime: Job? = null) {
+        if (recordOf == null) return
+        val work = pending.begin("account records by id (follow-up)")
         scope.launch {
             prime?.join()
             stats.timed("account records by id", calls = { n: Int -> n }) { materializeRecords(startedIn) }
-        }
+        }.invokeOnCompletion { pending.end(work) }
     }
 
     private suspend fun fetch(silent: Boolean, depth: RefreshDepth) {
@@ -1456,7 +1463,7 @@ class AgentRepository(
         val knownBefore = before.keys
         // A list already on screen draws an agent new to it only once its record has placed it (see [holdUntilPlaced]);
         // the first list of a session has nothing to hold its rows against, and default mode no record to wait for.
-        val holdNew = knownBefore.isNotEmpty() && !backend.isDemo && capabilities().accountSession
+        val holdNew = knownBefore.isNotEmpty() && !backend.isDemo && recordOf != null && capabilities().accountSession
         // Everything published by this fetch belongs to the backend and session it started against; a demo / real
         // switch or a sign-out half-way through must not leak the old list into the new one.
         fun publish(transform: (AgentListState) -> AgentListState): Boolean = publish(backend, startedIn, transform = transform)
@@ -1757,7 +1764,7 @@ class AgentRepository(
      * passing leaves the rest to the next pass.
      */
     suspend fun materializeRecords(startedIn: Int = token(), budget: Int = MAX_MATERIALIZED_RECORDS): Int {
-        if (session.isDemo || !_state.value.hasLoaded || _state.value.isFromCache || !capabilities().accountSession) return 0
+        if (recordOf == null || session.isDemo || !_state.value.hasLoaded || _state.value.isFromCache || !capabilities().accountSession) return 0
         if (accountListUnread || accountPaused()) return 0
         return recordMutex.withLock {
             val now = AppClock.now()

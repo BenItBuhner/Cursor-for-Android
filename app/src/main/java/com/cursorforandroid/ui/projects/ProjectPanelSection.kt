@@ -4,7 +4,9 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -142,7 +144,10 @@ private fun projectBodyItems(graph: AppGraph, projectId: String, onOpenAgent: (S
             value = AppClock.now()
         }
     }
-    return { panel.value.let { projectSection(it.view, local, busy, actions, nowMillis = now, clock = clock, rows = it.rows) } }
+    // The list reads the rows' shape and nothing else, and the policy keeps a publication that leaves it as it was from
+    // reaching the list at all; each row reads its own line from the panel (see projectSection).
+    val shape = remember(panel) { derivedStateOf(structuralEqualityPolicy()) { ProjectShape.of(panel.value) } }
+    return { projectSection(shape.value, panel, local, busy, actions, nowMillis = now, clock = clock) }
 }
 
 /**
