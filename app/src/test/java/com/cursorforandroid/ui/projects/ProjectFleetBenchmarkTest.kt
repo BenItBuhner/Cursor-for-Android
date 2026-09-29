@@ -97,7 +97,6 @@ class ProjectFleetBenchmarkTest {
     fun tearDown() {
         AppClock.nowMillis = System::currentTimeMillis
         RecomposeCounter.uninstall()
-        RecomposeCounter.reset()
     }
 
     private class Recompositions : CompositionObserver, RecomposeScopeObserver {
