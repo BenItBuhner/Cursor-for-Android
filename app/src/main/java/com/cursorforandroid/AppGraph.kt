@@ -526,6 +526,8 @@ class AppGraph(
         override suspend fun record(id: String): ComposerSnapshot? = lazyAccountAgents.value.record(id)
         override suspend fun scanRoots(maxPages: Int): RootScan = lazyAccountAgents.value.scanRoots(maxPages)
         override suspend fun scanRoots(maxPages: Int, stopBelowActivityMillis: Long?): RootScan = lazyAccountAgents.value.scanRoots(maxPages, stopBelowActivityMillis)
+        override suspend fun scanRoots(maxPages: Int, stopBelowActivityMillis: Long?, firstPage: AccountList?): RootScan =
+            lazyAccountAgents.value.scanRoots(maxPages, stopBelowActivityMillis, firstPage)
         override suspend fun createWorker(managerId: String, launch: WorkerLaunch): ComposerSnapshot = lazyProjectApi.value.createWorker(managerId, launch)
         override suspend fun setWorkerManager(workerId: String, managerId: String, spawnKind: WorkerSpawnKind) = lazyProjectApi.value.setWorkerManager(workerId, managerId, spawnKind)
         override suspend fun clearWorkerManager(workerId: String) = lazyProjectApi.value.clearWorkerManager(workerId)
@@ -644,6 +646,7 @@ class AppGraph(
             pending = pendingWork,
             // A pinned chat the public API will not give (Extended mode): stood in from its account record.
             recordOf = { id -> if (!session.isDemo && capabilities().accountSession) lazyAccountAgents.value.record(id) else null },
+            accountPaused = { accountPauseMillis() > 0L },
             start = { lazyAgentStart.value },
             uploads = { promptUploads },
         ).also { repo ->
@@ -696,7 +699,7 @@ class AppGraph(
                 // The root registry is filled from the account list — to the page older than every Project it
                 // knows, or the whole list on a deep refresh and a few times an hour — the memberships read after;
                 // the Projects group is drawn from the registry, not from the pages the sidebar holds.
-                projects.scheduleRootDiscovery(list.composers.filter { it.scope == AgentScope.PROJECT_ROOT }.map { it.id }, deep = agents.lastRefreshDepth == RefreshDepth.Deep)
+                projects.scheduleRootDiscovery(list.composers.filter { it.scope == AgentScope.PROJECT_ROOT }.map { it.id }, deep = agents.lastRefreshDepth == RefreshDepth.Deep, firstPage = list.takeIf { it.isFirstPage })
             },
             capabilities = capabilities,
             stats = refreshStats,
