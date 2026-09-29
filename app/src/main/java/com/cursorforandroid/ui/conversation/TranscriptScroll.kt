@@ -201,9 +201,13 @@ internal class TranscriptScroll(val list: LazyListState, private val followingSt
     private suspend fun measureDistanceToNewest(reach: Float): Float? {
         var found: Float? = null
         list.scroll {
+            val held = list.layoutInfo.visibleItemsInfo.let { it.getOrNull(it.size / 2) }
             val went = -scrollBy(-reach)
             found = distanceToNewest(list.layoutInfo)?.plus(went)
             scrollBy(went)
+            // Scrolling back by as much does not always land where it started (rows just landed below re-anchor the
+            // list on the way), so the row that was on screen is put back where it stood.
+            if (held != null) list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == held.key }?.let { now -> scrollBy((now.offset - held.offset).toFloat()) }
         }
         return found
     }
