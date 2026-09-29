@@ -101,20 +101,23 @@ internal fun StretchView(stretch: TranscriptRow.Stretch, modifier: Modifier = Mo
 /**
  * Where each subagent of [stretch] stands, in order. The line counts the ones at work, which their list rows say,
  * and draws where one stands only in a Project's chat — the newest at work — so only the subagents whose step it can
- * draw are followed live: [FOLLOWED_FOR_LINE] newest at work, the one before the newest ready to take over the moment
- * the newest ends. [followAll] follows every one, for steps drawn from these states.
+ * draw are followed live: the [FOLLOWED_FOR_LINE] newest at work by their rows, the one before the newest ready to take
+ * over the moment the newest ends. [followAll] follows every one, for steps drawn from these states. A subagent taken
+ * up starts from what its row said.
  */
 @Composable
 private fun subagentStates(stretch: TranscriptRow.Stretch, followAll: Boolean, coordinator: Boolean): List<Pair<TranscriptRow.Entry.Call, SubagentState>> {
-    if (followAll) return stretch.subagents.map { entry -> key(entry.key) { entry to rememberSubagentState(entry.call, entry.subagent!!) } }
     val listed = stretch.subagents.map { entry -> key(entry.key) { entry to rememberSubagentState(entry.call, entry.subagent!!, live = false) } }
-    if (!coordinator) return listed
-    val followed = listed.filter { (entry, state) -> SubagentRows.isWorking(entry.subagent!!, state.look, state.child, stretch.live) }
-        .takeLast(FOLLOWED_FOR_LINE)
-        .mapTo(HashSet()) { it.first.key }
+    val followed = when {
+        followAll -> listed.mapTo(HashSet()) { it.first.key }
+        !coordinator -> return listed
+        else -> listed.filter { (entry, state) -> SubagentRows.isWorking(entry.subagent!!, state.look, state.child, stretch.live) }
+            .takeLast(FOLLOWED_FOR_LINE)
+            .mapTo(HashSet()) { it.first.key }
+    }
     return listed.map { pair ->
-        val entry = pair.first
-        if (entry.key !in followed) pair else key(entry.key, FOLLOWED) { entry to rememberSubagentState(entry.call, entry.subagent!!) }
+        val (entry, state) = pair
+        if (entry.key !in followed) pair else key(entry.key, FOLLOWED) { entry to rememberSubagentState(entry.call, entry.subagent!!, initial = state.child) }
     }
 }
 
