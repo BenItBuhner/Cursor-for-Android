@@ -378,7 +378,7 @@ internal class PromoRunStreamer(
             if (steered(agentId)) {
                 pause(250)
                 say("hero.adapt")
-                pause(200)
+                pause(1_200)
                 edit(5, "src/hooks/useTheme.ts#system", 900)
             }
             pause(200)

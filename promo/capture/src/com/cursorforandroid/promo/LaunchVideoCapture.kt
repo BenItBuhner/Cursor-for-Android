@@ -404,8 +404,8 @@ class LaunchVideoCapture {
         const val FOLLOW_UP_AT = 6_300L
         const val STEER_AT = 8_900L
         const val LATEST_AT = 9_900L
-        const val SHIP_AT = 22_400L
-        const val PULL_REQUEST_AT = 23_300L
-        const val END_AT = 26_000L
+        const val SHIP_AT = 23_400L
+        const val PULL_REQUEST_AT = 24_300L
+        const val END_AT = 27_000L
     }
 }
