@@ -621,7 +621,7 @@ class ProjectRepository(
     private fun derive(projectId: String, list: AgentListState, extra: Extras, unavailable: Map<String, String>): ProjectViewState {
         val probe = onViewDerived
         val startedAt = if (probe != null) System.nanoTime() else 0L
-        val root = list.agents.firstOrNull { it.id == projectId }
+        val root = list.agent(projectId)
         val members = list.childrenOf[projectId].orEmpty()
         // Workers the account named but the list has not shown yet stand in with what the membership says.
         val listedWorkerIds = members.mapTo(HashSet()) { it.id }
