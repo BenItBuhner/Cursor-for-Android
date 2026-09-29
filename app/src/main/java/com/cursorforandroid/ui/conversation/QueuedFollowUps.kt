@@ -1,6 +1,5 @@
 package com.cursorforandroid.ui.conversation
 
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -39,6 +38,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -97,8 +100,8 @@ import com.cursorforandroid.ui.components.onContextClick
  * its glyphs, dimmed, until the server answers.
  *
  * A message steered into the running turn is on its way the same way: its glyphs dim, and it stays on its card
- * until the transcript shows it — "Steering…" under the line with a ring while the account takes it, then
- * "Steered" with a check, the line dimmed throughout. A steer that did not go through leaves the card as it was,
+ * until the transcript shows it — "Steering…" on its second line, where a held card keeps its wait, while the
+ * account takes it, then "Steered", the message dimmed throughout. A steer that did not go through leaves the card as it was,
  * the reason under the line in red, and the up arrow tries again.
  *
  * With [flights], each row is an end of the send's flight (see `SendMotion`): a message sent while the agent is busy
@@ -205,7 +208,7 @@ private fun QueuedFollowUpRow(
         // the server took (see QueuedFollowUp.isHeld). The ring is for a first send only.
         val steer = item.steer
         val sending = item.isSending && !item.isHeld && steer == null
-        Column(Modifier.weight(1f).padding(vertical = 4.dp).animateContentSize(tween(SteerLabelMillis))) {
+        Column(Modifier.weight(1f).padding(vertical = 4.dp).animateContentSize(tween(NoteFadeMs))) {
             // The commands dim with the rest of the line while it goes out.
             val textColor = if (sending || steer != null) colors.textTertiary else colors.textPrimary
             QueueLine(words, textColor, motion, anchor, item.id)
@@ -215,7 +218,7 @@ private fun QueuedFollowUpRow(
                 Text(note, style = type.small, color = colors.red, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (steer != null) {
-                SteerLabel(steer)
+                SteerNote(steer)
             } else {
                 item.steerError?.let { reason ->
                     Text(reason, style = type.small, color = colors.red, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag(QueueSteerErrorTag))
@@ -246,21 +249,25 @@ private fun QueuedFollowUpRow(
     }
 }
 
-/** A steered card's line under the message: a ring while the account takes it, a check once it has. */
+/**
+ * A steered card's second line, where a held card keeps its wait: "Steering…" while the account takes the message,
+ * then "Steered", the one fading into the other in place, the line no taller for it. Quiet, as the wait is.
+ */
 @Composable
-private fun SteerLabel(phase: SteerPhase) {
+private fun SteerNote(phase: SteerPhase) {
     val colors = CursorTheme.colors
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag(QueueSteerLabelTag)) {
-        Crossfade(phase, animationSpec = tween(SteerLabelMillis), label = "queued-steer-mark") { shown ->
-            Box(Modifier.size(SteerMark), contentAlignment = Alignment.Center) {
-                when (shown) {
-                    SteerPhase.STEERING -> SpinnerRing(size = SteerMark)
-                    SteerPhase.STEERED -> Icon(CursorIcons.Check, null, tint = colors.iconTertiary, modifier = Modifier.size(SteerMark))
-                }
+    val type = CursorTheme.typography
+    val steered by animateFloatAsState(if (phase == SteerPhase.STEERED) 1f else 0f, tween(NoteFadeMs), label = "steer-note")
+    Box(Modifier.fillMaxWidth().testTag(QueueSteerLabelTag).semantics { liveRegion = LiveRegionMode.Polite }) {
+        Text(
+            QueueCardWords.STEERING, style = type.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.graphicsLayer { alpha = 1f - steered }.then(if (phase == SteerPhase.STEERED) Modifier.clearAndSetSemantics {} else Modifier),
+        )
+        if (phase == SteerPhase.STEERED || steered > 0f) {
+            Box(Modifier.matchParentSize().graphicsLayer { alpha = steered }, contentAlignment = Alignment.CenterStart) {
+                Text(QueueCardWords.STEERED, style = type.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        Spacer(Modifier.width(5.dp))
-        Text(QueueCardWords.steerLabel(phase), style = CursorTheme.typography.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -633,9 +640,8 @@ private fun Modifier.faceOf(face: QueueCardFace): Modifier =
 private val RowHeight = 40.dp
 private val Tile = 18.dp
 private val Glyph = 14.dp
-/** A card's steer label comes in, and its mark turns from ring to check, over this long. */
-private const val SteerLabelMillis = 180
-private val SteerMark = 9.dp
+/** A card's second line comes in, and one note on it fades into the next, over this long. */
+private const val NoteFadeMs = 160
 const val QueueSteerLabelTag = "queued-steer"
 const val QueueSteerErrorTag = "queued-steer-error"
 private const val TileThumbnailPx = 256
