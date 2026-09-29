@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "footage": "node scripts/footage.mjs",
-    "music": "python3 scripts/music.py public/audio/score.wav",
+    "music": "node --experimental-strip-types --no-warnings scripts/cues.ts && python3 scripts/music.py public/audio/score.wav",
     "studio": "remotion studio",
     "typecheck": "tsc --noEmit",
     "render": "node scripts/render.mjs"
