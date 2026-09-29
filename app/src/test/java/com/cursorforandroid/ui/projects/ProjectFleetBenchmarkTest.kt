@@ -327,6 +327,9 @@ class ProjectFleetBenchmarkTest {
         assertWithMessage("$scroll").that(scroll.mainDerivations).isEqualTo(0)
         // A worker's move recomposes its own row, if it is composed at all, not every row on screen.
         assertWithMessage("$ticking").that(ticking.workerRows).isAtMost(ticking.patches + ROW_SLACK)
+        // Nor the list's item scopes around the rows: a move leaves the rows' shape as it was, so the list is not laid
+        // out again and no other row's item recomposes (about 21 scopes a move while it was).
+        assertWithMessage("$ticking").that(ticking.scopes).isAtMost(ticking.patches * SCOPES_PER_MOVE)
         // A worker's move rebuilds its own row; the rest are kept.
         assertWithMessage("$ticking").that(ticking.rowsBuilt).isAtMost(ticking.patches.toLong() + ROW_SLACK)
         // The first primary is on the panel's first frames, not a round trip later.
@@ -361,6 +364,8 @@ class ProjectFleetBenchmarkTest {
         const val STREAM_PACE_MS = 14L
         /** Rows over one per move: a row that scrolls in, a line whose run ends. */
         const val ROW_SLACK = 8
+        /** Scopes recomposed per move at most, on average: the moved row's own, when it is on screen, and what it draws. */
+        const val SCOPES_PER_MOVE = 2
         fun worker(i: Int) = "bc-w$i"
     }
 }

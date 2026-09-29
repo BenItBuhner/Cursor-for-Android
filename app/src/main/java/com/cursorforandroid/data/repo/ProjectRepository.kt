@@ -2,6 +2,7 @@ package com.cursorforandroid.data.repo
 
 import androidx.annotation.VisibleForTesting
 import com.cursorforandroid.crash.Breadcrumbs
+import com.cursorforandroid.data.api.AccountList
 import com.cursorforandroid.data.api.AgentStoreApi
 import com.cursorforandroid.data.api.ConnectRpcException
 import com.cursorforandroid.data.api.ProjectActionsApi
@@ -240,11 +241,12 @@ class ProjectRepository(
     /**
      * [discoverRoots] then [syncLineage], on this repository's own scope: what follows every account list read.
      * [deep] reads the whole account list, as the user asked for by a deep refresh; otherwise the pass stops at the
-     * page older than every Project the registry knows.
+     * page older than every Project the registry knows. [firstPage] is the newest page that read just brought, which
+     * the pass starts from rather than asking for it again.
      */
-    fun scheduleRootDiscovery(rootIds: Collection<String>, deep: Boolean = false) {
+    fun scheduleRootDiscovery(rootIds: Collection<String>, deep: Boolean = false, firstPage: AccountList? = null) {
         scope.launch {
-            discoverRoots(deep = deep)
+            discoverRoots(deep = deep, firstPage = firstPage)
             syncLineage(rootIds)
             // The roots the memberships admitted have their rows fetched like the ones the pass named.
             agents.materializeRoots(budget = ROOT_FETCH_BUDGET)
@@ -296,7 +298,7 @@ class ProjectRepository(
      * stopped it are in [lastRootScan] for the diagnostics. Default mode has no list to scan: its registry is what
      * earlier sessions and the coordinators' transcripts filled, and its roots are fetched by id all the same.
      */
-    suspend fun discoverRoots(force: Boolean = false, deep: Boolean = false) {
+    suspend fun discoverRoots(force: Boolean = false, deep: Boolean = false, firstPage: AccountList? = null) {
         if (session.isDemo) return
         if (!capabilities().projects) {
             agents.materializeRoots()
@@ -312,7 +314,7 @@ class ProjectRepository(
             _lastRootScan.update { (it ?: RootScanRecord()).copy(status = RootScanRecord.Status.Running, attempts = attempt) }
             runningJob.set(currentCoroutineContext()[Job])
             try {
-                scan(token, attempt, deep)
+                scan(token, attempt, deep, firstPage)
             } finally {
                 runningJob.set(null)
                 // A pass that left any other way — cut short between its Running and its outcome — is no pass in
@@ -326,7 +328,7 @@ class ProjectRepository(
     }
 
     /** One discovery pass, under the mutex and past its Running mark (see [discoverRoots]). */
-    private suspend fun scan(token: Int, attempt: Int, deep: Boolean) {
+    private suspend fun scan(token: Int, attempt: Int, deep: Boolean, firstPage: AccountList?) {
         // The list is read newest first; once a page is older than every live Project the registry knows, the
         // pages behind it can name no Project newer than those — only one older, which a deep refresh reads for.
         // Archived Projects are left out of the floor: they sit far down the list and are not what a pull is
@@ -340,7 +342,7 @@ class ProjectRepository(
         val floor = if (deep || !complete) null else floorOfRegistry(token)
         val scanStartedAt = now()
         val scan = try {
-            api.scanRoots(ROOT_SCAN_PAGES, floor)
+            api.scanRoots(ROOT_SCAN_PAGES, floor, firstPage)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
