@@ -377,8 +377,6 @@ internal class PromoRunStreamer(
             shell(1, "npm run typecheck", 2_400, TYPECHECK_OUTPUT)
             if (steered(agentId)) {
                 pause(250)
-                think("hero.steer")
-                pause(150)
                 say("hero.adapt")
                 pause(200)
                 edit(5, "src/hooks/useTheme.ts#system", 900)
