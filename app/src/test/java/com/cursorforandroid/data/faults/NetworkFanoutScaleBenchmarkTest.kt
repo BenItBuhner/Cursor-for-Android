@@ -53,6 +53,7 @@ class NetworkFanoutScaleBenchmarkTest {
     private val rigs = CopyOnWriteArrayList<FaultRig>()
     private val uncaught = CopyOnWriteArrayList<Pair<String, Throwable>>()
     private var previousHandler: Thread.UncaughtExceptionHandler? = null
+    private var rigSequence = 0
 
     @After
     fun tearDown() {
@@ -247,7 +248,7 @@ class NetworkFanoutScaleBenchmarkTest {
     private fun rig(extended: Boolean): FaultRig =
         FaultRig(
             server.baseUrl,
-            folder.newFolder("rig-${rigs.size}"),
+            folder.newFolder("rig-${rigSequence++}"),
             readTimeoutMs = 15_000L,
             extended = extended,
             engine = if (extended) TranscriptEngine.BETA else TranscriptEngine.STABLE,
