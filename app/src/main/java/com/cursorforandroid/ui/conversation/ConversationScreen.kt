@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -37,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -183,7 +185,50 @@ internal fun rememberCaptionFadeIn(shown: Boolean): Animatable<Float, AnimationV
     return fade
 }
 
+/**
+ * What takes the working caption's place as it goes — a reply's first thought, its first call, its text — waits out
+ * of sight until the caption has faded out where it stood, then fades in there itself. The list fades a removed row
+ * out at its last place while the rows after it are already laid out in that place, so otherwise the two are drawn
+ * over each other for the whole fade. [keys] are the rows that landed under the caption on the frame it went.
+ */
+@Stable
+internal class CaptionHandoff(private val keys: Set<String>) {
+    private val fade = Animatable(if (keys.isEmpty()) 1f else 0f)
+    private var holding by mutableStateOf(keys.isNotEmpty())
+
+    /** [key]'s row at the hand-off's fade while it lasts; else as it is. */
+    fun hold(key: String): Modifier = if (holding && key in keys) Modifier.graphicsLayer { alpha = fade.value } else Modifier
+
+    suspend fun run() {
+        if (!holding) return
+        fade.animateTo(1f, tween(CaptionFadeMillis, delayMillis = CaptionFadeMillis + CaptionHandoffGapMillis))
+        holding = false
+    }
+}
+
+/** Where the caption stood: whether it was shown, under which row. Written as the screen is composed. */
+private class CaptionSpot {
+    var shown = false
+    var under: String? = null
+}
+
+/** The hand-off from the caption to the rows that land under it as it goes (see [CaptionHandoff]); none while it stays. */
+@Composable
+internal fun rememberCaptionHandoff(shown: Boolean, rows: List<TranscriptRow>): CaptionHandoff {
+    val spot = remember { CaptionSpot() }
+    val handoff = remember(shown) {
+        val under = rows.indexOfLast { it.key == spot.under }.takeIf { !shown && spot.shown && spot.under != null && it >= 0 }
+        CaptionHandoff(if (under == null) emptySet() else rows.subList(under + 1, rows.size).mapTo(HashSet()) { it.key })
+    }
+    spot.shown = shown
+    if (shown) spot.under = rows.lastOrNull()?.key
+    LaunchedEffect(handoff) { handoff.run() }
+    return handoff
+}
+
 internal const val CaptionFadeMillis = 220
+/** The caption's fade out runs on the list's own clock, begun as the list measures, a frame or so off the hand-off's. */
+private const val CaptionHandoffGapMillis = 32
 internal const val WORKING_CAPTION_TAG = "working-caption"
 
 /**
@@ -387,6 +432,7 @@ fun ConversationScreen(
     val loadingRow = conversation.isLoading && items.isEmpty()
     val emptyRow = !conversation.isLoading && items.isEmpty()
     val captionIn = rememberCaptionFadeIn(showWorking)
+    val captionHandoff = rememberCaptionHandoff(showWorking, listedRows)
     // Everything the list holds, top to bottom: the rows between the items above them and the working caption below.
     val order = remember(listedRows, showWorking, showTraces, hasOlder, loadingRow, emptyRow) {
         TranscriptOrder(
@@ -592,8 +638,9 @@ fun ConversationScreen(
                         // A dropped connection is not the run's problem: the agent keeps working while the stream
                         // is re-established, so the caption keeps shimmering and only its wording says what is
                         // going on, rolling from one wording to the next as a subagent's line does. The caption is
-                        // the whole indicator, as in the web chat: no glyph beside it.
-                        Box(itemModifier.then(paneWidth)) {
+                        // the whole indicator, as in the web chat: no glyph beside it. It stands in a thinking
+                        // line's place, as tall and its words as high, so the line that takes over comes in there.
+                        Box(itemModifier.then(paneWidth).heightIn(min = DisclosureRowHeight), contentAlignment = Alignment.CenterStart) {
                             RollingText(conversation.workingCaption(), style = type.base, label = "working-caption", modifier = Modifier.testTag(WORKING_CAPTION_TAG))
                         }
                     }
@@ -673,7 +720,7 @@ fun ConversationScreen(
                     before.forEach(::edge)
                     // Without a content type the lazy layout offers a scrolled-off user bubble's slot to an activity
                     // group, whose subtree shares nothing with it: the reuse always fails and costs more than it saves.
-                    items(if (following) listedRows.asReversed() else listedRows, key = { it.key }, contentType = ::transcriptContentType) { row -> TranscriptRowView(row, paneWidth.then(rowMotion(row, openStretches))) }
+                    items(if (following) listedRows.asReversed() else listedRows, key = { it.key }, contentType = ::transcriptContentType) { row -> TranscriptRowView(row, paneWidth.then(rowMotion(row, openStretches)).then(captionHandoff.hold(row.key))) }
                     after.forEach(::edge)
                 }
                 SideEffect { transcriptScroll.orient(following, order) }
