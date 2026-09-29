@@ -14,15 +14,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.tooling.observe
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
@@ -141,23 +144,34 @@ class ScaleRig(
     }
 
     /**
-     * "Older messages" at the top of [agentId]'s [transcript] tapped [pages] times, each time until the older turns
-     * are in and the screen has settled, the fleet ticking under it every [FRAMES_PER_TICK] frames. Each page's frames
-     * and wall time go into [phase]'s extras; how many pages there were.
+     * [pages] pages of [agentId]'s older turns paged into its [transcript], each until the older turns are in and the
+     * screen has settled, the fleet ticking under it every [FRAMES_PER_TICK] frames. A page is "Older messages"
+     * tapped, or (`scroll`) the one the transcript asks for itself when the unmeasured scroll back to its top comes
+     * near it, of which only the frames after the scroll are measured. Each page's frames, wall time and way in go into
+     * [phase]'s extras; how many pages there were.
      */
     fun loadOlder(phase: ScaleMeter.Phase, agentId: String, transcript: SemanticsMatcher, pages: Int, also: () -> Unit = {}): Int {
         val button = hasTestTag("load-older")
         val state = { graph.conversations.state(agentId).value }
         var loaded = 0
         while (loaded < pages && state().hasOlder) {
-            if (!shown(button)) toTop(transcript)
-            if (!shown(button)) {
-                phase.extra["olderStop"] = "no-button,hasOlder=${state().hasOlder}"
-                break
-            }
+            check(shown(transcript)) { "the transcript left the screen after $loaded older pages" }
             val before = state().items.size
             val wall0 = phase.wall.sum()
-            meter.measured(phase) { compose.onAllNodes(button).onFirst().performClick() }
+            if (!shown(button)) toTop(transcript)
+            val way = when {
+                state().isLoadingOlder || state().items.size > before -> "scroll"
+                shown(button) -> {
+                    // The button's own action, not a touch at its middle: scrolled to the top under a held clock, the
+                    // row can stand under the header, which takes the tap and leaves the conversation.
+                    meter.measured(phase) { compose.onAllNodes(hasClickAction() and hasAnyAncestor(button)).onFirst().performSemanticsAction(SemanticsActions.OnClick) }
+                    "tap"
+                }
+                else -> {
+                    phase.extra["olderStop"] = "no-button,hasOlder=${state().hasOlder}"
+                    break
+                }
+            }
             var sinceTick = 0
             val (frames, realMs) = framesUntil(phase, maxMillis = 20_000) {
                 if (++sinceTick >= FRAMES_PER_TICK) {
@@ -169,8 +183,12 @@ class ScaleRig(
                 state().let { !it.isLoadingOlder && it.items.size > before }
             }
             val settled = meter.settle(phase, quiet = 5, max = 240)
+            if (state().items.size <= before) {
+                phase.extra["olderStop"] = "no-load,${frames}f/${realMs}ms,hasOlder=${state().hasOlder}"
+                break
+            }
             loaded++
-            phase.extra["older$loaded"] = "${frames + settled}f/${realMs}ms/${ScaleMeter.Phase.f(phase.wall.sum() - wall0)}mainMs/+${state().items.size - before}items"
+            phase.extra["older$loaded"] = "${frames + settled}f/${realMs}ms/${ScaleMeter.Phase.f(phase.wall.sum() - wall0)}mainMs/+${state().items.size - before}items/$way"
         }
         phase.extra["olderPages"] = loaded
         phase.extra["items"] = state().items.size
