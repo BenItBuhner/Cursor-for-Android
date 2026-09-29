@@ -657,9 +657,8 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         val accountQueue = caps.accountQueue && !graph.session.isDemo
         val waiting = graph.followUps.state(agentId).value.queue.isNotEmpty()
         // A message for a queue waits there with its files already up; the send button is held until they are. Into a
-        // bubble it goes regardless: the bubble finishes its uploads (see dispatch).
+        // bubble it goes regardless: the bubble finishes its uploads (see dispatch). The dimmed Send says why.
         if ((busy || waiting) && AttachmentUploads.isUploading(graph.attachmentUploads.states.value, attached.map { it.id })) {
-            toast.value = "Wait for the files to finish uploading."
             return null
         }
         val message = OutgoingMessages.Draft(

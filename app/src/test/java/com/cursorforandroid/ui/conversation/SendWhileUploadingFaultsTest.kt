@@ -203,7 +203,7 @@ class SendWhileUploadingFaultsTest {
 
         assertThat(vm.submit()).isNull()
 
-        assertThat(vm.toastMessage.value).isEqualTo("Wait for the files to finish uploading.")
+        assertThat(vm.toastMessage.value).isNull()
         assertThat(vm.draftText.value).isEqualTo("When you are done, read the spec")
         assertThat(vm.pendingFiles.value.map { it.id }).containsExactly(spec.id)
         assertThat(graph.followUps.state(AGENT).value.queue).isEmpty()
