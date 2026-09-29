@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.WindowCompat
 import com.cursorforandroid.ui.components.ProvideHaptics
+import com.cursorforandroid.ui.components.ProvideSharedAnimationTicker
 
 enum class ThemeMode { System, Dark, Light }
 
@@ -76,33 +77,35 @@ fun CursorTheme(
         }
     }
 
-    CompositionLocalProvider(
-        LocalCursorColors provides colors,
-        LocalCursorTypography provides typography,
-        LocalCursorShapes provides shapes,
-    ) {
-        MaterialTheme(
-            colorScheme = colors.toMaterialScheme(),
-            typography = Typography(
-                bodyLarge = typography.row,
-                bodyMedium = typography.base,
-                bodySmall = typography.small,
-                titleLarge = typography.pageTitle,
-                titleMedium = typography.title,
-                titleSmall = typography.baseMedium,
-                labelLarge = typography.baseMedium,
-                labelMedium = typography.small,
-                labelSmall = typography.tiny,
-            ),
-            shapes = Shapes(
-                extraSmall = shapes.sm,
-                small = shapes.base,
-                medium = shapes.lg,
-                large = shapes.xl,
-                extraLarge = shapes.sheet,
-            ),
+    ProvideSharedAnimationTicker {
+        CompositionLocalProvider(
+            LocalCursorColors provides colors,
+            LocalCursorTypography provides typography,
+            LocalCursorShapes provides shapes,
         ) {
-            ProvideHaptics(content = content)
+            MaterialTheme(
+                colorScheme = colors.toMaterialScheme(),
+                typography = Typography(
+                    bodyLarge = typography.row,
+                    bodyMedium = typography.base,
+                    bodySmall = typography.small,
+                    titleLarge = typography.pageTitle,
+                    titleMedium = typography.title,
+                    titleSmall = typography.baseMedium,
+                    labelLarge = typography.baseMedium,
+                    labelMedium = typography.small,
+                    labelSmall = typography.tiny,
+                ),
+                shapes = Shapes(
+                    extraSmall = shapes.sm,
+                    small = shapes.base,
+                    medium = shapes.lg,
+                    large = shapes.xl,
+                    extraLarge = shapes.sheet,
+                ),
+            ) {
+                ProvideHaptics(content = content)
+            }
         }
     }
 }

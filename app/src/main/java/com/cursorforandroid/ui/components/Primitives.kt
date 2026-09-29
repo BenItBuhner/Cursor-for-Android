@@ -1,12 +1,9 @@
 package com.cursorforandroid.ui.components
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.foundation.Canvas
@@ -35,9 +32,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -73,6 +77,14 @@ import com.cursorforandroid.domain.ProjectAppearance
 import com.cursorforandroid.domain.PullRequestState
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlin.coroutines.coroutineContext
 
 /**
  * Fill + hairline stroke sharing one shape so the edge stays crisp. [clip] also clips the content to the shape — and
@@ -409,6 +421,85 @@ fun Dot(color: Color, size: Dp = CursorDimens.unreadDot, modifier: Modifier = Mo
     Box(modifier.size(size).background(color, CircleShape))
 }
 
+private data class SharedAnimationFrame(val millis: Long = Long.MIN_VALUE, val durationScale: Float = 1f)
+
+/** Test-only observation point for the number of frame-clock resumptions used by the shared indicators. */
+internal object SharedAnimationTickerTestHooks {
+    @Volatile
+    var onFrame: (() -> Unit)? = null
+
+    fun frame() {
+        onFrame?.invoke()
+    }
+}
+
+/**
+ * One frame-clock continuation for every continuously drawn primitive in this composition. Readers only register
+ * while they are composed; the collector remains asleep, without requesting frames, when the last reader leaves.
+ */
+@Stable
+private class SharedAnimationTicker {
+    private val readers = MutableStateFlow(0)
+    private val mutableFrame = mutableStateOf(SharedAnimationFrame())
+    val frame: State<SharedAnimationFrame> get() = mutableFrame
+
+    fun attach() {
+        readers.update { it + 1 }
+    }
+
+    fun detach() {
+        readers.update { count ->
+            check(count > 0) { "Shared animation ticker detached without a reader" }
+            count - 1
+        }
+    }
+
+    suspend fun run() {
+        readers
+            .map { it > 0 }
+            .distinctUntilChanged()
+            .collectLatest { active ->
+                if (!active) return@collectLatest
+                val motionDurationScale = coroutineContext[MotionDurationScale]
+                while (currentCoroutineContext().isActive) {
+                    withInfiniteAnimationFrameMillis { millis ->
+                        SharedAnimationTickerTestHooks.frame()
+                        mutableFrame.value = SharedAnimationFrame(
+                            millis = millis,
+                            durationScale = motionDurationScale?.scaleFactor ?: 1f,
+                        )
+                    }
+                }
+            }
+    }
+}
+
+private val LocalSharedAnimationTicker = staticCompositionLocalOf<SharedAnimationTicker?> { null }
+
+/** Installs the window-level animation ticker, reusing an outer provider when themes are nested. */
+@Composable
+internal fun ProvideSharedAnimationTicker(content: @Composable () -> Unit) {
+    if (LocalSharedAnimationTicker.current != null) {
+        content()
+        return
+    }
+    val ticker = remember { SharedAnimationTicker() }
+    LaunchedEffect(ticker) { ticker.run() }
+    CompositionLocalProvider(LocalSharedAnimationTicker provides ticker, content = content)
+}
+
+@Composable
+private fun sharedAnimationTicker(): SharedAnimationTicker {
+    val ticker = checkNotNull(LocalSharedAnimationTicker.current) {
+        "Animated Cursor primitives must be composed inside CursorTheme"
+    }
+    DisposableEffect(ticker) {
+        ticker.attach()
+        onDispose { ticker.detach() }
+    }
+    return ticker
+}
+
 /**
  * The web sidebar's "working" glyph, reproduced frame for frame from the live app: dots on a 3x3 grid that step
  * through eight arrangements at 175ms per step (a 1.4s loop). Nothing moves, fades or rotates; each step simply
@@ -418,13 +509,10 @@ fun Dot(color: Color, size: Dp = CursorDimens.unreadDot, modifier: Modifier = Mo
  */
 @Composable
 fun RunningGlyph(modifier: Modifier = Modifier, color: Color = CursorTheme.colors.iconSecondary, size: Dp = 16.dp) {
-    val step by produceState(0) {
-        while (true) withInfiniteAnimationFrameMillis {
-            SharedAnimationTickerTestHooks.frame()
-            value = ((it / RUNNING_STEP_MS) % RUNNING_FRAMES.size).toInt()
-        }
-    }
+    val ticker = sharedAnimationTicker()
     Canvas(modifier.size(size)) {
+        val millis = ticker.frame.value.millis
+        val step = if (millis == Long.MIN_VALUE) 0 else ((millis / RUNNING_STEP_MS) % RUNNING_FRAMES.size).toInt()
         val box = this.size.minDimension
         val pitch = box * RUNNING_PITCH
         val radius = box * RUNNING_DOT_RADIUS
@@ -443,16 +531,6 @@ fun RunningGlyph(modifier: Modifier = Modifier, color: Color = CursorTheme.color
 private const val RUNNING_PITCH = 4.7f / 16f
 private const val RUNNING_DOT_RADIUS = 1.3f / 16f
 private const val RUNNING_STEP_MS = 175L
-
-/** Test-only observation point for the number of frame-clock resumptions used by the shared indicators. */
-internal object SharedAnimationTickerTestHooks {
-    @Volatile
-    var onFrame: (() -> Unit)? = null
-
-    fun frame() {
-        onFrame?.invoke()
-    }
-}
 
 /** Lit cells per step, rows top to bottom (`X` = dot), transcribed from the web app's animation. */
 private val RUNNING_FRAMES = listOf(
@@ -494,9 +572,7 @@ fun ShimmerText(
         Text(text, style = style, color = color, maxLines = maxLines, overflow = overflow, modifier = modifier)
         return
     }
-    val phase by produceState(0f) {
-        while (true) withInfiniteAnimationFrameMillis { value = (it % SHIMMER_PERIOD_MS) / SHIMMER_PERIOD_MS.toFloat() }
-    }
+    val ticker = sharedAnimationTicker()
     val restAlpha = if (highlight.alpha > 0f) (color.alpha / highlight.alpha).coerceIn(0f, 1f) else 1f
     val rest = Color.White.copy(alpha = restAlpha)
     val peak = Color.White
@@ -510,6 +586,8 @@ fun ShimmerText(
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
                 drawContent()
+                val millis = ticker.frame.value.millis
+                val phase = if (millis == Long.MIN_VALUE) 0f else (millis % SHIMMER_PERIOD_MS) / SHIMMER_PERIOD_MS.toFloat()
                 // The band is wider than the text and its peak travels from off the left edge to off the right, so
                 // every loop starts and ends with the caption fully at rest and the falloff is soft mid-word.
                 val band = size.width * SHIMMER_BAND
@@ -532,16 +610,37 @@ private const val SHIMMER_BAND = 1.4f
 /** Thin indeterminate ring for in-flight tool calls. */
 @Composable
 fun SpinnerRing(modifier: Modifier = Modifier, color: Color = CursorTheme.colors.iconTertiary, size: Dp = 11.dp, strokeWidth: Dp = 1.5.dp) {
-    val transition = rememberInfiniteTransition(label = "spinner")
-    val angle by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "spin")
+    val ticker = sharedAnimationTicker()
+    val phase = remember { SpinnerPhase() }
     Box(
         modifier.size(size).drawBehind {
+            val frame = ticker.frame.value
+            val angle = phase.angle(frame)
             val stroke = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Round)
             drawArc(color.copy(alpha = 0.25f), 0f, 360f, false, style = stroke)
             drawArc(color, angle, 90f, false, style = stroke)
         },
     )
 }
+
+/** Per-ring origin preserves the old transition's start-relative phase while its frame source is shared. */
+private class SpinnerPhase {
+    private var startedAt = Long.MIN_VALUE
+    private var durationScale = 1f
+
+    fun angle(frame: SharedAnimationFrame): Float {
+        if (frame.millis == Long.MIN_VALUE) return 0f
+        if (startedAt == Long.MIN_VALUE || durationScale != frame.durationScale) {
+            startedAt = frame.millis
+            durationScale = frame.durationScale
+        }
+        if (durationScale == 0f) return 0f
+        val playTime = (frame.millis - startedAt) / durationScale
+        return (playTime % SPINNER_PERIOD_MS) / SPINNER_PERIOD_MS * 360f
+    }
+}
+
+private const val SPINNER_PERIOD_MS = 900f
 
 /** [SpinnerRing]'s determinate twin: the arc fills clockwise from the top with [progress] (0..1), for an upload under way. */
 @Composable

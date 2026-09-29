@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
@@ -102,12 +103,15 @@ class SharedAnimationTickerBenchmarkTest {
         SharedAnimationTickerTestHooks.onFrame = { callbacks.incrementAndGet() }
         RecomposeCounter.install()
         compose.mainClock.autoAdvance = false
+        val shown = mutableStateOf(true)
         compose.setContent {
             CursorTheme(mode = ThemeMode.Dark) {
-                LazyColumn(Modifier.fillMaxSize().testTag(LIST)) {
-                    items((0 until ROWS).toList(), key = { it }) {
-                        Box(Modifier.height(ROW_HEIGHT)) {
-                            RunningGlyph()
+                if (shown.value) {
+                    LazyColumn(Modifier.fillMaxSize().testTag(LIST)) {
+                        items((0 until ROWS).toList(), key = { it }) {
+                            Box(Modifier.height(ROW_HEIGHT)) {
+                                RunningGlyph()
+                            }
                         }
                     }
                 }
@@ -129,10 +133,15 @@ class SharedAnimationTickerBenchmarkTest {
             advanceEventTime(200)
             up()
         }
+        shown.value = false
+        compose.waitForIdle()
+        val detached = measure(10)
 
-        println("SCALE glyphs rows=$ROWS idle {$idle} scrolling {$scrolling}")
+        println("SCALE glyphs rows=$ROWS idle {$idle} scrolling {$scrolling} detached {$detached}")
         assertWithMessage("idle $idle").that(idle.scopes).isEqualTo(0)
         assertWithMessage("idle $idle").that(idle.callbacks).isAtMost(IDLE_FRAMES + 1)
+        assertWithMessage("scrolling $scrolling").that(scrolling.callbacks).isAtMost(SCROLL_FRAMES * 3)
+        assertWithMessage("detached $detached").that(detached.callbacks).isEqualTo(0)
     }
 
     private companion object {
