@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
@@ -56,10 +57,30 @@ fun CursorTheme(
     paintWindow: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    // Recomposed by every configuration change (isSystemInDarkTheme reads the configuration), a window resize among
+    // them. M3's ColorScheme has no equals and its local is static: a new one, even of the same colours, would turn
+    // off skipping for the whole app under it. So everything handed down is kept while its inputs are.
     val colors = cursorColorsFor(mode, oledBlack, isSystemInDarkTheme())
     val dark = colors.isDark
-    val typography = CursorTypography()
-    val shapes = CursorShapes()
+    val typography = remember { CursorTypography() }
+    val shapes = remember { CursorShapes() }
+    val materialScheme = remember(colors) { colors.toMaterialScheme() }
+    val materialTypography = remember(typography) {
+        Typography(
+            bodyLarge = typography.row,
+            bodyMedium = typography.base,
+            bodySmall = typography.small,
+            titleLarge = typography.pageTitle,
+            titleMedium = typography.title,
+            titleSmall = typography.baseMedium,
+            labelLarge = typography.baseMedium,
+            labelMedium = typography.small,
+            labelSmall = typography.tiny,
+        )
+    }
+    val materialShapes = remember(shapes) {
+        Shapes(extraSmall = shapes.sm, small = shapes.base, medium = shapes.lg, large = shapes.xl, extraLarge = shapes.sheet)
+    }
 
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -81,27 +102,7 @@ fun CursorTheme(
         LocalCursorTypography provides typography,
         LocalCursorShapes provides shapes,
     ) {
-        MaterialTheme(
-            colorScheme = colors.toMaterialScheme(),
-            typography = Typography(
-                bodyLarge = typography.row,
-                bodyMedium = typography.base,
-                bodySmall = typography.small,
-                titleLarge = typography.pageTitle,
-                titleMedium = typography.title,
-                titleSmall = typography.baseMedium,
-                labelLarge = typography.baseMedium,
-                labelMedium = typography.small,
-                labelSmall = typography.tiny,
-            ),
-            shapes = Shapes(
-                extraSmall = shapes.sm,
-                small = shapes.base,
-                medium = shapes.lg,
-                large = shapes.xl,
-                extraLarge = shapes.sheet,
-            ),
-        ) {
+        MaterialTheme(colorScheme = materialScheme, typography = materialTypography, shapes = materialShapes) {
             ProvideHaptics(content = content)
         }
     }
