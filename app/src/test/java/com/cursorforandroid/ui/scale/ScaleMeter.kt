@@ -321,7 +321,6 @@ class ScaleMeter(private val compose: ComposeTestRule) {
             return result to top
         } finally {
             RecomposeCounter.uninstall()
-            RecomposeCounter.reset()
         }
     }
 }
