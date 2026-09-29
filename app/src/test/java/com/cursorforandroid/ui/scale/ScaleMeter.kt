@@ -8,7 +8,7 @@ import androidx.compose.runtime.tooling.CompositionObserver
 import androidx.compose.runtime.tooling.RecomposeScopeObserver
 import androidx.compose.runtime.tooling.observe
 import androidx.compose.ui.test.junit4.ComposeTestRule
-import com.cursorforandroid.audit.RecomposeCounter
+import com.cursorforandroid.util.RecomposeCounter
 import org.robolectric.Shadows.shadowOf
 import java.time.Duration
 import java.util.Collections
@@ -320,8 +320,7 @@ class ScaleMeter(private val compose: ComposeTestRule) {
             val top = RecomposeCounter.snapshot().entries.sortedByDescending { it.value }.take(n).map { it.key.removePrefix("ui.").replace(' ', '_') to it.value }
             return result to top
         } finally {
-            RecomposeCounter.on = false
-            RecomposeCounter.reset()
+            RecomposeCounter.uninstall()
         }
     }
 }
