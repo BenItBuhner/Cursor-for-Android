@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -149,7 +150,7 @@ class SessionManager(
     suspend fun restore() {
         // A sign-out that could not prove the key was gone left a tombstone behind. The key stays withheld while it
         // stands, and the removal and the preference cleanup it could not finish are retried now.
-        if (withContext(Dispatchers.IO) { keyStore.signOutPending() }) {
+        if (readKeyStore { signOutPending() }) {
             finishPendingSignOut()
             return
         }
@@ -159,7 +160,7 @@ class SessionManager(
             return
         }
         // The encrypted key store initialises the Android Keystore on first access; never on the main thread.
-        val key = withContext(Dispatchers.IO) { keyStore.apiKey() }
+        val key = readKeyStore { apiKey() }
         if (key.isNullOrBlank()) {
             // No key and not the demo: no account owns the settings a sign-out clears, so a clear that could not be
             // written last time is tried again here rather than being inherited by whoever signs in next.
@@ -375,6 +376,14 @@ class SessionManager(
 
     /** The encrypted store opens the Android Keystore on first use, which is disk and IPC work, so keep it off Main. */
     private suspend fun storeKey(key: String?) = withContext(Dispatchers.IO) { keyStore.setApiKey(key) }
+
+    /**
+     * A read of the encrypted store, off Main like [storeKey], but in the session's own [scope] and awaited rather than
+     * run in the caller's context. Opening the Keystore cannot be interrupted, so a caller cancelled meanwhile — the
+     * restore of an activity that is torn down while it is still loading — is let go at once instead of being held
+     * until the Keystore answers and only then resumed on a UI dispatcher that nothing drives any more.
+     */
+    private suspend fun <T> readKeyStore(read: SecureKeyStore.() -> T): T = scope.async(Dispatchers.IO) { keyStore.read() }.await()
 
     private fun demoUser() = CursorUser(
         apiKeyName = "Demo",
