@@ -327,7 +327,8 @@ class ConversationViewModelTest {
 
         runBlocking { withTimeout(5_000) { vm.draftText.first { it == "First thought" } } }
         assertThat(graph.followUps.state(RUNNING).value.queue.map { it.text }).containsExactly("Second thought")
-        assertThat(runBlocking { withTimeout(5_000) { vm.toastMessage.first { it != null } } }).isEqualTo("Your draft was queued in its place.")
+        // The queue shows the draft in its place; nothing more is said.
+        assertThat(vm.toastMessage.value).isNull()
     }
 
     @Test
