@@ -59,8 +59,8 @@ fun CursorRoot(
             is SessionState.SignedIn -> when {
                 !s.isDemo && modeChoicePending == true -> ModeChoiceScreen(graph = graph)
                 !s.isDemo && modeChoicePending == null -> Unit
-                // The loader is provided here rather than around the whole tree because building it is what first
-                // pulls Coil and its HTTP client in, and nothing before this point draws an image.
+                // The loader is provided here rather than around the whole tree because nothing before this point
+                // draws an image; Coil and its HTTP client are built by the first image, not by providing it.
                 else -> CompositionLocalProvider(LocalMediaLoader provides graph.media) {
                     // Over every screen and pane, so a sent message can travel from one composer into a bubble on
                     // another screen (see SendMotion).
