@@ -23,6 +23,7 @@ import com.cursorforandroid.ui.agents.SidebarTags
 import com.cursorforandroid.ui.navigation.AppShell
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
+import com.cursorforandroid.util.RecomposeCounter
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -57,8 +58,7 @@ class DrawerRecompositionTest {
 
     @After
     fun tearDown() {
-        RecomposeCounter.on = false
-        RecomposeCounter.reset()
+        RecomposeCounter.uninstall()
     }
 
     private fun launch() {

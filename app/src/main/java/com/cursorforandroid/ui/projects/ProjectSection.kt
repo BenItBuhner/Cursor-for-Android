@@ -36,6 +36,7 @@ import com.cursorforandroid.data.repo.ProjectViewState
 import com.cursorforandroid.domain.Agent
 import com.cursorforandroid.domain.AgentIndicator
 import com.cursorforandroid.domain.AgentListOrganizer
+import com.cursorforandroid.domain.AgentRow
 import com.cursorforandroid.domain.ContextEntry
 import com.cursorforandroid.domain.FileFormat
 import com.cursorforandroid.domain.LocalAgentState
@@ -83,9 +84,10 @@ internal fun LazyListScope.projectSection(
     actions: ProjectActions,
     nowMillis: Long,
     clock: State<Long>? = null,
+    rows: ProjectRows = ProjectRows.of(state, local, nowMillis),
 ) {
     sectionRow("project-summary") {
-        ProjectSummary(state, nowMillis, clock, onEditAppearance = if (state.actionsAvailable) actions.onEditAppearance else null, enabled = !busy)
+        ProjectSummary(state, rows.running, rows.needsInput, nowMillis, clock, onEditAppearance = if (state.actionsAvailable) actions.onEditAppearance else null, enabled = !busy)
     }
 
     sectionRow("project-primaries-label") {
@@ -99,8 +101,8 @@ internal fun LazyListScope.projectSection(
             )
         }
     }
-    sectionRows(state.workers.distinctBy { it.agent.id }, key = { "project-primary-${it.agent.id}" }, contentType = { "project-primary" }) { worker ->
-        WorkerRow(worker, local, nowMillis, clock, actionsAvailable = state.actionsAvailable, busy = busy, actions = actions)
+    sectionRows(rows.workers, key = { "project-primary-${it.worker.agent.id}" }, contentType = { "project-primary" }) { line ->
+        WorkerRow(line.worker, line.row, nowMillis, clock, actionsAvailable = state.actionsAvailable, busy = busy, actions = actions)
     }
     state.lineageNotice?.let { notice -> sectionRow("project-lineage-notice") { NoticeRow(notice) } }
     if (state.actionsAvailable) {
@@ -151,12 +153,10 @@ internal class ProjectActions(
  * last moved — and, in Extended mode, the pencil that opens the Project editor (name, icon and colour).
  */
 @Composable
-private fun ProjectSummary(state: ProjectViewState, nowMillis: Long, clock: State<Long>?, onEditAppearance: (() -> Unit)?, enabled: Boolean) {
+private fun ProjectSummary(state: ProjectViewState, running: Int, needsInput: Int, nowMillis: Long, clock: State<Long>?, onEditAppearance: (() -> Unit)?, enabled: Boolean) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
     val root = state.root
-    val running = state.workers.count { it.agent.isRunning } + (if (root?.isRunning == true) 1 else 0)
-    val needsInput = state.workers.count { it.agent.hasPendingInteraction }
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(32.dp).background(colors.projectTone(root?.projectAppearance?.colorId).copy(alpha = 0.14f), CircleShape), contentAlignment = Alignment.Center) {
             Icon(CursorIcons.project(root?.projectAppearance?.icon), "Project", tint = colors.projectTone(root?.projectAppearance?.colorId), modifier = Modifier.size(17.dp))
@@ -231,7 +231,7 @@ private fun SectionLabel(text: String, syncing: Boolean = false) {
 @Composable
 internal fun WorkerRow(
     worker: ProjectWorker,
-    local: LocalAgentState,
+    row: AgentRow,
     nowMillis: Long,
     clock: State<Long>?,
     actionsAvailable: Boolean,
@@ -241,7 +241,6 @@ internal fun WorkerRow(
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
     val agent = worker.agent
-    val row = remember(agent, local, nowMillis) { AgentListOrganizer.toRow(agent, local, nowMillis) }
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var menuAt by remember { mutableStateOf<IntOffset?>(null) }
     // Pause and Stop ask first while Settings › Confirm before stopping is on; the question goes with the run.
