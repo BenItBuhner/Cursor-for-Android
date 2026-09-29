@@ -143,18 +143,26 @@ class LiveNotificationService : Service() {
             }
         }
         monitor.start()
+        val pacer = LivePostPacer(watching) { state -> post(LiveNotificationRenderer.LIVE_ID, LiveNotificationRenderer.live(this, state)) }
         watching.launch {
             combine(monitor.state, graph.prefs.liveNotifications, graph.prefs.localAgentState) { state, enabled, local ->
                 Triple(audible(state, local.quietIds(AppClock.now())), enabled, local)
             }
                 .collect { (state, enabled, _) ->
                     when {
-                        !enabled -> shutdown(keepWatching = false)
-                        state.running.isEmpty() -> scheduleIdleShutdown(state)
+                        !enabled -> {
+                            pacer.cancel()
+                            shutdown(keepWatching = false)
+                        }
+                        state.running.isEmpty() -> {
+                            // The notification stays up through the idle grace: with the last state it had, not one a period old.
+                            pacer.flush()
+                            scheduleIdleShutdown(state)
+                        }
                         else -> {
                             idleJob?.cancel()
                             idleJob = null
-                            post(LiveNotificationRenderer.LIVE_ID, LiveNotificationRenderer.live(this@LiveNotificationService, state))
+                            pacer.offer(state)
                         }
                     }
                 }
