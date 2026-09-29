@@ -69,6 +69,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -184,7 +185,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     /** Decoded previews of the images the queue cards and a restored draft show, by [DraftImage.id]. */
     private val thumbnails = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
 
-    val agent: StateFlow<Agent?> = graph.agents.state.map { s -> s.agents.firstOrNull { it.id == agentId } }
+    val agent: StateFlow<Agent?> = graph.agents.row(agentId).flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), graph.agents.agent(agentId))
 
     val conversation: StateFlow<ConversationState> = graph.conversations.state(agentId)
