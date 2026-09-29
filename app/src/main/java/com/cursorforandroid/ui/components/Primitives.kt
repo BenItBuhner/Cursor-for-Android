@@ -419,7 +419,10 @@ fun Dot(color: Color, size: Dp = CursorDimens.unreadDot, modifier: Modifier = Mo
 @Composable
 fun RunningGlyph(modifier: Modifier = Modifier, color: Color = CursorTheme.colors.iconSecondary, size: Dp = 16.dp) {
     val step by produceState(0) {
-        while (true) withInfiniteAnimationFrameMillis { value = ((it / RUNNING_STEP_MS) % RUNNING_FRAMES.size).toInt() }
+        while (true) withInfiniteAnimationFrameMillis {
+            SharedAnimationTickerTestHooks.frame()
+            value = ((it / RUNNING_STEP_MS) % RUNNING_FRAMES.size).toInt()
+        }
     }
     Canvas(modifier.size(size)) {
         val box = this.size.minDimension
@@ -440,6 +443,16 @@ fun RunningGlyph(modifier: Modifier = Modifier, color: Color = CursorTheme.color
 private const val RUNNING_PITCH = 4.7f / 16f
 private const val RUNNING_DOT_RADIUS = 1.3f / 16f
 private const val RUNNING_STEP_MS = 175L
+
+/** Test-only observation point for the number of frame-clock resumptions used by the shared indicators. */
+internal object SharedAnimationTickerTestHooks {
+    @Volatile
+    var onFrame: (() -> Unit)? = null
+
+    fun frame() {
+        onFrame?.invoke()
+    }
+}
 
 /** Lit cells per step, rows top to bottom (`X` = dot), transcribed from the web app's animation. */
 private val RUNNING_FRAMES = listOf(
