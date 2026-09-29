@@ -212,9 +212,9 @@ fun QueueStack(
             }
             for (id in leaving) {
                 key(id) {
-                    val exit = exits.leaving[id] ?: return@key
+                    val exit = exits.leaving[id]
                     LaunchedEffect(exit) {
-                        exit.progress.animateTo(1f, tween(QueueExitMillis, easing = FastOutSlowInEasing))
+                        exit?.progress?.animateTo(1f, tween(QueueExitMillis, easing = FastOutSlowInEasing))
                         exits.leaving.remove(id)
                         exits.tick++
                     }

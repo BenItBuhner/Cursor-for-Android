@@ -54,6 +54,13 @@ class SteerInQueueTest {
         }
     }
 
+    /** The clock is stopped (a ring never idles): what was just set is taken up, then [millis] of it run. */
+    private fun advance(millis: Long) {
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(millis)
+        compose.waitForIdle()
+    }
+
     private fun stackHeight(): Float = compose.onNodeWithTag(QueueStackTag).fetchSemanticsNode().boundsInRoot.height
 
     @Test
@@ -61,7 +68,7 @@ class SteerInQueueTest {
         queue = listOf(waiting.copy(isSending = true, steer = SteerPhase.STEERING))
         stack()
         compose.mainClock.autoAdvance = false
-        compose.mainClock.advanceTimeBy(500)
+        advance(500)
         compose.onNodeWithText(QueueCardWords.STEERING).assertExists()
         compose.onNodeWithContentDescription("Steering").assertExists()
         compose.onAllNodesWithContentDescription(QueueGlyphs.STEER).assertCountEquals(0)
@@ -69,7 +76,7 @@ class SteerInQueueTest {
         compose.onNodeWithContentDescription("Queued follow-up 1 of 1, steering into this turn").assertExists()
 
         queue = listOf(waiting.copy(isSending = true, steer = SteerPhase.STEERED, steerFollowupId = "fu-1"))
-        compose.mainClock.advanceTimeBy(500)
+        advance(500)
         compose.onNodeWithText(QueueCardWords.STEERED).assertExists()
         compose.onNodeWithContentDescription("Steered").assertExists()
         compose.onAllNodesWithContentDescription(QueueGlyphs.STEER).assertCountEquals(0)
@@ -90,10 +97,11 @@ class SteerInQueueTest {
         queue = listOf(waiting.copy(isSending = true, steer = SteerPhase.STEERED, steerFollowupId = "fu-1"), next)
         stack()
         compose.mainClock.autoAdvance = false
-        compose.mainClock.advanceTimeBy(1_000)
+        advance(1_000)
         val two = stackHeight()
 
         queue = listOf(next)
+        compose.waitForIdle()
         compose.mainClock.advanceTimeByFrame()
         val heights = mutableListOf(stackHeight())
         repeat(((QueueExitMillis + 200) / 16)) {

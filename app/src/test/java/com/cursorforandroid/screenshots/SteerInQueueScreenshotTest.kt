@@ -90,6 +90,7 @@ class SteerInQueueScreenshotTest {
 
     /** The clock is stopped (a ring never idles): [millis] of it run, then the frame composed. */
     private fun advance(millis: Long) {
+        compose.waitForIdle()
         compose.mainClock.advanceTimeBy(millis)
         compose.waitForIdle()
     }
