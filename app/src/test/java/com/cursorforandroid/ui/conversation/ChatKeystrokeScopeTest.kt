@@ -4,18 +4,12 @@ import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
-import androidx.compose.runtime.Composer
-import androidx.compose.runtime.Composition
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ExperimentalComposeRuntimeApi
-import androidx.compose.runtime.RecomposeScope
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.tooling.CompositionData
-import androidx.compose.runtime.tooling.CompositionGroup
-import androidx.compose.runtime.tooling.CompositionObserver
-import androidx.compose.runtime.tooling.RecomposeScopeObserver
 import androidx.compose.runtime.tooling.observe
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
@@ -40,6 +34,8 @@ import com.cursorforandroid.ui.components.SendMotionHost
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.cursorforandroid.util.AppClock
+import com.cursorforandroid.util.RecomposeScopes
+import com.cursorforandroid.util.threadAllocatedBytes
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
@@ -53,8 +49,6 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.time.Instant
-import java.util.Collections
-import java.util.IdentityHashMap
 
 /**
  * A keystroke in the follow-up composer recomposes the composer and nothing else on the chat screen: not the screen's
@@ -75,7 +69,7 @@ class ChatKeystrokeScopeTest {
     private val streamer = FakeRunStreamer()
     private val now = Instant.parse("2026-09-25T12:00:00Z").toEpochMilli()
     private val agentId = "bc-keystroke-scope"
-    private val rec = Recompositions()
+    private val rec = RecomposeScopes()
     private var data: CompositionData? = null
 
     @Before fun setUp() { AppClock.nowMillis = { now } }
@@ -170,15 +164,15 @@ class ChatKeystrokeScopeTest {
         val rows0 = rowsComposed()
         var allocated = 0L
         repeat(keystrokes) { i ->
-            val before = allocatedBytes()
+            val before = threadAllocatedBytes()
             field.performTextInput(if (i % 6 == 5) " " else "a")
             compose.waitForIdle()
-            allocated += allocatedBytes() - before
+            allocated += threadAllocatedBytes() - before
         }
         val measured = Measured(rec.scopes / keystrokes.toDouble(), HashMap(rec.byName), rowsComposed() - rows0)
         println(
             "keystroke [$label] scopes/keystroke=${"%.1f".format(measured.scopesPerKeystroke)} alloc/keystroke=${allocated / keystrokes / 1024}KB " +
-                "rowsComposed=${measured.rowsComposed}\n" + measured.byName.entries.sortedByDescending { it.value }.joinToString("\n") { "  ${it.value}x ${it.key}" },
+                "rowsComposed=${measured.rowsComposed}\n" + rec.top(),
         )
         return measured
     }
@@ -191,64 +185,4 @@ class ChatKeystrokeScopeTest {
     }
 
     private fun rowsComposed(): Int = TranscriptPerf.sessionOrNull(agentId)?.snapshot()?.rowCompositions ?: 0
-
-    private fun allocatedBytes(): Long = runCatching {
-        val bean = Class.forName("java.lang.management.ManagementFactory").getMethod("getThreadMXBean").invoke(null)
-        Class.forName("com.sun.management.ThreadMXBean").getMethod("getCurrentThreadAllocatedBytes").invoke(bean) as Long
-    }.getOrDefault(0L)
-
-    /** Scopes recomposed, named by the class of the lambda each one restarts (the composable or content lambda it belongs to). */
-    private class Recompositions : CompositionObserver, RecomposeScopeObserver {
-        var scopes = 0
-        val byName = HashMap<String, Int>()
-        private val observed = Collections.newSetFromMap(IdentityHashMap<RecomposeScope, Boolean>())
-
-        override fun onBeginComposition(composition: Composition, invalidationMap: Map<RecomposeScope, Set<Any>?>) {
-            for (scope in invalidationMap.keys) if (observed.add(scope)) scope.observe(this)
-        }
-        override fun onEndComposition(composition: Composition) = Unit
-        override fun onBeginScopeComposition(scope: RecomposeScope) {
-            scopes++
-            val name = nameOf(scope)
-            byName[name] = (byName[name] ?: 0) + 1
-        }
-        override fun onEndScopeComposition(scope: RecomposeScope) = Unit
-        override fun onScopeDisposed(scope: RecomposeScope) { observed.remove(scope) }
-
-        /** Observes every scope in [data]'s groups, not only the invalidated ones, so children recomposed by a changed parameter count too. */
-        fun observeAll(data: CompositionData) {
-            fun walk(g: CompositionGroup) {
-                for (d in g.data) {
-                    if (d is RecomposeScope && observed.add(d)) d.observe(this)
-                    subcompositions(d).forEach { sub -> sub.compositionGroups.forEach(::walk) }
-                }
-                for (c in g.compositionGroups) walk(c)
-            }
-            for (g in data.compositionGroups) walk(g)
-        }
-
-        fun reset() { scopes = 0; byName.clear() }
-
-        /** The slot tables of subcompositions (BoxWithConstraints, LazyColumn items…) hanging off a remembered context. */
-        private fun subcompositions(d: Any?): List<CompositionData> = runCatching {
-            var x: Any? = d ?: return emptyList()
-            if (x!!.javaClass.name.endsWith("RememberObserverHolder")) x = x.javaClass.getDeclaredField("wrapped").apply { isAccessible = true }.get(x)
-            if (x == null || !x.javaClass.name.endsWith("CompositionContextHolder")) return emptyList()
-            val ref = x.javaClass.getDeclaredField("ref").apply { isAccessible = true }.get(x)
-            val composers = ref.javaClass.getDeclaredField("composers").apply { isAccessible = true }.get(ref) as Collection<*>
-            composers.mapNotNull { (it as? Composer)?.compositionData }
-        }.getOrDefault(emptyList())
-
-        private fun nameOf(scope: RecomposeScope): String = runCatching {
-            val f = scope.javaClass.getDeclaredField("block").apply { isAccessible = true }
-            var b: Any? = f.get(scope)
-            if (b != null && b.javaClass.name.startsWith("androidx.compose.runtime.internal.ComposableLambdaImpl")) {
-                val outer = if (b.javaClass.name.endsWith("\$invoke\$1")) b.javaClass.declaredFields.firstOrNull { it.type.name.contains("ComposableLambdaImpl") }?.apply { isAccessible = true }?.get(b) else b
-                b = outer?.javaClass?.getDeclaredField("_block")?.apply { isAccessible = true }?.get(outer) ?: b
-            }
-            val c = b?.javaClass ?: return@runCatching "?"
-            // Hidden lambda classes carry no source name; what they capture says which lambda they are.
-            if (c.name.contains("\$\$Lambda")) c.name.substringBefore("\$\$Lambda") + "{" + c.declaredFields.joinToString(",") { it.type.simpleName } + "}" else c.name
-        }.getOrDefault("?")
-    }
 }
