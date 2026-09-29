@@ -267,7 +267,7 @@ class AgentsViewModel(
 
     private val localState: Flow<LocalAgentState> = combine(graph.prefs.localAgentState, graph.pullRequests.states) { local, states ->
         local.copy(pullRequests = states)
-    }
+    }.distinctUntilChanged()
 
     /** The three smallest device facts, bundled so the device combine stays within its arity. */
     private val countsAndFolds: Flow<Triple<Map<String, Int>, Set<String>, Boolean>> =
