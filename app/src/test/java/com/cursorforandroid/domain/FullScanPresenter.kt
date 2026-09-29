@@ -4,7 +4,8 @@ package com.cursorforandroid.domain
  * The oracle for [IncrementalLeftOutTest]: what the transcript left out as said again, and the presenter that read
  * it, as they were before the scan was made resumable — the scan over the whole transcript on every presentation.
  * Kept verbatim (the presenter's class renamed, and reading [LegacyLeftOut]) so the incremental reading is held to
- * the rows, items and reuse the full scan gave, turn for turn.
+ * the rows, items and reuse the full scan gave, turn for turn — save the fix both scans share: a message key a replay
+ * shares with a call of the run's own is not a replay's (see `ReplayedActivityDuplicateKeyTest`).
  */
 
 /** [CoordinatorTranscript]'s `repeatedMessages`, `replayedActivity` and `leftOut` as they read before the scan was resumable. */
@@ -62,14 +63,16 @@ internal object LegacyLeftOut {
             val runName = (run.lastOrNull() as? RunFooter)?.let { "run:${it.runId}" } ?: "run#$runNo"
             var own = false
             val replayed = HashSet<String>()
+            val ownKeys = HashSet<String>()
             for (item in run) {
                 if (item !is ActivityGroup) continue
                 for (step in item.steps) {
                     if (step !is ToolCall || step.callId.isBlank()) continue
                     val key = callKey(step)
-                    if (seenCalls.containsKey(key)) replayed += CoordinatorTranscript.messageKey(item, step) else own = true
+                    if (seenCalls.containsKey(key)) replayed += CoordinatorTranscript.messageKey(item, step) else { own = true; ownKeys += CoordinatorTranscript.messageKey(item, step) }
                 }
             }
+            replayed.removeAll(ownKeys)
             for (item in run) {
                 when (item) {
                     is ActivityGroup -> {

@@ -443,12 +443,11 @@ internal class DemoCursorApi(private val store: DemoStore) : CursorApi {
             latestRunId = runId,
             repos = body.repos ?: emptyList(),
             workOnCurrentBranch = body.workOnCurrentBranch ?: false,
-            autoCreatePR = body.autoCreatePR,
         )
         val run = RunDto(id = runId, agentId = id, status = "CREATING", createdAt = nowIso, updatedAt = nowIso)
         store.addAgent(
             agent = agent,
-            legacy = V0AgentDto(id, agent.name, "CREATING", repo?.let { V0SourceDto(it.url, it.startingRef) }, V0TargetDto(url = agent.url, autoCreatePr = body.autoCreatePR), null, nowIso),
+            legacy = V0AgentDto(id, agent.name, "CREATING", repo?.let { V0SourceDto(it.url, it.startingRef) }, V0TargetDto(url = agent.url), null, nowIso),
             run = run,
             firstMessage = body.prompt.text,
             script = scriptFor(body.prompt.text, body.mode),
