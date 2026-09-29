@@ -33,6 +33,19 @@ class SharedAnimationTickerFrameTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
+    fun `standalone spinner keeps its local ticker fallback`() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            SpinnerRing(size = 32.dp)
+        }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
+
+        assertThat(compose.activity.window.decorView.isAttachedToWindow).isTrue()
+    }
+
+    @Test
     fun `all eight fixed-clock glyph frames render to a strip`() {
         compose.mainClock.autoAdvance = false
         compose.setContent {

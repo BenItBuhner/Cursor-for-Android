@@ -501,8 +501,12 @@ internal fun ProvideSharedAnimationTicker(content: @Composable () -> Unit) {
 
 @Composable
 private fun sharedAnimationTicker(spinnerPhase: SpinnerPhase? = null): SharedAnimationTicker {
-    val ticker = checkNotNull(LocalSharedAnimationTicker.current) {
-        "Animated Cursor primitives must be composed inside CursorTheme"
+    val providedTicker = LocalSharedAnimationTicker.current
+    val ticker = providedTicker ?: remember { SharedAnimationTicker() }
+    if (providedTicker == null) {
+        // Animated primitives have historically been safe to compose on their own (including in focused UI tests).
+        // Production roots install one shared ticker through CursorTheme; this fallback preserves standalone use.
+        LaunchedEffect(ticker) { ticker.run() }
     }
     DisposableEffect(ticker, spinnerPhase) {
         ticker.attach(spinnerPhase)
