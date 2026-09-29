@@ -13,6 +13,7 @@ import org.robolectric.Shadows.shadowOf
 import java.time.Duration
 import java.util.Collections
 import java.util.IdentityHashMap
+import java.util.concurrent.locks.LockSupport
 
 /**
  * What the UI scale benchmarks measure, frame by frame, with the clock held: each frame's wall time and the main
@@ -20,6 +21,10 @@ import java.util.IdentityHashMap
  * every scope it invalidates), and around a phase the JVM's collections and the heap left after one. Robolectric
  * composes, measures and lays out on the JVM and draws nothing on a GPU: the times are this machine's main-thread
  * costs, not a phone's frame times; the counts (frames, scopes, composables, requests) do not depend on the machine.
+ *
+ * `SCALE_PROFILE=1` in the environment also samples the main thread's stack every half millisecond during the frames
+ * and names the app's lines it was in: `hotAt` over every frame of a phase, `slowAt` over its frames past 16.7 ms.
+ * The sampling costs the frames a little, so it is off unless asked for.
  */
 @OptIn(ExperimentalComposeRuntimeApi::class)
 class ScaleMeter(private val compose: ComposeTestRule) {
@@ -37,6 +42,66 @@ class ScaleMeter(private val compose: ComposeTestRule) {
     }
 
     val recompositions = Recompositions()
+
+    /**
+     * Samples [target]'s stack while [sink] is set: each sample is the innermost app line on it (outside this
+     * harness), or failing one the innermost frame. One thread for the whole run, pointed at each meter's main thread.
+     */
+    object Sampler {
+        val enabled: Boolean = System.getenv("SCALE_PROFILE")?.let { it == "1" || it.equals("true", ignoreCase = true) } == true
+        private const val INTERVAL_NANOS = 500_000L
+        @Volatile var target: Thread? = null
+        @Volatile var sink: HashMap<String, Int>? = null
+
+        private val worker by lazy {
+            Thread({
+                while (true) {
+                    val into = sink
+                    val on = target
+                    if (into != null && on != null) {
+                        val key = key(on.stackTrace)
+                        synchronized(into) { into.merge(key, 1, Int::plus) }
+                    }
+                    LockSupport.parkNanos(INTERVAL_NANOS)
+                }
+            }, "scale-sampler").apply { isDaemon = true; start() }
+        }
+
+        fun watch(thread: Thread) {
+            target = thread
+            worker
+        }
+
+        /** The innermost app line, then where under it the thread was: `OpenStretches.kt:167(holdingHeight)>text`. */
+        private fun key(stack: Array<StackTraceElement>): String {
+            val app = stack.firstOrNull { it.className.startsWith("com.cursorforandroid.") && !it.className.startsWith("com.cursorforandroid.ui.scale.") && !it.className.startsWith("com.cursorforandroid.fixtures.") }
+            val line = app?.let { "${it.fileName}:${it.lineNumber}(${it.methodName.substringBefore('$')})" } ?: "-"
+            return "$line>${area(stack)}"
+        }
+
+        /** The kind of work the innermost frames are: the app's own, text layout, a lazy list's measure, Robolectric's shadows… */
+        private fun area(stack: Array<StackTraceElement>): String {
+            for (frame in stack.take(40)) {
+                val c = frame.className
+                when {
+                    c.startsWith("java.lang.invoke.") || c.startsWith("jdk.internal.") || c.startsWith("java.lang.reflect.") -> continue
+                    c.startsWith("org.robolectric.") -> return "robolectric"
+                    c.startsWith("android.text.") || c.startsWith("android.graphics.text.") || c.startsWith("androidx.compose.ui.text.") || c.startsWith("androidx.compose.foundation.text.") -> return "text"
+                    c.startsWith("android.graphics.") || c.startsWith("androidx.compose.ui.graphics.") -> return "graphics"
+                    c.startsWith("androidx.compose.foundation.lazy.") -> return "lazy"
+                    c.startsWith("androidx.compose.runtime.") -> return "runtime"
+                    c.startsWith("androidx.compose.ui.node.") || c.startsWith("androidx.compose.ui.layout.") -> return "layout"
+                    c.startsWith("androidx.compose.ui.semantics.") || c.startsWith("androidx.compose.ui.platform.") -> return "semantics"
+                    c.startsWith("com.cursorforandroid.") -> return "app"
+                    c.startsWith("kotlin.") || c.startsWith("kotlinx.") || c.startsWith("java.") -> return "stdlib"
+                    else -> return c.split('.').take(3).joinToString(".")
+                }
+            }
+            return "?"
+        }
+    }
+
+    private val sampling = Sampler.enabled.also { if (it) Sampler.watch(Thread.currentThread()) }
 
     /** The JVM's management beans through reflection: the tests compile against the Android SDK and run on a JVM. */
     object Jvm {
@@ -117,6 +182,9 @@ class ScaleMeter(private val compose: ComposeTestRule) {
         var top: List<Pair<String, Int>> = emptyList()
         /** CPU nanoseconds and allocated bytes over the phase, by thread pool (see [Jvm.threads]). */
         val pools = HashMap<String, LongArray>()
+        /** With [Sampler.enabled]: the main thread's samples by app line, over every frame and over the frames past 16.7 ms. */
+        val hotAt = HashMap<String, Int>()
+        val slowAt = HashMap<String, Int>()
 
         /** Seconds the phase covers on the app's clock: sixty frames a second. */
         val simulatedSeconds: Double get() = (frames / 60.0).coerceAtLeast(1.0 / 60)
@@ -146,7 +214,11 @@ class ScaleMeter(private val compose: ComposeTestRule) {
             if (heapBytes > 0) append(" heapMB=${f(heapBytes / 1048576.0)}")
             extra.forEach { (k, v) -> append(" $k=$v") }
             if (top.isNotEmpty()) append(" top=${top.joinToString(",") { "${it.first}:${it.second}" }}")
+            if (hotAt.isNotEmpty()) append(" hotAt=${ranked(hotAt)}")
+            if (slowAt.isNotEmpty()) append(" slowAt=${ranked(slowAt)}")
         }
+
+        private fun ranked(samples: Map<String, Int>) = samples.entries.sortedByDescending { it.value }.take(8).joinToString(",") { "${it.key}=${it.value}" }
 
         companion object {
             fun f(v: Double) = "%.2f".format(v)
@@ -195,10 +267,19 @@ class ScaleMeter(private val compose: ComposeTestRule) {
         val scopes = recompositions.scopes
         val alloc0 = Jvm.allocatedBytes()
         val cpu0 = Jvm.cpuNanos()
+        val samples = if (phase != null && sampling) HashMap<String, Int>().also { Sampler.sink = it } else null
         val t0 = System.nanoTime()
         action()
+        if (samples != null) Sampler.sink = null
         if (phase == null) return
-        phase.wall += (System.nanoTime() - t0) / 1e6
+        val wallMs = (System.nanoTime() - t0) / 1e6
+        phase.wall += wallMs
+        if (samples != null) synchronized(samples) {
+            samples.forEach { (at, n) ->
+                phase.hotAt.merge(at, n, Int::plus)
+                if (wallMs > 16.7) phase.slowAt.merge(at, n, Int::plus)
+            }
+        }
         phase.cpu += (Jvm.cpuNanos() - cpu0) / 1e6
         phase.allocated += Jvm.allocatedBytes() - alloc0
         phase.frameScopes += recompositions.scopes - scopes

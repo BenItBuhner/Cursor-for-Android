@@ -121,7 +121,7 @@ class StreamingCoordinatorScaleBenchmarkTest {
         idle.top = meter.attributed { repeat(ATTRIBUTION_TICKS) { rig.tick(null, also = stream) } }.second
 
         // Older messages a page at a time, then down through them to the live turn and back up, streaming.
-        val transcript = rig.pinned(hasTestTag("transcript"))
+        val transcript = hasTestTag("transcript")
         val older = rig.phase("stream-older")
         rig.loadOlder(older, big.id, transcript, pages = OLDER_PAGES, also = stream)
         meter.end(older)

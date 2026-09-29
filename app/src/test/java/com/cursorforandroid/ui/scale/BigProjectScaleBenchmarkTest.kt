@@ -182,7 +182,7 @@ class BigProjectScaleBenchmarkTest {
         compose.onNode(hasContentDescription("Close panel")).performClick()
         rig.framesUntil(null, maxMillis = 10_000) { !rig.shown(hasTestTag("panel-sections")) }
         meter.settle(null, quiet = 10, max = 240)
-        val transcript = rig.pinned(hasTestTag("transcript"))
+        val transcript = hasTestTag("transcript")
         // The open shows the newest turns; the older ones are a tap on "Older messages" away, a page at a time.
         val older = rig.phase("big-transcript-older")
         rig.loadOlder(older, big.id, transcript, pages = OLDER_PAGES)
