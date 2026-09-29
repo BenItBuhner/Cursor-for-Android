@@ -149,13 +149,30 @@ class AgentListPublishBenchmarkTest {
         check(chats.size == total && chats.count { it.running } == running) { "fleet ${chats.size} / ${chats.count { it.running }}" }
     }
 
+    /** Chats just launched elsewhere: the public list and the account's record by id have them, the account's list not yet. */
+    private val arriving = ArrayList<Chat>()
+    private var arrived = 0
+
     /**
      * What happens on the account between two refreshes: [finishing] running agents end their turn, [starting] idle
-     * ones start a new one, and each moves up the list as its activity does.
+     * ones start a new one, and each moves up the list as its activity does; the chats launched last time reach the
+     * account's list, and [launching] more are launched — one of them a worker of the big Project — which the list
+     * holds back until their records are read by id.
      */
-    private fun churn(seed: Int, finishing: Int = 8, starting: Int = 4) {
+    private fun churn(seed: Int, finishing: Int = 8, starting: Int = 4, launching: Int = 3) {
         val random = Random(seed)
         val at = now + seed * 60_000L
+        chats += arriving
+        arriving.clear()
+        repeat(launching) { i ->
+            val id = "bc-new-${arrived++}"
+            val worker = i == 0
+            val c = Chat(id, at, running = true, manager = if (worker) "bc-project-0" else null)
+            arriving += c
+            byId[id] = c
+            if (worker) memberships["bc-project-0"] = memberships.getValue("bc-project-0") + WorkerMembership(id, "bc-project-0", WorkerSpawnKind.CREATED)
+            fake.addRunningAgent(id, id, "run-$id-${runSeq.incrementAndGet()}", createdAt = iso(at))
+        }
         val ending = chats.filter { it.running }.shuffled(random).take(finishing)
         val beginning = chats.filter { !it.running && !it.isProject }.shuffled(random).take(starting)
         ending.forEach { c ->
@@ -319,8 +336,32 @@ class AgentListPublishBenchmarkTest {
         val fingerprint: Int,
     ) {
         override fun toString() =
-            "SCALE refresh fleet=$fleet kind=$kind publishes=$publishes classified=$passes organizer=$organizer projectView=$projectView " +
+            "SCALE refresh fleet=$fleet publishes=$publishes organizer=$organizer projectView=$projectView kind=$kind classified=$passes " +
                 "organizerCpu=${organizerCpuMs}ms processCpu=${processCpuMs}ms calls=$calls final=${Integer.toHexString(fingerprint)}"
+    }
+
+    /**
+     * At most so many publications that changed the list, and classification passes behind them, per refresh of each
+     * kind — the batched passes' numbers with room to spare. Before the batching a Quick refresh took 22 passes, a
+     * Full one 24 to 27 and a Project poll 39, on either fleet: a pass per run record read, per record read by id and
+     * per membership answer, changed or not.
+     */
+    private data class Budget(val publishes: Int, val passes: Int)
+
+    private val budgets = mapOf(
+        "Quick" to Budget(publishes = 6, passes = 8),
+        "Full" to Budget(publishes = 10, passes = 14),
+        "ProjectPoll" to Budget(publishes = 6, passes = 22),
+    )
+
+    private fun assertBudgets(phases: List<Phase>) {
+        phases.forEach { phase ->
+            val budget = budgets[phase.kind] ?: return@forEach
+            assertWithMessage("${phase.fleet} ${phase.kind}: publications that changed the list").that(phase.publishes).isAtMost(budget.publishes)
+            assertWithMessage("${phase.fleet} ${phase.kind}: classification passes").that(phase.passes).isAtMost(budget.passes)
+            // Each publication that changed the list is one pass of the sidebar's organizer, and no more.
+            assertWithMessage("${phase.fleet} ${phase.kind}: organizer passes").that(phase.organizer).isAtMost(phase.publishes)
+        }
     }
 
     /** The list as the screens draw it, reduced to what a refresh settles: each row's run, place and look. */
@@ -383,15 +424,21 @@ class AgentListPublishBenchmarkTest {
                     process.projects.syncLineage(listOf("bc-project-0"), force = true)
                 }
             }
-            // A Quick refresh reads the first page only, so a turn that started deep in the list waits for a Full one.
-            phases += measure(process, watchers, fleet, "Settle") { process.agents.refresh(silent = true, depth = RefreshDepth.Full) }
+            // A Quick refresh reads the first page only, so a turn that started deep in the list waits for a Full one;
+            // and the launches have pushed the oldest rows past the pages the reader had loaded, so it scrolls again.
+            phases += measure(process, watchers, fleet, "Settle") {
+                process.agents.refresh(silent = true, depth = RefreshDepth.Full)
+                repeat(3) { if (process.agents.state.value.hasMore) process.agents.loadMore() }
+            }
             // What a refresh must still settle: every row's run as the server has it, every member under its Project.
             val rows = process.agents.state.value.agents.associateBy { it.id }
-            val wrongRun = chats.filter { c -> rows[c.id]?.isRunning != c.running }.map { "${it.id} server=${it.running} row=${rows[it.id]?.runStatus}" }
-            val loose = chats.filter { it.manager != null || it.sideChatOf != null }.filter { c -> rows[c.id]?.parent?.id != (c.manager ?: c.sideChatOf) }.map { it.id }
+            val expected = chats + arriving
+            val wrongRun = expected.filter { c -> rows[c.id]?.isRunning != c.running }.map { "${it.id} server=${it.running} row=${rows[it.id]?.runStatus}" }
+            val loose = expected.filter { it.manager != null || it.sideChatOf != null }.filter { c -> rows[c.id]?.parent?.id != (c.manager ?: c.sideChatOf) }.map { it.id }
             assertWithMessage("rows whose run the refreshes left wrong").that(wrongRun.take(10)).isEmpty()
             assertWithMessage("members not under their Project").that(loose.take(10)).isEmpty()
-            assertWithMessage("rows").that(rows.size).isEqualTo(total)
+            assertWithMessage("rows").that(rows.size).isEqualTo(expected.size)
+            assertWithMessage("rows still held back").that(process.agents.state.value.awaitingPlacement).isEmpty()
             phases
         } finally {
             process.end()
@@ -407,12 +454,14 @@ class AgentListPublishBenchmarkTest {
     fun `two hundred agents, eight Projects, sixty running`() {
         val phases = scenario("S200", total = 200, otherMembers = 42, running = 60)
         report(phases)
+        assertBudgets(phases)
     }
 
     @Test
     fun `five hundred agents, eight Projects, a hundred and twenty running`() {
         val phases = scenario("S500", total = 500, otherMembers = 210, running = 120)
         report(phases)
+        assertBudgets(phases)
     }
 
     private companion object {
