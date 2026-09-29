@@ -2,12 +2,16 @@ package com.cursorforandroid.ui.customize
 
 import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -93,25 +97,37 @@ class CustomizeSheetTest {
     }
 
     @Test
-    fun `the Actions card leads the sheet, and Read all marks every chat read and then goes off`() {
+    fun `Read all sits in the header left of Reset, marks every chat read, and then goes off`() {
         val viewModel = AgentsViewModel(graph)
         compose.setContent {
             CursorTheme(mode = ThemeMode.Dark) { CustomizeSheet(viewModel, onDismiss = {}) }
         }
         awaitOnScreen { composed("Grouping") && viewModel.uiState.value.unreadCount == repoCount }
-        // Actions sit above Grouping and the filters, in their own card, with the count on the row.
-        val actionsTop = compose.onNodeWithTag("sheet-actions").fetchSemanticsNode().boundsInRoot.top
-        assertThat(actionsTop).isLessThan(compose.onNodeWithText("Grouping").fetchSemanticsNode().boundsInRoot.top)
-        assertThat(actionsTop).isLessThan(compose.onNodeWithText("Status").fetchSemanticsNode().boundsInRoot.top)
-        compose.onNodeWithText("Actions").assertIsDisplayed()
-        compose.onNodeWithText("$repoCount unread chats").assertIsDisplayed()
-        compose.onNodeWithTag("sheet-action-$READ_ALL").assertIsEnabled()
+        val readAll = compose.onNodeWithTag("sheet-header-action-$READ_ALL")
+        readAll.assertIsDisplayed().assertIsEnabled().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "$repoCount unread chats"))
+        // In the header row, beside the title, and above the first section: the sheet opens on Grouping.
+        val readAllBounds = readAll.fetchSemanticsNode().boundsInRoot
+        val title = compose.onNodeWithText("Chats").fetchSemanticsNode().boundsInRoot
+        assertThat(readAllBounds.left).isAtLeast(title.right)
+        assertThat(readAllBounds.center.y).isWithin(1f).of(title.center.y)
+        assertThat(readAllBounds.bottom).isLessThan(compose.onNodeWithText("Grouping").fetchSemanticsNode().boundsInRoot.top)
+        // The Actions section is gone: no header of its own, no card.
+        assertThat(composed("Actions")).isFalse()
+        assertThat(compose.onAllNodesWithTag("sheet-actions").fetchSemanticsNodes()).isEmpty()
+        // Default preferences: nothing to reset, so Read all stands alone.
+        assertThat(composed("Reset")).isFalse()
 
-        compose.onNodeWithTag("sheet-action-$READ_ALL").performClick()
+        viewModel.setShowRuntime(true)
+        awaitOnScreen { composed("Reset") }
+        val reset = compose.onNodeWithTag("sheet-header-action-Reset").fetchSemanticsNode().boundsInRoot
+        val readAllBeside = readAll.fetchSemanticsNode().boundsInRoot
+        // Directly left of Reset, the two touch areas side by side without overlapping.
+        assertThat(readAllBeside.right).isAtMost(reset.left)
+        assertThat(readAllBeside.center.y).isWithin(1f).of(reset.center.y)
+
+        readAll.performClick()
         awaitOnScreen { viewModel.uiState.value.unreadCount == 0 }
-        compose.onNodeWithText("Nothing unread").assertIsDisplayed()
-        compose.onNodeWithTag("sheet-action-$READ_ALL").assertIsNotEnabled()
-        // Read all is the card's only action, and the filters list no such row of their own any more.
+        readAll.assertIsNotEnabled().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Nothing unread"))
         assertThat(compose.onAllNodesWithText(READ_ALL).fetchSemanticsNodes()).hasSize(1)
     }
 
