@@ -109,10 +109,17 @@ class AppScreenshotTest {
     /**
      * Robolectric has no Android Keystore, so the real [SecureKeyStore] would report itself unavailable and every
      * capture would carry the warning a device never shows. An ordinary private file stands in for the encrypted one.
+     * The agent list is organized on the main thread, so the sidebar and the Chats sheet never miss a state (see
+     * [AppGraph.agentListDispatcher]).
      */
     private fun appGraph(): AppGraph {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        return AppGraph(context, SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, appVersion = SCREENSHOT_APP_VERSION)
+        return AppGraph(
+            context,
+            SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) },
+            appVersion = SCREENSHOT_APP_VERSION,
+            agentListDispatcher = Dispatchers.Main,
+        )
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
