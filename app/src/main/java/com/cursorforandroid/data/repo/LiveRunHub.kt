@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * One shared live stream per (agent, run). The conversation screen and the live-notification monitor both
@@ -165,10 +166,14 @@ class LiveRunHub(
          * ran on is sent what the turn did meanwhile, not the whole turn again (a long turn's log is megabytes).
          */
         var position: String? = null
-        /** Each live subscriber's word on whether it is watched (see [snapshots]); guarded by [entries]. */
-        val watchers = ArrayList<StateFlow<Boolean>>()
+        /** Each live subscriber's word on whether it is watched, and how often it needs to hear (see [snapshots]); guarded by [entries]. */
+        val watchers = ArrayList<Watcher>()
         /** Bumped whenever [watchers] changes, so a stream between two looks hears a watcher arrive at once. */
         val watchersChanged = MutableStateFlow(0)
+        /** When [publish] last put the story out (System.nanoTime); what a paced pass counts its period from. */
+        @Volatile var publishedAt = 0L
+        /** A paced pass has applied events it has not published yet (see [publishPaced]). */
+        val owed = MutableStateFlow(false)
         /** Between two looks (see [lookBaseMs]), with no connection open; for [stats]. */
         @Volatile var resting = false
         /** Set by [lookNow]: the next pause between looks (or the one under way) ends at once. */
@@ -186,13 +191,36 @@ class LiveRunHub(
         }
 
         /** True while any subscriber is watched, or none has said (a replay riding along, a release's grace). */
-        fun watched(): Boolean = synchronized(entries) { watchers.isEmpty() || watchers.any { it.value } }
+        fun watched(): Boolean = synchronized(entries) { watchers.isEmpty() || watchers.any { it.watched.value } }
 
         @OptIn(ExperimentalCoroutinesApi::class)
         fun watchedChanges(): Flow<Boolean> = watchersChanged.flatMapLatest {
-            val now = synchronized(entries) { watchers.toList() }
+            val now = synchronized(entries) { watchers.map { it.watched } }
             if (now.isEmpty()) flowOf(true) else combine(now) { values -> values.any { it } }
         }.distinctUntilChanged()
+
+        /** How long a live pass may sit on what it applied before publishing it; see [paceOf]. */
+        fun publishEveryMs(): Long = synchronized(entries) { paceOf(watchers, watchers.map { it.watched.value }) }
+
+        @OptIn(ExperimentalCoroutinesApi::class)
+        fun paceChanges(): Flow<Long> = watchersChanged.flatMapLatest {
+            val now = synchronized(entries) { watchers.toList() }
+            if (now.isEmpty()) flowOf(0L) else combine(now.map { it.watched }) { values -> paceOf(now, values.toList()) }
+        }.distinctUntilChanged()
+    }
+
+    /** One live subscriber (see [snapshots]): its own object, so two subscribers passing the same flow are two. */
+    private class Watcher(val watched: StateFlow<Boolean>, val sampleMs: Long)
+
+    /**
+     * The slowest a live pass may publish for [watchers], whose watched words are [values]: every event (0) while any
+     * watched subscriber wants each one, else the shortest period a watched one asked for. With nobody watched a pass
+     * publishes when it rests (see [lookBaseMs]), and with nobody at all (a release's grace) every event, as before.
+     */
+    private fun paceOf(watchers: List<Watcher>, values: List<Boolean>): Long {
+        var pace = Long.MAX_VALUE
+        watchers.forEachIndexed { i, w -> if (values[i]) pace = minOf(pace, w.sampleMs) }
+        return if (pace == Long.MAX_VALUE) 0L else pace
     }
 
     /** What one connection to the stream came to. */
@@ -216,6 +244,9 @@ class LiveRunHub(
      */
     val finishes: SharedFlow<Snapshot> = _finishes.asSharedFlow()
 
+    /** Snapshots built for subscribers so far, each a copy of the run's story: for the benchmarks. */
+    internal val published = AtomicLong()
+
     init {
         scope.launch { session.backend.drop(1).collect { resetAll() } }
     }
@@ -227,14 +258,29 @@ class LiveRunHub(
      * [watched] says whether anyone is looking at what this collector shows (a chat kept current with no screen on it
      * says false until one opens). A run no watched collector follows is looked in on every so often instead of
      * streamed (see [lookBaseMs]); a collector that passes nothing always counts as watched.
+     *
+     * [sampleMs] is for a collector that shows the run somewhere slower than the screen (the live notification): it
+     * hears at most one snapshot per period — the first at once, then the latest of each period — and a finished one
+     * without delay. A run only such collectors watch is published at that pace too, rather than rebuilt per event.
      */
-    fun snapshots(agentId: String, runId: String, startedAtMillis: Long? = null, watched: StateFlow<Boolean>? = null): Flow<Snapshot> = flow {
-        val watcher = watched ?: ALWAYS_WATCHED
+    fun snapshots(agentId: String, runId: String, startedAtMillis: Long? = null, watched: StateFlow<Boolean>? = null, sampleMs: Long = 0L): Flow<Snapshot> = flow {
+        val watcher = Watcher(watched ?: ALWAYS_WATCHED, sampleMs.coerceAtLeast(0L))
         val entry = acquire(agentId, runId, startedAtMillis, replay = false, watcher = watcher)
         try {
-            emitAll(entry.state)
+            emitAll(if (watcher.sampleMs > 0) entry.state.sampled(watcher.sampleMs) else entry.state)
         } finally {
             release(entry, watcher)
+        }
+    }
+
+    /** At most one snapshot per [periodMs]: the first at once, then the latest of each period at its end; a finished one at once. */
+    private fun StateFlow<Snapshot>.sampled(periodMs: Long): Flow<Snapshot> = flow {
+        var last: Snapshot? = null
+        while (true) {
+            val next = first { it !== last }
+            emit(next)
+            last = next
+            withTimeoutOrNull(periodMs) { first { it.finished && it !== next } }
         }
     }
 
@@ -293,7 +339,7 @@ class LiveRunHub(
      * The mode of a pass is the mode of the subscriber that started it: a live subscriber follows the run and
      * settles its outcome, a replay reads history. A subscriber joining a pass of the other kind rides along.
      */
-    private fun acquire(agentId: String, runId: String, startedAtMillis: Long?, replay: Boolean, watcher: StateFlow<Boolean>? = null): Entry = synchronized(entries) {
+    private fun acquire(agentId: String, runId: String, startedAtMillis: Long?, replay: Boolean, watcher: Watcher? = null): Entry = synchronized(entries) {
         evictIfNeeded()
         val entry = entries.getOrPut(key(agentId, runId)) { Entry(agentId, runId, startedAtMillis ?: nowProvider()) }
         if (startedAtMillis != null && startedAtMillis < entry.state.value.startedAtMillis) {
@@ -323,7 +369,7 @@ class LiveRunHub(
         entry
     }
 
-    private fun release(entry: Entry, watcher: StateFlow<Boolean>? = null) = synchronized(entries) {
+    private fun release(entry: Entry, watcher: Watcher? = null) = synchronized(entries) {
         entry.subscribers = (entry.subscribers - 1).coerceAtLeast(0)
         if (watcher != null && entry.watchers.remove(watcher)) entry.watchersChanged.update { it + 1 }
         if (entry.subscribers == 0 && entry.job != null) {
@@ -518,6 +564,15 @@ class LiveRunHub(
                     emit(GraceUp)
                 }
             },
+            // What a paced pass sat on (see [publishPaced]) goes out when the watched subscribers' period is up, or at
+            // once when one that wants every event arrives.
+            combine(entry.owed, entry.paceChanges()) { owed, pace -> if (owed) pace else -1L }.flatMapLatest { pace ->
+                if (pace < 0) emptyFlow() else flow<Any> {
+                    val left = pace - (System.nanoTime() - entry.publishedAt) / NANOS_PER_MS
+                    if (left > 0) delay(left)
+                    emit(Flush)
+                }
+            },
         )
         var unwatched = false
         var windowStartedAt = System.nanoTime()
@@ -538,6 +593,10 @@ class LiveRunHub(
                     Unwatched -> { unwatched = true; windowStartedAt = System.nanoTime(); return@collect }
                     GraceUp -> {
                         if (entry.graceSpent(terminalGraceMs)) throw EndOfPass
+                        return@collect
+                    }
+                    Flush -> {
+                        if (entry.owed.value && !unwatched && live === entry.live && !live.finished) publish(entry)
                         return@collect
                     }
                     LookTick -> {
@@ -585,7 +644,7 @@ class LiveRunHub(
                         if (event is RunStreamEvent.Assistant || event is RunStreamEvent.Thinking || event is RunStreamEvent.ToolCall) pass.progressed = true
                         live.apply(event)
                         // Nobody watching: what a look brings is published once, when it rests (see [stream]).
-                        if (!historical && !unwatched) publish(entry)
+                        if (!historical && !unwatched) publishPaced(entry)
                     }
                 }
             }
@@ -598,6 +657,8 @@ class LiveRunHub(
             if (t is OutOfMemoryError) Breadcrumbs.add("out of memory reading run ${Breadcrumbs.tail(entry.runId)} of ${Breadcrumbs.tail(entry.agentId)}")
             pass.error = pass.error ?: RunStreamEvent.Error("stream_failed", t.message ?: "The run's stream failed.", resumeFrom = null)
         }
+        // A connection that ends goes out with everything it applied, as it would have event by event; a rest publishes its own.
+        if (!historical && !unwatched && !pass.rested && entry.owed.value && live === entry.live && owns(entry, self)) publish(entry)
         return pass
     }
 
@@ -749,13 +810,26 @@ class LiveRunHub(
         }
     }
 
+    /**
+     * [publish], at most once per the period the run's watched subscribers asked for (see [snapshots]'s `sampleMs`):
+     * a run only the live notification watches is not rebuilt, list and reply, for every token. What is held back is
+     * owed, and goes out when the period is up (see [follow]).
+     */
+    private fun publishPaced(entry: Entry) {
+        val pace = entry.publishEveryMs()
+        if (pace == 0L || System.nanoTime() - entry.publishedAt >= pace * NANOS_PER_MS) publish(entry) else entry.owed.value = true
+    }
+
     private fun publish(entry: Entry) {
+        entry.owed.value = false
         // A pass that replays fewer events than the last one applied would otherwise hold the trace still — and
         // "Reconnecting…" on — for the rest of the run, although the stream is perfectly healthy.
         if (entry.live.applied < entry.catchUp && nowProvider() - entry.catchUpArmedAt < catchUpTimeoutMs) return
         entry.catchUp = 0
         // Caught up with the story it replaced: the rebuild is the story from here on.
         if (entry.fallback?.let { entry.live.applied >= it.applied } == true) entry.fallback = null
+        entry.publishedAt = System.nanoTime()
+        published.incrementAndGet()
         entry.state.update { it.copy(items = entry.live.snapshot(), status = entry.live.status, eventCount = it.eventCount + 1, reconnecting = false) }
     }
 
@@ -789,6 +863,8 @@ class LiveRunHub(
             if (!owns(entry, self)) return
             val finishedAt = finishedAtMillis ?: nowProvider()
             entry.catchUp = 0
+            entry.owed.value = false
+            published.incrementAndGet()
             // A run that ended on its own stream told its whole story; a story kept from before a rebuild is not needed.
             if (streamed) entry.fallback = null
             if (!historical) {
@@ -835,6 +911,7 @@ class LiveRunHub(
     private object Unwatched
     private object LookTick
     private object GraceUp
+    private object Flush
 
     /** A turn under way, parked off the table (see [park]). */
     @Serializable
