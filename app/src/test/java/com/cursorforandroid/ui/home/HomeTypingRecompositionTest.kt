@@ -86,7 +86,7 @@ class HomeTypingRecompositionTest {
             field.performTextInput(c.toString())
             compose.waitForIdle()
         }
-        assertThat(RecomposeCounter.count("HomeScreen")).isAtLeast(text.length)
+        assertThat(RecomposeCounter.count("ComposerBox")).isAtLeast(text.length)
     }
 
     @Test
