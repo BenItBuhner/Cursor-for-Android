@@ -6,6 +6,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.TweenSpec
+import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -36,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -61,6 +63,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -75,7 +78,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import com.cursorforandroid.ui.components.BackGestureEdges
 import com.cursorforandroid.ui.components.Haptics
 import com.cursorforandroid.ui.components.LocalScrollFadeSurface
@@ -91,12 +93,14 @@ import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.ui.components.rememberSheetFocus
 import com.cursorforandroid.ui.components.setOffAhead
 import com.cursorforandroid.ui.components.sheetFocus
+import com.cursorforandroid.ui.theme.CursorColors
 import com.cursorforandroid.ui.theme.CursorTheme
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sign
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 
@@ -373,43 +377,108 @@ fun SidePanel(
     content: @Composable () -> Unit,
 ) {
     val pinned = LocalPinnedPanel.current
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(state.isVisible) { if (!state.isVisible) expanded = false }
-    // How far the sheet is widened over the chat, 0 to 1, where its window has room to spare for it.
-    val widening = remember { Animatable(if (expanded) 1f else 0f) }
-    LaunchedEffect(expanded) { widening.animateTo(if (expanded) 1f else 0f, tween(SlideMillis, easing = SlideEasing)) }
-    // The host's width as last laid out, for the one thing composed from it: whether the strip offers widening.
-    val hostWidth = remember { mutableStateOf<Dp?>(null) }
-    val canExpand by remember(pinned) { derivedStateOf { pinned == null && hostWidth.value?.let(::widens) == true } }
+    val expanded = rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.isVisible) { if (!state.isVisible) expanded.value = false }
+    val sheet = remember(expanded) { SheetWidth(expanded) }
+    LaunchedEffect(sheet) { sheet.follow() }
     // Half and half with the chat, it is half of this frame's room, the rail's slide included.
-    val panelWidth: (Dp) -> Dp = remember(pinned, widening) {
+    val panelWidth: (Dp) -> Dp = remember(pinned, sheet) {
         { maxWidth ->
             when {
-                pinned == null -> if (widens(maxWidth)) lerp(panelWidthFor(maxWidth), maxWidth - PanelMargin, widening.value) else panelWidthFor(maxWidth)
+                pinned == null -> sheet.at(maxWidth)
                 pinned.splits -> maxWidth / 2
                 else -> pinned.width.coerceAtMost(maxWidth - ChatMinWidth).coerceAtLeast(PinnedPanelMinWidth)
             }
         }
     }
-    val expand = remember(canExpand, expanded) { PanelExpand(available = canExpand, expanded = expanded && canExpand, toggle = { expanded = !expanded }) }
+    val colors = CursorTheme.colors
+    // One body for either answer to whether the strip offers widening, picked as the host is measured: the answer is
+    // composed in the frame its width changes, and a width that leaves it as it was composes nothing.
+    val bodies = remember(state, gesturesEnabled, pinned, expanded, panelWidth, colors, panelContent, content) {
+        BooleanArray(2) { it == 1 }.map { canExpand ->
+            sidePanelBody(canExpand, state, gesturesEnabled, pinned, expanded, panelWidth, colors, panelContent, content)
+        }
+    }
+    SubcomposeLayout(modifier) { constraints ->
+        val hostWidth = constraints.maxWidth.toDp()
+        sheet.host = hostWidth
+        val canExpand = pinned == null && widens(hostWidth)
+        val placeables = subcompose(Unit, bodies[if (canExpand) 1 else 0]).map { it.measure(constraints) }
+        val width = placeables.maxOfOrNull { it.width }?.coerceAtLeast(constraints.minWidth) ?: constraints.minWidth
+        val height = placeables.maxOfOrNull { it.height }?.coerceAtLeast(constraints.minHeight) ?: constraints.minHeight
+        layout(width, height) { placeables.forEach { it.place(0, 0) } }
+    }
+}
+
+/**
+ * The panel over [SidePanelHost], for a host that does ([canExpand]) or does not have room to widen the sheet over
+ * the chat. Built from one lambda for both answers, so a change of answer recomposes the body where it stands.
+ */
+private fun sidePanelBody(
+    canExpand: Boolean,
+    state: SidePanelState,
+    gesturesEnabled: Boolean,
+    pinned: PinnedPanel?,
+    expanded: MutableState<Boolean>,
+    panelWidth: (Dp) -> Dp,
+    colors: CursorColors,
+    panelContent: @Composable () -> Unit,
+    content: @Composable () -> Unit,
+): @Composable () -> Unit = {
+    val isExpanded = expanded.value
+    val expand = remember(canExpand, isExpanded) {
+        PanelExpand(available = canExpand, expanded = isExpanded && canExpand, toggle = { expanded.value = !expanded.value })
+    }
     SidePanelHost(
         state = state,
         panelWidth = panelWidth,
-        modifier = modifier.layout { measurable, constraints ->
-            hostWidth.value = constraints.maxWidth.toDp()
-            val placeable = measurable.measure(constraints)
-            layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-        },
+        modifier = Modifier,
         gesturesEnabled = gesturesEnabled,
         pinned = pinned,
-        containerColor = CursorTheme.colors.canvas,
-        contentColor = CursorTheme.colors.textPrimary,
+        containerColor = colors.canvas,
+        contentColor = colors.textPrimary,
         scrimColor = DefaultScrim,
         panelContent = {
             CompositionLocalProvider(LocalPanelExpand provides expand, LocalPanelPinned provides (pinned != null), content = panelContent)
         },
         content = content,
     )
+}
+
+/**
+ * The sheet's width as it eases after the width its host asks of it: its column, or all but a margin of the host
+ * while it is widened over the chat. Each new width eases on from wherever the last left it, as the host is resized a
+ * dp at a time or the sheet widened, and is read at layout only.
+ */
+@Stable
+private class SheetWidth(private val expanded: State<Boolean>) {
+    /** The host's width as last measured; null before the first measure. */
+    var host: Dp? by mutableStateOf(null)
+
+    private val width = Animatable(0.dp, Dp.VectorConverter)
+
+    private var following = false
+
+    private fun target(host: Dp): Dp = if (expanded.value && widens(host)) host - PanelMargin else panelWidthFor(host)
+
+    /** The width to lay the sheet out at in a host [hostWidth] wide: the target, until the animation has its start. */
+    fun at(hostWidth: Dp): Dp = if (following) width.value else target(hostWidth)
+
+    /**
+     * Each target is launched over the animation still running, as animate*AsState does: the new one then takes up the
+     * running one's clock. Cancelled first, it would start its clock afresh, and a target moving every frame would
+     * hold the sheet where it was until the window stops.
+     */
+    suspend fun follow() = coroutineScope {
+        snapshotFlow { host?.let(::target) }.filterNotNull().collect { target ->
+            if (following) {
+                launch { width.animateTo(target, tween(SlideMillis, easing = SlideEasing)) }
+            } else {
+                width.snapTo(target)
+                following = true
+            }
+        }
+    }
 }
 
 /** Whether a sheet on a host [hostWidth] wide has room enough beside its column to be widened over the chat. */
