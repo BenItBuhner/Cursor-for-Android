@@ -2,18 +2,22 @@ import type React from "react";
 import { AbsoluteFill, spring } from "remotion";
 import type { Framing } from "../camera";
 import { FPS } from "../edit";
-import { easeInOut, easeOut, progress } from "../math";
+import { easeOut, progress } from "../math";
 import { COLOR, SANS } from "../theme";
 import { AppIcon } from "./AppIcon";
 
 const WORDS = ["Cursor", "for", "Android"];
 
-/** The title card: the app's icon, its name and what it is, lifting away and falling back as the phone rises in front of it. */
+/**
+ * The title card: the app's icon, its name and what it is. The phone's entrance eases out as hard as this does, so
+ * the title lifts clear and dissolves as the camera tilts down to it, gone before the phone's top edge reaches its words.
+ */
 export const Title: React.FC<{ t: number; framing: Framing }> = ({ t, framing }) => {
   const tall = framing === "tall";
   const icon = spring({ frame: t - 6, fps: FPS, durationInFrames: 26, config: { damping: 13, stiffness: 120, mass: 0.9 } });
   const sub = easeOut(progress(t, 30, 52));
-  const out = easeInOut(progress(t, 96, 138));
+  const lift = easeOut(progress(t, 94, 140));
+  const gone = easeOut(progress(t, 96, 118));
   return (
     <AbsoluteFill
       style={{
@@ -23,9 +27,9 @@ export const Title: React.FC<{ t: number; framing: Framing }> = ({ t, framing })
         justifyContent: "center",
         paddingBottom: tall ? 120 : 60,
         fontFamily: SANS,
-        opacity: 1 - out,
-        transform: `translateY(${-120 * out}px) scale(${1 - 0.07 * out})`,
-        filter: out > 0 ? `blur(${9 * out}px)` : undefined,
+        opacity: 1 - gone,
+        transform: `translateY(${-(tall ? 520 : 300) * lift}px) scale(${1 - 0.06 * lift})`,
+        filter: gone > 0 ? `blur(${12 * gone}px)` : undefined,
       }}
     >
       <div
