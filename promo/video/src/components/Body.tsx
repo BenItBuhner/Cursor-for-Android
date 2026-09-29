@@ -7,6 +7,13 @@ export type Radii = [number, number, number, number];
 
 const RAD = Math.PI / 180;
 
+/**
+ * The key light hangs above the devices, so less of it reaches an edge the further down the device it runs: without
+ * this, a wall turned into the light lights up evenly end to end, a flat bar rather than metal.
+ */
+const FALLOFF = 0.34;
+const falloff = (y: number, h: number) => `rgba(0, 0, 0, ${(FALLOFF * Math.min(1, Math.max(0, y / h + 0.5))).toFixed(3)})`;
+
 /** A piece of the rim: its middle on the outline, its length along it, the way its outside faces (degrees in x, y). */
 type Strip = { x: number; y: number; len: number; phi: number };
 
@@ -88,6 +95,8 @@ export const Body: React.FC<{
       </div>
       {rim(w, h, radii).map((s, i) => {
         const outward: V3 = [Math.cos(s.phi * RAD), Math.sin(s.phi * RAD), 0];
+        // Once turned, the strip's length runs along (-sin, cos) of its facing: its right-hand end sits this far below its middle.
+        const along = Math.cos(s.phi * RAD) * (s.len / 2);
         return (
           <div
             key={i}
@@ -98,7 +107,7 @@ export const Body: React.FC<{
               width: px(s.len),
               height: px(depth),
               backfaceVisibility: "hidden",
-              background: edgeFill(metal, camera(outward)),
+              background: `linear-gradient(to right, ${falloff(s.y - along, h)}, ${falloff(s.y + along, h)}), ${edgeFill(metal, camera(outward))}`,
               // Stood on edge (its top toward the back), turned to face outward, and set on the outline.
               transform: `translate3d(${px(s.x)}px, ${px(s.y)}px, ${px(-depth / 2)}px) rotateZ(${s.phi + 90}deg) rotateX(90deg)`,
             }}

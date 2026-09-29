@@ -48,7 +48,7 @@ const HALF = norm([KEY[0], KEY[1], KEY[2] + 1]);
 export type Metal = { base: V3; ambient: number; key: number; fill: number; spec: number; shine: number };
 
 /** Anodised aluminium in the dark finishes the devices come in. */
-export const GRAPHITE: Metal = { base: [66, 67, 72], ambient: 0.42, key: 0.78, fill: 0.3, spec: 120, shine: 18 };
+export const GRAPHITE: Metal = { base: [66, 67, 72], ambient: 0.42, key: 0.78, fill: 0.3, spec: 72, shine: 30 };
 
 const channel = (v: number) => Math.round(Math.max(0, Math.min(255, v)));
 const rgb = (c: V3, k = 1, add = 0) => `rgb(${channel(c[0] * k + add)}, ${channel(c[1] * k + add)}, ${channel(c[2] * k + add)})`;
