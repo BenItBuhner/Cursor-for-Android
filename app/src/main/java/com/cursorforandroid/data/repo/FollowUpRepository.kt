@@ -1073,7 +1073,9 @@ class FollowUpRepository(
                             handed.fold(
                                 onSuccess = { (runId, followupId) ->
                                     // A run named behind a turn under way has not started: the message is queued all the same.
-                                    val queued = runId == null || conversations.waitsBehindTurn(e.agentId, runId)
+                                    // So is one the server does not have under way: it has just refused the run request as busy.
+                                    val queued = runId == null || conversations.waitsBehindTurn(e.agentId, runId) || !agents.runStarted(e.agentId, runId, turnUnderWay = true)
+                                    if (generation.get() != startedIn) return
                                     e.attempt(item, VIA_ACCOUNT, if (runId == null) "queued-on-account" else if (queued) "queued-behind-turn" else "accepted", runId)
                                     runId?.let { e.acceptedId(it) }
                                     e.update { copy(queue = queue.filterNot { it.id == item.id }) }

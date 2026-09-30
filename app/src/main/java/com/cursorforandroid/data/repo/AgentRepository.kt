@@ -346,6 +346,12 @@ private fun modelRef(modelId: String?, params: List<ModelParam>): ModelRefDto? =
 data class Launched(val agent: Agent, val run: RunDto?)
 
 /**
+ * What the account made of a follow-up filed through it (see [AgentRepository.followUpVia]): the run it named, null
+ * when it named none, and whether the server has that run under way — else the message waits on the account's queue.
+ */
+data class FollowUpTaken(val run: RunDto?, val started: Boolean)
+
+/**
  * The agent list. Restored from disk before the first fetch so the app opens on the last known state, then kept
  * fresh with stale-while-revalidate refreshes: every v1 page is published the moment it arrives, the legacy v0
  * enrichment (repo / branch / PR / summary / execution status) lands independently, the runs whose state is still in
@@ -2533,6 +2539,12 @@ class AgentRepository(
      * since the account reports no record for it. Null from [send] is success with no run to stream: the caller
      * reloads the chat instead. A message [queued] behind a turn under way — asked with the run the account named,
      * once it has answered — leaves the row on that turn, its run and its status: the account has started nothing.
+     * Nor has it when the server does not have the named run under way: a Project's coordinator names the run a
+     * message will start the moment it takes the message into its queue, behind a turn that no listed run may stand
+     * for (a worker's report) — Bennett's frames of 2026-09-30, a message taken for started on the name alone, under
+     * "Starting…" while the account held it. So the name is a run started only on its record's word: running, or
+     * over, or — unless the message went into a [turnUnderWay], shown or refused as busy, where a run still to start
+     * is the queued message's own — starting. No record under a documented id yet, or none to read: not started.
      */
     suspend fun followUpVia(
         agentId: String,
@@ -2540,26 +2552,43 @@ class AgentRepository(
         modelParams: List<ModelParam> = emptyList(),
         modelDisplayName: String? = null,
         queued: (runId: String?) -> Boolean = { false },
+        turnUnderWay: Boolean = false,
         send: suspend () -> String?,
-    ): Result<RunDto?> = runCatching {
+    ): Result<FollowUpTaken> = runCatching {
         val startedIn = token()
         val named = send()
         val behind = queued(named)
         // A run the account started under its own name is followed, stopped and read by the id the documented API
         // lists it under (see [documentedRunId]); only when that cannot be learned yet does the account's name stand in.
         val runId = if (named == null || behind || isDocumentedRunId(named)) named else resolveNamedRun(agentId, named, after = agent(agentId)?.latestRunId) ?: named
+        val started = runId != null && !behind && runStarted(agentId, runId, turnUnderWay)
         val now = AppClock.now()
         val stamp = Instant.ofEpochMilli(now).toString()
         val run = runId?.let { RunDto(id = it, agentId = agentId, status = RunStatus.CREATING.name, createdAt = stamp, updatedAt = stamp) }
         patch(agentId, startedIn) { current ->
             val switched = current.switchedTo(modelId, modelParams, modelDisplayName)
-            if (behind) {
+            if (!started || run == null) {
                 switched.copy(lifecycle = AgentLifecycle.ACTIVE).touched(now)
             } else {
-                switched.copy(runStatus = RunStatus.CREATING, latestRunId = run?.id ?: current.latestRunId, lifecycle = AgentLifecycle.ACTIVE).touched(now)
+                switched.copy(runStatus = RunStatus.CREATING, latestRunId = run.id, lifecycle = AgentLifecycle.ACTIVE).touched(now)
             }
         }
-        run
+        FollowUpTaken(run, started)
+    }
+
+    /**
+     * Whether the server has [runId], a run the account named for a follow-up, under way (see [followUpVia]): its
+     * record runs or is over — or is still starting, unless the follow-up went into a [turnUnderWay]. A run with no
+     * record under a documented id yet, or one that cannot be read, has not been seen to start.
+     */
+    suspend fun runStarted(agentId: String, runId: String, turnUnderWay: Boolean): Boolean {
+        val status = try {
+            RunStatus.parse(runRecord(agentId, runId).status)
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            return false
+        }
+        return status == RunStatus.RUNNING || status.isTerminal || (!turnUnderWay && status == RunStatus.CREATING)
     }
 
     /**

@@ -6010,6 +6010,8 @@ class ConversationRepository(
         /** The account's id for the follow-up [send] files (`AccountFollowup.followupId`), by which its card row is known (see [expectDelivery]). */
         followupId: String? = null,
         discardOnFailure: Boolean = true,
+        /** Sent into a turn the chat showed under way: a run the account names still to start is the message's own, queued (see `AgentRepository.followUpVia`). */
+        turnUnderWay: Boolean = false,
         send: suspend () -> String?,
     ): Result<Unit> {
         val e = entry(agentId)
@@ -6019,10 +6021,11 @@ class ConversationRepository(
         // What the message waits behind, read the moment the account answers: the turn under way, or the newest run
         // already queued behind it; nothing when the account starts the message's run at once.
         var behind: RunDto? = null
-        return agents.followUpVia(agentId, modelId, modelParams, modelDisplayName, queued = { runId -> synchronized(e) { e.queueTail(except = runId) }.also { behind = it } != null }, send = send)
-            .map { run ->
+        return agents.followUpVia(agentId, modelId, modelParams, modelDisplayName, queued = { runId -> synchronized(e) { e.queueTail(except = runId) }.also { behind = it } != null }, turnUnderWay = turnUnderWay, send = send)
+            .map { taken ->
+                val run = taken.run
                 val waitsBehind = behind
-                if (run != null && waitsBehind == null) {
+                if (run != null && taken.started) {
                     // The account started the run on the message at once: "Starting…" is that run's word.
                     accepted(e, agentId, staged, run, viaAccount = true, followupId = followupId)
                 } else {
@@ -6067,8 +6070,9 @@ class ConversationRepository(
     /**
      * Sends a [queueAhead]ed message by [send]. Queued behind a turn, as expected, it stays on the card, now the
      * account's to deliver (see [expectDelivery]). The turn over by the time the account had it — the account started
-     * the message's run at once — it leaves the card for the transcript, filed under that run. On a failure it stays
-     * on the card, still sending, for the caller to [unqueue].
+     * the message's run at once, as the run's record says, never the name alone (see `AgentRepository.followUpVia`) —
+     * it leaves the card for the transcript, filed under that run. On a failure it stays on the card, still sending,
+     * for the caller to [unqueue].
      */
     suspend fun sendQueuedVia(
         agentId: String,
@@ -6081,10 +6085,11 @@ class ConversationRepository(
     ): Result<Unit> {
         val e = entry(agentId)
         var behind: RunDto? = null
-        return agents.followUpVia(agentId, modelId, modelParams, modelDisplayName, queued = { runId -> synchronized(e) { e.queueTail(except = runId) }.also { behind = it } != null }, send = send)
-            .map { run ->
+        return agents.followUpVia(agentId, modelId, modelParams, modelDisplayName, queued = { runId -> synchronized(e) { e.queueTail(except = runId) }.also { behind = it } != null }, turnUnderWay = true, send = send)
+            .map { taken ->
+                val run = taken.run
                 val waitsBehind = behind
-                if (run != null && waitsBehind == null) {
+                if (run != null && taken.started) {
                     e.publish(mutate = { awaiting = awaiting.filterNot { it.followupId == followupId } })
                     accepted(e, agentId, staged, run, viaAccount = true, followupId = followupId)
                 } else {

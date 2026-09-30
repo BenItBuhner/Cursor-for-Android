@@ -245,6 +245,7 @@ class OutgoingMessages(
                     message.draft.override?.label,
                     followupId = route.followupId,
                     discardOnFailure = false,
+                    turnUnderWay = route.queued,
                 ) {
                     val uploaded = awaitUploads(message)
                     setStatus(id, OutgoingStatus.Sending)
