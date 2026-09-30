@@ -34,6 +34,7 @@ import kotlinx.serialization.json.putJsonObject
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
+import org.robolectric.shadows.ShadowChoreographer
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -87,12 +88,15 @@ data class Screen(
 class EnoughFrames : RuntimeException("promo.frames reached")
 
 /**
- * Drives the running app one video frame at a time and films it. A frame moves every clock the app runs on by 16 ms
- * together: the scripted backend's ([VirtualTime]), the main looper's (the view system, `Dispatchers.Main`) and
- * Compose's (recomposition, animations, `LaunchedEffect` delays). Between them it waits for what the app does on its
- * own threads with the wall clock (the repository publishes a stream's burst up to 80 ms after it lands), so each
- * frame shows what a device would show that instant. Then every window the app has open is drawn, in order, where
- * the window manager has it: the activity, a sheet's dialog, a menu's popup.
+ * Drives the running app one video frame at a time and films it. A frame moves the capture's clock ([VirtualTime], the
+ * scripted backend's) and Compose's (recomposition, animations, `LaunchedEffect` delays) on by 16 ms, brings the main
+ * looper's (the view system, `Dispatchers.Main`, a ripple, the recording's timer) up to the capture's, and gives the
+ * framework's animators their frame ([AnimatorPulse]). The looper's clock can only run ahead between frames, by the
+ * millisecond Robolectric takes for each frame the view system asks for, and each frame lets the capture's catch up.
+ * Between them it waits for what the app does on its own threads with the wall clock (the repository publishes a
+ * stream's burst up to 80 ms after it lands), so each frame shows what a device would show that instant. Then every
+ * window the app has open is drawn, in order, where the window manager has it: the activity, a sheet's dialog, a
+ * menu's popup.
  */
 class Director(
     private val compose: ComposeTestRule,
@@ -106,6 +110,20 @@ class Director(
         private set
 
     private val looper = shadowOf(Looper.getMainLooper())
+
+    init {
+        // Robolectric moves the clock by this much each time the view system asks for a frame, before it gives it one:
+        // at its default of 15 ms, the frames Compose and the test rule's idling ask for ran the app's clock seconds
+        // ahead of the capture's, and a ripple or the recording's timer with it. At a millisecond, the next frame
+        // makes up what they add.
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(1))
+    }
+
+    /** The main looper's clock when the capture's read zero: each frame brings it up to the capture's. */
+    private val uptimeBase = SystemClock.uptimeMillis() - VirtualTime.nowMs
+
+    private val animators = AnimatorPulse { uptimeBase + VirtualTime.nowMs }.also { it.install() }
+
     private var scale = 1f
     private var compositor: Compositor? = null
     private val marks = ArrayList<String>()
@@ -159,7 +177,8 @@ class Director(
         framesThisRun++
         VirtualTime.advance(VirtualTime.FRAME_MS)
         timed("settle") { settle() }
-        timed("looper") { looper.idleFor(Duration.ofMillis(VirtualTime.FRAME_MS)) }
+        timed("looper") { looper.idleFor(Duration.ofMillis((uptimeBase + VirtualTime.nowMs - SystemClock.uptimeMillis()).coerceAtLeast(0))) }
+        animators.pulse()
         applyInsets()
         timed("compose") {
             compose.mainClock.advanceTimeBy(VirtualTime.FRAME_MS)
@@ -170,6 +189,10 @@ class Director(
     }
 
     fun frames(n: Int) = repeat(n) { frame() }
+
+    /** How far the main looper's clock and the realtime clock the app reads stand ahead of the capture's, in ms. */
+    fun clockDrift(): Pair<Long, Long> =
+        (SystemClock.uptimeMillis() - uptimeBase - VirtualTime.nowMs) to (SystemClock.elapsedRealtime() - uptimeBase - VirtualTime.nowMs)
 
     fun hold(seconds: Double) = frames((seconds * 60).roundToInt())
 
