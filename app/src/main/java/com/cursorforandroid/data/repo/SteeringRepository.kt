@@ -15,6 +15,7 @@ import com.cursorforandroid.domain.PendingFollowup
 import com.cursorforandroid.domain.QueueLoad
 import com.cursorforandroid.domain.QueuePlacement
 import com.cursorforandroid.domain.SteerOutcome
+import com.cursorforandroid.domain.SteerPhase
 import com.cursorforandroid.domain.ToolPayload
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CancellationException
@@ -68,6 +69,8 @@ class SteeringRepository(
     private val onQueuedDeleted: (agentId: String, followupId: String) -> Unit = { _, _ -> },
     /** A queued message the reader edited on the card, once the account holds the new words (`ConversationRepository.queuedEdited`). */
     private val onQueuedEdited: (agentId: String, followupId: String, text: String) -> Unit = { _, _, _ -> },
+    /** A word under a queued message's row the account kept rather than steering it (`ConversationRepository.noteQueuedNote`). */
+    private val onQueuedNote: (agentId: String, followupId: String, note: String) -> Unit = { _, _, _ -> },
     /**
      * Where the transcript says each queued message stands (`ConversationRepository.queuePlacement`): a message it has
      * just filed under a run is the moment the account's queue is read again, whatever the poll's clock says (see
@@ -189,7 +192,15 @@ class SteeringRepository(
         val read = reads.begun.incrementAndGet()
         try {
             val pending = api.listPending(agentId)
-            val shown = reads.land(read, pending) { standing -> f.update { it.copy(queue = standing, queueLoad = QueueLoad.Loaded) } } ?: return
+            val shown = reads.land(read, pending) { standing ->
+                // A steer is kept while its row is anywhere on the card — listed, or waiting on the transcript to show
+                // it — and let go by the second read in a row to find it nowhere: a screen may still be drawing the
+                // frame before the transcript filed it, and the row it draws there reads as a steer until the next.
+                val waiting = placement?.invoke(agentId)?.value?.waiting.orEmpty()
+                val nowhere = f.value.steers.keys.filterTo(HashSet()) { id -> standing.none { it.id == id } && waiting.none { it.id == id } }
+                val gone = reads.steersNowhere(nowhere)
+                f.update { c -> c.copy(queue = standing, queueLoad = QueueLoad.Loaded, steers = if (gone.isEmpty()) c.steers else c.steers - gone) }
+            } ?: return
             onQueueRead(agentId, shown, readAt)
         } catch (e: CancellationException) {
             throw e
@@ -248,6 +259,17 @@ class SteeringRepository(
             if (read < applied) return
             applied = read
             publish()
+        }
+
+        /** Steered rows the last applied read found nowhere on the card. */
+        private var steersNowhere: Set<String> = emptySet()
+
+        /** The steered rows [nowhere] this read finds nowhere: those the read before found nowhere too are returned, to be let go. */
+        @Synchronized
+        fun steersNowhere(nowhere: Set<String>): Set<String> {
+            val gone = nowhere.filterTo(HashSet()) { it in steersNowhere }
+            steersNowhere = nowhere - gone
+            return gone
         }
 
         /** The account took [followupId] from here: an answer to a read begun after this that does not list it has been let go of. */
@@ -311,14 +333,37 @@ class SteeringRepository(
             api.steer(agentId, text.trim(), expectedRunId(agentId)).also { outcome -> flow(agentId).update { it.copy(lastSteer = outcome) } }
         }
 
-    /** Delivers a queued message into the turn under way as a steer (`InjectBackgroundComposerContext` with `promoteFollowupId`). */
+    /**
+     * Delivers a queued message into the turn under way as a steer (`InjectBackgroundComposerContext` with
+     * `promoteFollowupId`). Its row reads "steering" from the call on and "steered" once the account took it
+     * ([ConversationControls.steers]), staying where it is until the transcript shows the message. An outcome that
+     * leaves the message waiting — held for the next turn, or refused ([SteerRefusedException]) — puts the row back as
+     * it was, saying so under it; a refusal is this call's failure too, so a caller never takes it for a steer.
+     */
     suspend fun promotePending(agentId: String, followupId: String): Result<SteerOutcome> =
         action(agentId, ConversationControls.QUEUE_ACTION_PREFIX + followupId, needs = { it.steering && it.accountQueue }, api = { runs }) { api ->
-            api.promoteFollowup(agentId, followupId, expectedRunId(agentId)).also { outcome ->
-                flow(agentId).update { it.copy(lastSteer = outcome) }
-                refreshQueue(agentId)
+            val f = flow(agentId)
+            f.update { it.copy(steers = it.steers + (followupId to SteerPhase.STEERING)) }
+            val outcome = try {
+                api.promoteFollowup(agentId, followupId, expectedRunId(agentId))
+            } catch (t: Throwable) {
+                f.update { it.copy(steers = it.steers - followupId) }
+                throw t
             }
+            when (outcome) {
+                SteerOutcome.QUEUED, SteerOutcome.UNKNOWN -> f.update { it.copy(lastSteer = outcome, steers = it.steers + (followupId to SteerPhase.STEERED)) }
+                SteerOutcome.QUEUED_FOR_NEXT_TURN, SteerOutcome.REJECTED -> {
+                    f.update { it.copy(lastSteer = outcome, steers = it.steers - followupId) }
+                    onQueuedNote(agentId, followupId, keptNote(outcome))
+                }
+            }
+            refreshQueue(agentId)
+            if (outcome == SteerOutcome.REJECTED) throw SteerRefusedException(outcome.message)
+            outcome
         }
+
+    private fun keptNote(outcome: SteerOutcome): String =
+        if (outcome == SteerOutcome.REJECTED) STEER_REFUSED_NOTE else STEER_HELD_NOTE
 
     suspend fun pause(agentId: String): Result<Unit> = action(agentId, "pause", needs = { it.steering }, api = { runs }) { api ->
         api.pause(agentId, expectedRunId(agentId))
@@ -382,6 +427,8 @@ class SteeringRepository(
             Result.success(block(target))
         } catch (e: CancellationException) {
             throw e
+        } catch (t: SteerRefusedException) {
+            Result.failure(t)
         } catch (t: Throwable) {
             Result.failure(IOException(describe(t), t))
         } finally {
@@ -412,5 +459,12 @@ class SteeringRepository(
         const val ENDPOINT_CHANGED = "Cursor changed a private endpoint; this control is unavailable until the app is updated."
         private const val NOT_WIRED = "The chat's controls are not wired to the account service in this build."
         private const val NO_SESSION = "Cursor couldn't start a session for this key."
+        /** Under a row whose steer the account refused, the message still in its queue. */
+        const val STEER_REFUSED_NOTE = "Not steered: Cursor kept it queued for when this turn ends."
+        /** Under a row whose steer the account held for the next turn. */
+        const val STEER_HELD_NOTE = "Held for the agent's next turn."
     }
 }
+
+/** The account answered a steer with `OUTCOME_REJECTED`: the message was not delivered, and waits in its queue. */
+class SteerRefusedException(message: String) : IOException(message)

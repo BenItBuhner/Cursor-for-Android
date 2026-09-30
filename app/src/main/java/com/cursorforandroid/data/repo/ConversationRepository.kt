@@ -5820,8 +5820,8 @@ class ConversationRepository(
     }
 
     /**
-     * A word of this device's under the account's row for [followupId] (see [QueuePlacement.returned]): a steer from the
-     * device's card the account took into its queue but would not promote, which now waits there. Goes with the row.
+     * A word of this device's under the account's row for [followupId] (see [QueuePlacement.returned]): a steer — from
+     * the device's card or the account's row — the account would not promote, the message now waiting in its queue. Goes with the row.
      */
     fun noteQueuedNote(agentId: String, followupId: String, note: String) {
         val e = synchronized(entries) { entries[agentId] } ?: return
