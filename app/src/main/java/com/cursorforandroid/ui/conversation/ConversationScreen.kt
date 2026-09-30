@@ -899,6 +899,9 @@ fun ConversationScreen(
                             onMove = { item, up -> viewModel.queueMove(item.id, up) },
                             flights = queueFlights,
                             face = face,
+                            // A row being steered refuses its glyphs, as a steering device card does: it says why, in place.
+                            refused = refusedQueuedId == accountRows[at].id,
+                            onRefused = { item -> haptics.perform(Haptic.Reject); viewModel.refuseSteering(item.id) },
                         )
                     }
                 }
