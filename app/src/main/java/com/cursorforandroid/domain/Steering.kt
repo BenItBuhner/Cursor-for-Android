@@ -138,8 +138,15 @@ data class QueuePlacement(
      * said it holds them. The card shows them in flight, their actions held until the account knows their id.
      */
     val sendingIds: Set<String> = emptySet(),
+    /**
+     * The device queue's rows ([QueuedFollowUp.id]) sent from the card whose bubbles this frame's items show:
+     * the card leaves them out from this frame on, and stands for them until it (see `QueueHandover`), so the card
+     * closes in the very frame the bubble opens and the transcript moves once.
+     */
+    val filedQueueIds: Set<String> = emptySet(),
 ) {
-    val isEmpty: Boolean get() = deliveredIds.isEmpty() && deliveredTexts.isEmpty() && returned.isEmpty() && waiting.isEmpty() && shownIds.isEmpty() && shownTexts.isEmpty()
+    val isEmpty: Boolean get() =
+        deliveredIds.isEmpty() && deliveredTexts.isEmpty() && returned.isEmpty() && waiting.isEmpty() && shownIds.isEmpty() && shownTexts.isEmpty() && filedQueueIds.isEmpty()
 
     /** Whether [followup] is in the transcript now — filed under its run, or standing as the composer's bubble — and so not on the card. */
     fun holds(followup: PendingFollowup): Boolean =

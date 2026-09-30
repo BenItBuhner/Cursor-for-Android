@@ -168,6 +168,38 @@ class FollowUpRepositoryTest {
     }
 
     @Test
+    fun `the state that first shows a queued message's bubble names its row as filed, before the queue drops it`() = runBlocking<Unit> {
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        agents.refresh()
+        val followUps = repository()
+        followUps.enqueue("bc-1", "Now the tests")
+        val rowId = followUps.state("bc-1").value.queue.single().id
+
+        // Every state the chat publishes, as it publishes it, until the queue lets the row go.
+        val unfiled = mutableListOf<Set<String>>()
+        var filedWhenDropped: Set<String>? = null
+        val watch = launch(Dispatchers.Unconfined) {
+            conversations.state("bc-1").collect { state ->
+                val bubble = state.items.any { it is UserMessage && it.text == "Now the tests" }
+                if (bubble && filedWhenDropped == null && rowId !in state.queuePlacement.filedQueueIds) unfiled += state.queuePlacement.filedQueueIds
+            }
+        }
+        val drop = launch(Dispatchers.Unconfined) {
+            followUps.state("bc-1").first { s -> s.queue.none { it.id == rowId } }
+            filedWhenDropped = conversations.state("bc-1").value.queuePlacement.filedQueueIds
+        }
+        awaitUntil { streamer.connections.contains("run-1") }
+        finish("run-1")
+
+        awaitUntil { sent() == listOf("Now the tests") }
+        awaitUntil { filedWhenDropped != null }
+        watch.cancel()
+        drop.cancel()
+        assertWithMessage("states that showed the bubble while the card still stood for it").that(unfiled).isEmpty()
+        assertWithMessage("the chat's placement as the queue let the row go").that(filedWhenDropped).contains(rowId)
+    }
+
+    @Test
     fun `queued follow-ups go out one per turn, in order`() = runBlocking<Unit> {
         api.addRunningAgent("bc-1", "Agent", "run-1")
         agents.refresh()
@@ -1178,16 +1210,49 @@ class FollowUpRepositoryTest {
         awaitUntil { api.runRequests.size == 1 }
         assertThat(followUps.state("bc-1").value.queue.single().isSending).isTrue()
 
+        assertThat(followUps.isOnItsWay("bc-1", item.id)).isTrue()
         assertThat(followUps.sendNow("bc-1", item.id)).isFalse()
+        assertThat(followUps.sendNext("bc-1", item.id)).isFalse()
         assertThat(followUps.takeForEdit("bc-1", item.id)).isNull()
-        followUps.remove("bc-1", item.id)
+        // The removal says it took nothing, for the screen to say why rather than let the tap pass for a delete.
+        assertThat(followUps.remove("bc-1", item.id)).isFalse()
         assertThat(followUps.state("bc-1").value.queue).hasSize(1)
         assertThat(followUps.state("bc-1").value.draft.isEmpty).isTrue()
 
         gate.complete(Unit)
         awaitUntil { followUps.state("bc-1").value.queue.isEmpty() }
+        assertThat(followUps.isOnItsWay("bc-1", item.id)).isFalse()
         assertThat(sent()).containsExactly("Only once")
         assertThat(api.cancelled).isEmpty()
+    }
+
+    /** A held message's retry on the wire can be neither removed nor edited; once the server has refused it, it can, and is never sent. */
+    @Test
+    fun `a held follow-up can be removed once its retry is refused, and is never sent`() = runBlocking<Unit> {
+        api.addIdleAgent("bc-1", "Agent", "run-0")
+        agents.refresh()
+        api.busyCreateRun = true
+        val followUps = repository(retryBaseMs = 200)
+        val item = followUps.enqueue("bc-1", "Now the tests")
+        awaitUntil { followUps.state("bc-1").value.queue.single().let { it.busyRefusals == 1 && !it.isSending } }
+        val gate = CompletableDeferred<Unit>()
+        api.createRunGate = gate
+        awaitUntil { followUps.state("bc-1").value.queue.single().isSending }
+        assertThat(followUps.state("bc-1").value.queue.single().isHeld).isTrue()
+
+        assertThat(followUps.remove("bc-1", item.id)).isFalse()
+        assertThat(followUps.isOnItsWay("bc-1", item.id)).isTrue()
+
+        gate.complete(Unit)
+        awaitUntil { followUps.state("bc-1").value.queue.single().let { it.busyRefusals == 2 && !it.isSending } }
+        assertThat(followUps.isOnItsWay("bc-1", item.id)).isFalse()
+        assertThat(followUps.remove("bc-1", item.id)).isTrue()
+        assertThat(followUps.state("bc-1").value.queue).isEmpty()
+
+        api.busyCreateRun = false
+        delay(1_000)
+        assertThat(api.runRequests).hasSize(2)
+        assertThat(api.runs.keys.none { it.startsWith("run-followup") }).isTrue()
     }
 
     /**

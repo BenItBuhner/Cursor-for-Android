@@ -18,12 +18,17 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,7 +38,7 @@ import com.cursorforandroid.data.repo.NewChatDrafts
 import com.cursorforandroid.domain.AgentListOrganizer
 import com.cursorforandroid.domain.AgentRow
 import com.cursorforandroid.domain.CursorUser
-import com.cursorforandroid.domain.NewChatHome
+import com.cursorforandroid.domain.NewChatHomeChoice
 import com.cursorforandroid.domain.TranscriptHit
 import com.cursorforandroid.domain.UpdateState
 import com.cursorforandroid.notifications.NotificationPermissionPrompt
@@ -53,9 +58,11 @@ import com.cursorforandroid.share.ShareTarget
 import com.cursorforandroid.ui.components.SpinnerRing
 import com.cursorforandroid.ui.components.hitTestBoundary
 import com.cursorforandroid.ui.home.HomeScreen
+import com.cursorforandroid.ui.home.rememberNewChatHome
 import com.cursorforandroid.ui.media.MediaViewerHost
 import com.cursorforandroid.ui.media.rememberMediaViewerState
 import com.cursorforandroid.ui.settings.ExtendedModeUpgradeNotice
+import com.cursorforandroid.ui.panel.LocalHinge
 import com.cursorforandroid.ui.projects.ProjectEditorHost
 import com.cursorforandroid.ui.projects.ProjectEditorTarget
 import com.cursorforandroid.ui.settings.KeyboardShortcutsScreen
@@ -194,7 +201,19 @@ private fun AppShell(
     val mediaViewer = rememberMediaViewerState()
     val focusManager = LocalFocusManager.current
     // How the wide window shares its width between the rail, the chat and a panel pinned beside it (see ShellPanes).
-    val panes = remember { ShellPanes(graph.prefs, scope, railExpanded = { !sidebarCollapsed }, chatOnTop = { stack.top.screen is Screen.Agent }) }
+    // A fold splitting the window is read where the panes are worked out, so a change to it recomposes only what moves.
+    val windowHinge by rememberUpdatedState(LocalHinge.current)
+    val rtl by rememberUpdatedState(LocalLayoutDirection.current == LayoutDirection.Rtl)
+    val panes = remember {
+        ShellPanes(
+            graph.prefs,
+            scope,
+            railExpanded = { !sidebarCollapsed },
+            chatOnTop = { stack.top.screen is Screen.Agent },
+            hinge = { windowHinge?.value },
+            rtl = { rtl },
+        )
+    }
     // A fold, an unfold or a turn lays the whole window out again in one frame, so the rail is where the new window has
     // it in that frame: a rail still sliding once the window has changed would drag the chat and a pinned panel
     // through widths of their own after it. That includes making way for the chat's sheet, pinned open as the window
@@ -437,8 +456,10 @@ private fun AppShell(
     // has been read the shell assumes the default, which only ever hides what the setting would allow.
     val extendedMode by graph.extendedMode.enabled.collectAsStateWithLifecycle(initialValue = false)
     val extendedNoticePending by graph.extendedMode.noticePending.collectAsStateWithLifecycle(initialValue = false)
-    // Null until read, so a pane set to Projects never shows the recents for a frame first.
-    val newChatHome by graph.prefs.newChatHome.collectAsStateWithLifecycle(initialValue = null)
+    // Null until read, so a pane set to Projects never shows the recents for a frame first; the switch is read again
+    // as nullable so the New Chat page's automatic pick waits on it rather than taking the shell's assumed "off".
+    val newChatHomeChoice by graph.prefs.newChatHomeChoice.collectAsStateWithLifecycle(initialValue = null)
+    val extendedModeRead by graph.extendedMode.enabled.collectAsStateWithLifecycle(initialValue = null)
     if (extendedNoticePending && !isDemo) {
         ExtendedModeUpgradeNotice(
             onOpenSettings = {
@@ -552,7 +573,8 @@ private fun AppShell(
                         // The chat fades in over the pane, its prompt and composer carrying on from this one's.
                         onLaunchOpen = { id -> stack.gliding { openAgent(id) } },
                         rowActions = pane.rowActions,
-                        home = pane.newChatHome,
+                        // Picked here, inside the page's own entry, so each opening of the page picks afresh.
+                        home = rememberNewChatHome(pane.newChatHomeChoice, pane.projectsKnown, pane.listState, account = pane.user.email),
                         projectsAvailable = pane.projectsAvailable,
                         onNewProject = pane.onNewProject,
                         onOpenSettings = ::openSettings,
@@ -600,8 +622,9 @@ private fun AppShell(
         onOpenAgent = rowActions.onOpen,
         rowActions = rowActions,
         backEnabled = !drawerState.isOpen,
-        newChatHome = newChatHome,
+        newChatHomeChoice = newChatHomeChoice,
         projectsAvailable = isDemo || extendedMode,
+        projectsKnown = if (isDemo) true else extendedModeRead,
         onNewProject = if (isDemo || extendedMode) ({ projectEditor = ProjectEditorTarget.Create }) else null,
         onReorderProjects = { ids -> agentsViewModel.setProjectOrder(ids) },
         composerFocus = shortcuts.composerFocus,
@@ -836,10 +859,12 @@ private data class DetailPane(
     val rowActions: AgentRowActions,
     /** False while the drawer is over the pane: the gesture is the drawer's to close, not the stack's to pop. */
     val backEnabled: Boolean,
-    /** Settings › New chat page; null until the preference has been read. */
-    val newChatHome: NewChatHome?,
+    /** Settings › New chat page as chosen, or nothing chosen; null until the preference has been read. */
+    val newChatHomeChoice: NewChatHomeChoice?,
     /** Projects exist to pin: Extended mode is on, or this is the demo. */
     val projectsAvailable: Boolean,
+    /** [projectsAvailable], null until Extended mode's switch has been read. */
+    val projectsKnown: Boolean?,
     val onNewProject: (() -> Unit)?,
     /** The Projects as arranged on the New Chat page, first to last. */
     val onReorderProjects: (List<String>) -> Unit,

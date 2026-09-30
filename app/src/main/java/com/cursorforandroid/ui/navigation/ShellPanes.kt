@@ -36,6 +36,7 @@ import com.cursorforandroid.ui.components.PaneSide
 import com.cursorforandroid.ui.components.backGestureEdges
 import com.cursorforandroid.ui.components.rememberBackGestureEdges
 import com.cursorforandroid.ui.components.setOffAhead
+import com.cursorforandroid.ui.panel.Hinge
 import com.cursorforandroid.ui.panel.LocalPinnedPanel
 import com.cursorforandroid.ui.panel.PaneWidthClass
 import com.cursorforandroid.ui.panel.PaneWidths
@@ -58,7 +59,8 @@ import kotlinx.coroutines.launch
  * ([PaneWidths]), with what the reader has made of it: the width the rail was dragged to and the share of the window
  * the panel was, and the panel open or shut for each window size class, all kept for the device ([PreferencesStore])
  * and read once as the shell starts. It is every chat's [PinnedPanel], so the panel left open beside one chat stands
- * open beside the next.
+ * open beside the next. Across a fold that splits the window ([hinge], from the window's left edge) the panes keep to
+ * either side of it instead.
  */
 @Stable
 internal class ShellPanes(
@@ -66,6 +68,8 @@ internal class ShellPanes(
     private val scope: CoroutineScope,
     private val railExpanded: () -> Boolean,
     private val chatOnTop: () -> Boolean,
+    private val hinge: () -> Hinge? = { null },
+    private val rtl: () -> Boolean = { false },
 ) : PinnedPanel {
     private var configured by mutableStateOf(0.dp)
     private var measured by mutableStateOf<Dp?>(null)
@@ -83,15 +87,24 @@ internal class ShellPanes(
     /** The shell's width: as last measured, and the configuration's from a change until the shell is measured again. */
     val window: Dp get() = measured ?: configured
 
-    val widths: PaneWidths by derivedStateOf {
-        PaneWidths.of(
-            window = window,
-            railExpanded = railExpanded(),
-            railWidth = railWant ?: CursorDimens.sidebarWidth,
-            panelOpen = chatOnTop() && open == true,
-            panelFraction = panelFraction,
-        )
-    }
+    /**
+     * The panes as the window has them now, worked out from the state behind them on every read rather than held in
+     * derived state: the rail and the chat's panel read it at layout, each observing that state itself, so a change
+     * heard off the main thread while one of them is laid out again still reaches the other. Read in composition only
+     * through `derivedStateOf`, so a change that leaves what is read as it was recomposes nothing.
+     */
+    val widths: PaneWidths
+        get() {
+            val window = window
+            return PaneWidths.of(
+                window = window,
+                railExpanded = railExpanded(),
+                railWidth = railWant ?: CursorDimens.sidebarWidth,
+                panelOpen = chatOnTop() && openAt(window) == true,
+                panelFraction = panelFraction,
+                hinge = hinge()?.fromStart(window, rtl()),
+            )
+        }
 
     /** The rail is away for want of room beside a pinned panel, not put away by the reader. */
     val railYields: Boolean get() = railExpanded() && !widths.railShown
@@ -126,17 +139,19 @@ internal class ShellPanes(
      * Open or shut as the window's size class was left; shut on a window with no room to pin it, a Fold's cover. Read
      * coarse, so what reads it in composition sees the window's class change and not every width.
      */
-    override val open: Boolean? by derivedStateOf {
-        when {
-            !PaneWidths.pinnable(window) -> false
-            PaneWidthClass.of(window) == PaneWidthClass.Medium -> openMedium
-            else -> openExpanded
-        }
+    override val open: Boolean? by derivedStateOf { openAt(window) }
+
+    private fun openAt(window: Dp): Boolean? = when {
+        !PaneWidths.pinnable(window) -> false
+        PaneWidthClass.of(window) == PaneWidthClass.Medium -> openMedium
+        else -> openExpanded
     }
 
     override val width: Dp get() = widths.panel
 
     override val splits: Boolean get() = widths.splits
+
+    override val endPane: Dp? get() = widths.endPane
 
     /**
      * The configuration's screen width, as the composition that sees it hears it ([ShellWindow.follow]): a change drops
@@ -251,6 +266,7 @@ internal fun WidePanes(
     // The rail's edge as it is drawn, sliding in and out included, for the resize strip to ride.
     var railEdge by remember { mutableIntStateOf(0) }
     val railYields by remember(panes) { derivedStateOf { panes.railYields } }
+    val keepsToHinge by remember(panes) { derivedStateOf { panes.widths.endPane != null } }
     SideEffect { panes.railYielded = railYields }
     val railSlide = remember { Animatable(if (railShown) 1f else 0f) }
     DisposableEffect(panes, railSlide) {
@@ -285,7 +301,7 @@ internal fun WidePanes(
                 detail(Modifier.weight(1f).fillMaxHeight())
             }
         }
-        if (railShown) {
+        if (railShown && !keepsToHinge) {
             PaneResizeEdge(
                 side = PaneSide.Start,
                 paneWidth = { panes.widths.rail },

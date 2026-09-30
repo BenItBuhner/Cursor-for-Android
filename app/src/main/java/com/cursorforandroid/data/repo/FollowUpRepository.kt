@@ -346,14 +346,28 @@ class FollowUpRepository(
         return item
     }
 
-    /** Takes a queued follow-up away. One in flight, or steered, stays until the server has answered. */
-    fun remove(agentId: String, id: String) {
+    /**
+     * Takes a queued follow-up away. False when nothing was taken: the message is gone, or [isOnItsWay] — its request
+     * is out, and the run it asks for cannot be called back, so it stays until the server has answered.
+     */
+    fun remove(agentId: String, id: String): Boolean {
         val e = entry(agentId)
-        synchronized(e) {
-            e.update { copy(queue = queue.filterNot { it.id == id && !it.isSending && !it.isSteered }) }
+        val removed = synchronized(e) {
+            if (e.state.value.queue.none { it.id == id && !it.isOnItsWay }) return@synchronized false
+            e.update { copy(queue = queue.filterNot { it.id == id }) }
+            true
         }
-        e.scheduleSave()
+        if (removed) e.scheduleSave()
+        return removed
     }
+
+    /**
+     * Whether queued follow-up [id] is on its way to the server — its request out (a held message's retry among them,
+     * though its card still reads as waiting), or steered — so it can be neither removed, edited nor sent again until
+     * the server has answered.
+     */
+    fun isOnItsWay(agentId: String, id: String): Boolean =
+        entry(agentId).state.value.queue.any { it.id == id && it.isOnItsWay }
 
     /**
      * Hands a queued follow-up back to the composer to be reworked: it leaves the queue with its model and mode, and
@@ -938,7 +952,8 @@ class FollowUpRepository(
             runToFollow(e.agentId).collectLatest { runId ->
                 if (runId != null) {
                     runCatching {
-                        hub.snapshots(e.agentId, runId).transformWhile { emit(it); !it.finished }.collect { }
+                        // Only the end is read here, and a sampled subscriber hears that at once (see LiveRunHub.snapshots).
+                        hub.snapshots(e.agentId, runId, sampleMs = RunMonitor.SAMPLE_MS).transformWhile { emit(it); !it.finished }.collect { }
                     }.onFailure { if (it is CancellationException) throw it }
                 }
             }
@@ -1030,9 +1045,10 @@ class FollowUpRepository(
                 modelParams = item.modelParams,
                 modelDisplayName = item.modelDisplayName,
                 showEcho = false,
+                queuedId = item.id,
             ).map { it.id }
         } else {
-            val staged = conversations.stageFollowUp(e.agentId, item.previewText, item.images.map { it.image }, item.files.map { it.file }, show = false)
+            val staged = conversations.stageFollowUp(e.agentId, item.previewText, item.images.map { it.image }, item.files.map { it.file }, show = false, queuedId = item.id)
             sendStagedItem(e, staged, item)
         }
         if (generation.get() != startedIn) return
@@ -1057,7 +1073,9 @@ class FollowUpRepository(
                             handed.fold(
                                 onSuccess = { (runId, followupId) ->
                                     // A run named behind a turn under way has not started: the message is queued all the same.
-                                    val queued = runId == null || conversations.waitsBehindTurn(e.agentId, runId)
+                                    // So is one the server does not have under way: it has just refused the run request as busy.
+                                    val queued = runId == null || conversations.waitsBehindTurn(e.agentId, runId) || !agents.runStarted(e.agentId, runId, turnUnderWay = true)
+                                    if (generation.get() != startedIn) return
                                     e.attempt(item, VIA_ACCOUNT, if (runId == null) "queued-on-account" else if (queued) "queued-behind-turn" else "accepted", runId)
                                     runId?.let { e.acceptedId(it) }
                                     e.update { copy(queue = queue.filterNot { it.id == item.id }) }

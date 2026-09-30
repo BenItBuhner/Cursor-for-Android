@@ -137,6 +137,8 @@ class FaultServer(
     val pending: MutableMap<String, MutableList<Pending>> = ConcurrentHashMap()
     /** How long the account's list keeps naming a followup after the run it started (or the steer it became) exists. */
     @Volatile var queueLagMs: Long = 0L
+    /** What each `ListPendingFollowups` answer named, by followup id, in the order the server made them. */
+    val queueAnswers = CopyOnWriteArrayList<List<String>>()
     /**
      * A Project's coordinator: behind a turn under way the account names, in its answer, the run the queued message
      * will start ([Pending.runId]) and starts that very run once the turn is over (see [deliverNext]), the list naming
@@ -153,6 +155,19 @@ class FaultServer(
      */
     @Volatile var datesQueuedRunsAtQueue = false
     private val queuedRunDates = ConcurrentHashMap<String, String>()
+    /**
+     * The account's record takes the prompt of a run it starts on a message ([startRun]) as the record of a turn started
+     * elsewhere does: the Beta engine then draws the message from the record, whatever `/v0` answers. Off by default,
+     * for the tests written before the record carried deliveries.
+     */
+    @Volatile var recordsDeliveries = false
+    /**
+     * Chats the account is on a turn of that the agent's latest run is not: a Project's injected turn (a worker's
+     * report, a timer), which runs with no run in the `/v1` list, or an older run the account went on with past a newer
+     * one it cancelled. A follow-up joins the queue behind that turn — named a run in a Project (see [namesQueuedRuns])
+     * — and `POST /runs` is refused as busy, until [endAccountTurn].
+     */
+    val accountTurns: MutableSet<String> = ConcurrentHashMap.newKeySet()
     /** Whether the account may start the next run on a queued message on its own the moment the turn ends (see [endTurn]); tests deliver by hand otherwise. */
     @Volatile var autoDeliver = false
     /** The followups delivered, in order, and the run each started (a steer's run is the one it was delivered into). */
@@ -263,11 +278,19 @@ class FaultServer(
          * The request is processed at once and its answer held on its way back until [release]: a reply exactly as
          * slow as the test needs, where a round trip set long enough stood in for one — and slowed every other request
          * the server met meanwhile, the queue's poll among them (#281's CI, `QueuedMessagePlacementTest`).
+         * [processedOnRelease] holds the request itself instead, unprocessed until [release], and answers it from what
+         * the server holds then: a request that reached a busy backend late, answered after one sent behind it.
          */
-        class Held : Fault {
+        class Held(val processedOnRelease: Boolean = false) : Fault {
             private val gate = java.util.concurrent.CountDownLatch(1)
+            /** A request has met this fault: its answer made and held, or — [processedOnRelease] — the request waiting unanswered. */
+            @Volatile var reached = false
+                private set
             fun release() = gate.countDown()
-            internal fun await() = gate.await(HOLD_CEILING_S, TimeUnit.SECONDS)
+            internal fun await(): Boolean {
+                reached = true
+                return gate.await(HOLD_CEILING_S, TimeUnit.SECONDS)
+            }
         }
     }
 
@@ -403,6 +426,10 @@ class FaultServer(
         val fault = faults[route]?.let { queue -> take(queue, url.encodedPath) }?.fault
             ?: standing[route]?.takeIf { it.matches(url.encodedPath) }?.fault
         seen += Seen(route, request.method ?: "", request.path ?: "", nowMillis(), fault, request.getHeader("Last-Event-ID"))
+        if (fault is Fault.Held && fault.processedOnRelease) {
+            held += fault
+            fault.await()
+        }
         val segments = url.encodedPath.trimStart('/').split('/')
         val processed = when (fault) {
             is Fault.LostReply -> fault.processed
@@ -484,8 +511,10 @@ class FaultServer(
             Fault.TruncatedBody -> answer.setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY).withWeather()
             is Fault.Silence -> MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
             is Fault.Held -> {
-                held += fault
-                fault.await()
+                if (!fault.processedOnRelease) {
+                    held += fault
+                    fault.await()
+                }
                 answer.withWeather()
             }
         }
@@ -507,7 +536,7 @@ class FaultServer(
         val agent = agents[agentId] ?: return notFound()
         // One turn at a time, as the real server has it: a second request while the latest run is under way is
         // refused as busy — which is what a duplicate of an accepted follow-up meets.
-        val onATurn = agent.latestRunId?.let { runs[it]?.status }?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } == true
+        val onATurn = agentId in accountTurns || agent.latestRunId?.let { runs[it]?.status }?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } == true
         if (busy || onATurn) return json(409, error("agent_busy", "Agent is busy."))
         if (!processed) return json(500, error("not_processed", "The fault said this request was never processed."))
         val sequence = ids.incrementAndGet()
@@ -585,7 +614,7 @@ class FaultServer(
         val synchronous = body["synchronous"]?.jsonPrimitive?.booleanOrNull == true
         val agent = agents[agentId] ?: return json(404, connectError("not_found", "no such composer"))
         if (!processed) return json(500, connectError("internal", "The fault said this request was never processed."))
-        val onATurn = agent.latestRunId?.let { runs[it]?.status }?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } == true
+        val onATurn = agentId in accountTurns || agent.latestRunId?.let { runs[it]?.status }?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } == true
         if (onATurn && !synchronous) {
             if (!namesQueuedRuns) {
                 pending.getOrPut(agentId) { CopyOnWriteArrayList() } += Pending(followupId, text, clock())
@@ -615,6 +644,7 @@ class FaultServer(
         val agentId = body["bcId"]?.jsonPrimitive?.contentOrNull ?: return json(400, connectError("invalid_argument", "bcId is required"))
         val now = nowMillis()
         val listed = pending[agentId].orEmpty().filter { p -> p.consumedAtServerMs?.let { now < it + queueLagMs } ?: true }
+        queueAnswers += listed.map { it.followupId }
         val items = listed.joinToString(",") { p ->
             """{"followupId":"${p.followupId}","text":${CursorJson.encodeToString(String.serializer(), p.text)},"createdAtMs":"${p.createdAtMs}","source":"BACKGROUND_COMPOSER_SOURCE_MOBILE"}"""
         }
@@ -734,6 +764,7 @@ class FaultServer(
         agents[agentId] = agent.copy(status = "ACTIVE", latestRunId = runId, updatedAt = now)
         v0[agentId]?.let { v0[agentId] = it.copy(status = "RUNNING") }
         transcripts[agentId] = transcripts[agentId].orEmpty() + V0ConversationMessageDto("$runId-u", "user_message", text)
+        if (recordsDeliveries) records[agentId]?.let { steps -> records[agentId] = steps + buildJsonObject { put("humanMessage", buildJsonObject { put("text", text) }) } }
         sent += text to runId
         return run
     }
@@ -764,6 +795,21 @@ class FaultServer(
         agents[agentId] = agent.copy(status = "IDLE", updatedAt = endedAt)
         v0[agentId]?.let { v0[agentId] = it.copy(status = "FINISHED") }
         // The account's list says the turn is over too; still saying running, it kept a chat at RUNNING in Extended mode.
+        composers[agentId]?.takeIf { it.running }?.let { composers[agentId] = it.copy(running = false) }
+        return if (autoDeliver) deliverNext(agentId, nextLog) else null
+    }
+
+    /**
+     * The turn [accountTurns] holds [agentId] on ends — [runId], when it is a listed run (the older one the account
+     * went on with), FINISHED with its result — and the account's list says the chat is idle; then, with
+     * [autoDeliver], the next queued message is delivered.
+     */
+    fun endAccountTurn(agentId: String, runId: String? = null, durationMs: Long = 40_000L, nextLog: List<Pair<String, String>> = emptyList()): RunDto? {
+        accountTurns.remove(agentId)
+        runId?.let { id ->
+            runs[id]?.let { run -> runs[id] = run.copy(status = "FINISHED", durationMs = durationMs, updatedAt = Instant.ofEpochMilli(clock()).toString(), result = null) }
+            appendRunEvents(id, listOf("result" to """{"runId":"$id","status":"FINISHED","text":"","durationMs":$durationMs}"""))
+        }
         composers[agentId]?.takeIf { it.running }?.let { composers[agentId] = it.copy(running = false) }
         return if (autoDeliver) deliverNext(agentId, nextLog) else null
     }

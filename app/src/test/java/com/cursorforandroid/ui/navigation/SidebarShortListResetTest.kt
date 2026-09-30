@@ -180,8 +180,11 @@ class SidebarShortListResetTest {
     fun `beside the pane, opening a chat from past the cut cuts the group back with that chat kept as the sixth row`() {
         showShell(wide = true)
         val firstFive = listedPinned()
+        // A chat at rest: the running one past the cut (Cesium Revenue Strategy) is written to as its opened stream
+        // works, and that lifts it into the first five on its own a moment after it opens.
+        val pastTheCut = "Latest release process"
+        assertThat(firstFive).doesNotContain(pastTheCut)
         listInFull()
-        val pastTheCut = (pinned.values.toSet() - firstFive).first()
 
         tapInSidebar(pastTheCut)
         compose.waitUntil(20_000) { exists(hasTestTag("chat-header") and hasContentDescription(pastTheCut)) }
