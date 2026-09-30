@@ -3948,11 +3948,14 @@ class ConversationRepository(
      * 2026-09-30: the next-run look found only the cancelled run, and the chat sat on it, running and following
      * nothing). The newest run the list still has active other than [endedRunId], its record read again by id and
      * the account asked again: followed only when both still call it under way (see [Entry.statusOf]). One the
-     * record calls over is merged as such, and asked about no more.
+     * record calls over is merged as such, and asked about no more. Asked only while the account calls the chat
+     * running, and never about the run a stream is already open on.
      */
     private suspend fun runOutlivingEnd(e: Entry, endedRunId: String?): RunDto? {
         val agentId = e.agentId
-        val candidate = synchronized(e) { e.newestListedActive() }?.takeUnless { it.id == endedRunId } ?: return null
+        val candidate = synchronized(e) {
+            e.newestListedActive()?.takeUnless { it.id == endedRunId || !e.rowSaysRunning() || (e.streamJob?.isActive == true && e.state.value.activeRunId == it.id) }
+        } ?: return null
         composerStatus?.let { poll -> runCatching { poll(agentId) }.getOrElse { t -> if (t is CancellationException) throw t; null } }
             ?.let { agents.applyAccountSnapshots(listOf(it)) }
         val run = runCatching { net(agentId, "run"); agents.runRecord(agentId, candidate.id, session.current.api) }.getOrElse { t -> if (t is CancellationException) throw t; null } ?: return null
