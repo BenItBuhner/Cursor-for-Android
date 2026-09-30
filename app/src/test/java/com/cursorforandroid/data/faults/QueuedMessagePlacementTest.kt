@@ -18,6 +18,7 @@ import java.io.File
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -31,6 +32,7 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 
 /**
  * A message sent while the coordinator is mid-turn goes into the account's queue: the card above the composer is what
@@ -66,6 +68,11 @@ class QueuedMessagePlacementTest {
     private lateinit var turns: List<LongProject.Turn>
     private val live get() = turns.last()
     private var recorder: Job? = null
+    // One thread, as the screen's main thread: the two flows' collectors on a pool race each other, so a frame could
+    // pair the transcript's newer publish with the queue value the repository had already replaced before it — the
+    // read that lets a filed message go publishes its empty list, then prunes the message's hold, and a frame of the
+    // old list with the new hold showed the message on the card and in the transcript at once.
+    private val screenThread = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
     /** What the screen pairs: the account's queue as last read, and the transcript's frame, with when the pair was seen. */
     private class Frame(val controls: ConversationControls, val state: ConversationState, val atNanos: Long) {
@@ -107,6 +114,7 @@ class QueuedMessagePlacementTest {
         recorder?.cancel()
         rig?.let { it.steering.detach(agentId); it.close() }
         server.close()
+        screenThread.close()
     }
 
     /** The rig, its account queue read every [pollMs]: the card's staleness (production: 10 s). */
@@ -135,7 +143,7 @@ class QueuedMessagePlacementTest {
         agents.refresh()
         conversations.attach(agentId)
         steering.attach(agentId)
-        recorder = scope.launch {
+        recorder = scope.launch(screenThread) {
             combine(steering.state(agentId), conversations.state(agentId)) { c, s -> c to s }.collect { (c, s) -> frames += Frame(c, s, System.nanoTime()) }
         }
         awaitUntil(60_000) { state.let { !it.isLoading && it.isStreaming } && steering.state(agentId).value.isQueueAvailable }
@@ -315,7 +323,7 @@ class QueuedMessagePlacementTest {
         rig.agents.refresh()
         rig.conversations.attach(agentId)
         rig.steering.attach(agentId)
-        recorder = rig.scope.launch {
+        recorder = rig.scope.launch(screenThread) {
             combine(rig.steering.state(agentId), rig.conversations.state(agentId)) { c, s -> c to s }.collect { (c, s) -> frames += Frame(c, s, System.nanoTime()) }
         }
         rig.awaitUntilOr(60_000, "the chat open") { state.let { !it.isLoading && it.items.isNotEmpty() } && rig.steering.state(agentId).value.isQueueAvailable }
@@ -512,7 +520,7 @@ class QueuedMessagePlacementTest {
         first.awaitUntilOr(10_000, "the list to name it") { first.steering.state(agentId).value.queue.any { it.id == followupId } }
         val listed = first.steering.state(agentId).value.queue.single { it.id == followupId }
         assertThat(listed.attachments).isEmpty()
-        val card = first.steering.state(agentId).value.placed(state.queuePlacement).queue.single { it.id == followupId }
+        val card = state.let { s -> first.steering.state(agentId).value.placed(s.queuePlacement) }.queue.single { it.id == followupId }
         assertThat(card.attachments.map { it.isFile }).containsExactly(false, true).inOrder()
         card.attachments.forEach { assertThat(File(it.path).isFile).isTrue() }
 
@@ -525,7 +533,7 @@ class QueuedMessagePlacementTest {
         again.awaitUntilOr(10_000, "the waiting message back") { state.queuePlacement.waiting.any { it.id == followupId } }
         assertThat(state.queuePlacement.waiting.single { it.id == followupId }.attachments).isEqualTo(card.attachments)
         again.awaitUntilOr(10_000, "the list read again") { again.steering.state(agentId).value.queue.any { it.id == followupId } }
-        val restored = again.steering.state(agentId).value.placed(state.queuePlacement).queue.single { it.id == followupId }
+        val restored = state.let { s -> again.steering.state(agentId).value.placed(s.queuePlacement) }.queue.single { it.id == followupId }
         assertThat(restored.attachments).isEqualTo(card.attachments)
     }
 
@@ -722,7 +730,8 @@ class QueuedMessagePlacementTest {
         }
         val (first, second, third) = queued.map { it.first }
         rig.awaitUntilOr(20_000, "the list to name all three") { rig.steering.state(agentId).value.queue.map { it.id }.containsAll(listOf(first, second, third)) }
-        fun card() = rig.steering.state(agentId).value.placed(state.queuePlacement).queue
+        // The transcript's frame first, then the queue: the screen never pairs a frame with a queue value older than it.
+        fun card() = state.let { s -> rig.steering.state(agentId).value.placed(s.queuePlacement) }.queue
         assertThat(card().map { it.id }).containsExactly(first, second, third).inOrder()
 
         // Edit the second: its row reads the new words under the same id, the others untouched.
