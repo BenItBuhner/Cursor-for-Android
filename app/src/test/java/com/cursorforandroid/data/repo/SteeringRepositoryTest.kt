@@ -22,9 +22,12 @@ import com.cursorforandroid.domain.QueueLoad
 import com.cursorforandroid.domain.SteerOutcome
 import com.cursorforandroid.domain.ToolPayload
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -35,6 +38,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 
@@ -54,6 +58,8 @@ class SteeringRepositoryTest {
         @Volatile var runId: String? = "run-new"
         @Volatile var resolution = InteractionResolution.SIGNAL_ENQUEUED
         @Volatile var outcome = SteerOutcome.QUEUED
+        /** Answers for the next reads of the queue, taken in the order the reads reach the account and awaited; a read none is left for answers [queue] at once. */
+        val answers = ConcurrentLinkedQueue<CompletableDeferred<List<PendingFollowup>>>()
 
         private fun record(call: String) {
             calls += call
@@ -72,7 +78,7 @@ class SteeringRepositoryTest {
 
         override suspend fun listPending(agentId: String): List<PendingFollowup> {
             record("list:$agentId")
-            return queue
+            return answers.poll()?.await() ?: queue
         }
 
         override suspend fun updatePending(agentId: String, followupId: String, text: String) = record("update:$followupId:$text")
@@ -323,6 +329,101 @@ class SteeringRepositoryTest {
             Triple(listOf("fu-2"), listOf("fu-2"), QueueLoad.Loaded),
             Triple(emptyList<String>(), emptyList<String>(), QueueLoad.Loaded),
         ).inOrder()
+    }
+
+    /**
+     * Reads of the queue overlap and the account answers them in any order, with nothing to order the answers by: a
+     * read begun first can be answered after the account let a message go and land first, and one begun behind it be
+     * answered from before and land last. That answer is the older word: it does not bring the message back, in the
+     * controls or in what the transcript hears. A read begun once the let-go had landed was answered after it, and a
+     * message it lists again is listed.
+     */
+    @Test
+    fun `an answer landing last from before the account let a message go does not bring it back, a read begun after does`() = runBlocking<Unit> {
+        extended = true
+        api.addRunningAgent("bc-1", "Chat", "run-9")
+        val agents = agents()
+        agents.refresh()
+        val heard = CopyOnWriteArrayList<List<String>>()
+        val steering = steering(agents, onQueueRead = { _, pending, _ -> heard += pending.map { it.id } })
+        val delivered = PendingFollowup("fu-1", "First")
+        val waiting = PendingFollowup("fu-2", "Second")
+        account.queue = listOf(delivered, waiting)
+        steering.refreshQueue("bc-1")
+
+        val fresh = CompletableDeferred<List<PendingFollowup>>()
+        val stale = CompletableDeferred<List<PendingFollowup>>()
+        account.answers += listOf(fresh, stale)
+        val firstRead = async(start = CoroutineStart.UNDISPATCHED) { steering.refreshQueue("bc-1") }
+        val secondRead = async(start = CoroutineStart.UNDISPATCHED) { steering.refreshQueue("bc-1") }
+        fresh.complete(listOf(waiting))
+        firstRead.await()
+        assertThat(steering.state("bc-1").value.queue).containsExactly(waiting)
+        stale.complete(listOf(delivered, waiting))
+        secondRead.await()
+        assertThat(steering.state("bc-1").value.queue).containsExactly(waiting)
+        assertThat(steering.state("bc-1").value.queueLoad).isEqualTo(QueueLoad.Loaded)
+
+        steering.refreshQueue("bc-1")
+        assertThat(steering.state("bc-1").value.queue).containsExactly(delivered, waiting).inOrder()
+        assertThat(heard).containsExactly(listOf("fu-1", "fu-2"), listOf("fu-2"), listOf("fu-2"), listOf("fu-1", "fu-2")).inOrder()
+    }
+
+    /**
+     * The same for a message sent from here that the account let go of before any read had listed it — the turn ended
+     * as it was queued, and the account started the next run on it: the send is what says the account held it.
+     */
+    @Test
+    fun `a message sent from here and let go of before any read listed it does not come back with an older answer`() = runBlocking<Unit> {
+        extended = true
+        api.addRunningAgent("bc-1", "Chat", "run-9")
+        val agents = agents()
+        agents.refresh()
+        val steering = steering(agents)
+        steering.refreshQueue("bc-1")
+        val sent = PendingFollowup("fu-9", "Queued behind")
+        assertThat(steering.sendFollowup("bc-1", AccountFollowup(sent.text, followupId = sent.id), refresh = false).isSuccess).isTrue()
+
+        val fresh = CompletableDeferred<List<PendingFollowup>>()
+        val stale = CompletableDeferred<List<PendingFollowup>>()
+        account.answers += listOf(fresh, stale)
+        val firstRead = async(start = CoroutineStart.UNDISPATCHED) { steering.refreshQueue("bc-1") }
+        val secondRead = async(start = CoroutineStart.UNDISPATCHED) { steering.refreshQueue("bc-1") }
+        fresh.complete(emptyList())
+        firstRead.await()
+        stale.complete(listOf(sent))
+        secondRead.await()
+        assertThat(steering.state("bc-1").value.queue).isEmpty()
+    }
+
+    /**
+     * What an answer landing last adds stands, whatever order the answers came in: a message another client queued
+     * meanwhile, and one sent from here that the answer to a read begun before the send could not have listed.
+     */
+    @Test
+    fun `an answer landing last still shows what the account has newly queued`() = runBlocking<Unit> {
+        extended = true
+        api.addRunningAgent("bc-1", "Chat", "run-9")
+        val agents = agents()
+        agents.refresh()
+        val steering = steering(agents)
+        val waiting = PendingFollowup("fu-1", "First")
+        account.queue = listOf(waiting)
+        steering.refreshQueue("bc-1")
+
+        val beforeSend = CompletableDeferred<List<PendingFollowup>>()
+        val afterSend = CompletableDeferred<List<PendingFollowup>>()
+        account.answers += listOf(beforeSend, afterSend)
+        val firstRead = async(start = CoroutineStart.UNDISPATCHED) { steering.refreshQueue("bc-1") }
+        val sent = PendingFollowup("fu-2", "From here")
+        assertThat(steering.sendFollowup("bc-1", AccountFollowup(sent.text, followupId = sent.id), refresh = false).isSuccess).isTrue()
+        val secondRead = async(start = CoroutineStart.UNDISPATCHED) { steering.refreshQueue("bc-1") }
+        beforeSend.complete(listOf(waiting))
+        firstRead.await()
+        val elsewhere = PendingFollowup("fu-3", "From the desktop")
+        afterSend.complete(listOf(waiting, sent, elsewhere))
+        secondRead.await()
+        assertThat(steering.state("bc-1").value.queue).containsExactly(waiting, sent, elsewhere).inOrder()
     }
 
     @Test
