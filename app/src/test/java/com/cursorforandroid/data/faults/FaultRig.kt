@@ -179,11 +179,15 @@ class FaultRig(
         .addNetworkInterceptor(countBodies)
         .build()
     val api: CursorApi = CursorApiFactory.retrofit(client, baseUrl)
+    private val sseClient = CursorApiFactory.sseClient(client).newBuilder().readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS).build()
+    /** Where the run streams are read over `http2`, as the app reads them (see `RunStreamMux`); counted on the wire with the rest. */
+    val streamMux = com.cursorforandroid.data.api.RunStreamMux(sseClient, onOpen = { calls.incrementAndGet() }, onRead = { bytesIn.addAndGet(it) })
     val streamer = SseRunStreamer(
-        CursorApiFactory.sseClient(client).newBuilder().readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS).build(),
+        sseClient,
         key,
         urlFor = { agentId, runId -> "${baseUrl}v1/agents/$agentId/runs/$runId/stream" },
         maxAttempts = streamAttempts,
+        mux = streamMux,
     )
     val prefs = PreferencesStore(context)
     val backend = CursorBackend(api, streamer, isDemo = false)

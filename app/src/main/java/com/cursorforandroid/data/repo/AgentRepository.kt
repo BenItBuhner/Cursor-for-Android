@@ -485,8 +485,11 @@ class AgentRepository(
      */
     private val overruledRunning = ConcurrentHashMap<String, Long>()
 
-    /** [startedAtMillis] is the run's `createdAt` when the list has read its record ([runStarts]); null when it never has. */
-    private class EndedRun(val runId: String, val status: RunStatus, val startedAtMillis: Long?)
+    /**
+     * [startedAtMillis] is the run's `createdAt` when the list has read its record ([runStarts]); null when it never has.
+     * [notedAtMillis] is when this device learned of the end, on its own clock: what the account's word is placed against.
+     */
+    private class EndedRun(val runId: String, val status: RunStatus, val startedAtMillis: Long?, val notedAtMillis: Long = AppClock.now())
 
     /**
      * When each agent's last few runs began, by run id: every run record the list reads passes [known], which
@@ -746,6 +749,9 @@ class AgentRepository(
      * that run active in the chat either (see `ConversationRepository.Entry.statusOf`).
      */
     fun endedStatus(agentId: String, runId: String?): RunStatus? = runId?.let { id -> endedRuns[agentId]?.takeIf { it.runId == id }?.status }
+
+    /** When this device learned of the end of [agentId]'s run it last saw end (see [endedRuns]), on its own clock; null when it knows of none. */
+    fun endedNotedAt(agentId: String): Long? = endedRuns[agentId]?.notedAtMillis
 
     /**
      * True when [run] began before the run of [agentId] this device last saw end (see [endedRuns]) — and so is over
