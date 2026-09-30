@@ -823,6 +823,64 @@ class QueuedMessagePlacementTest {
         }
     }
 
+    // -- (11) reads answered out of order: the answer landing last is from before the account let the message go -------
+
+    /**
+     * Reads of the account's queue overlap — the poll, the one a filing asks for, the one after an edit — and nothing
+     * orders the account's answers but when they land. A read that reaches a busy backend late is answered after the
+     * account let the filed message go, and lands first; one sent behind it is answered at once, from before, and
+     * lands last. That answer is the older word: it must not put the message back on the card beside its filing, nor
+     * back in the list the controls hold, for the poll it would otherwise stand for (10 s in the app).
+     */
+    @Test
+    fun `an answer from before the account let a filed message go, landing last, does not put it back on the card`() = runBlocking<Unit> {
+        // The account keeps naming the consumed followup until the test lets it go, and no poll comes in between.
+        server.queueLagMs = Long.MAX_VALUE / 4
+        val rig = rig(pollMs = 600_000L)
+        rig.open()
+        val sentAt = System.nanoTime()
+        val followupId = rig.queueOnAccount(MESSAGE)
+        rig.awaitUntilOr(20_000, "the list to name it") { rig.steering.state(agentId).value.queue.any { it.id == followupId } }
+        // The account starts the next run on it; the transcript files it, and the read the filing asks for still names it.
+        server.endTurn(agentId)
+        val next = server.deliverNext(agentId, log = LongProject.turns(firstAt, turns = TURNS + 1).last().log)!!
+        server.outage(Route.Stream, Fault.StreamCut(events = 3), path = "/${next.id}/")
+        val readsBeforeFiling = server.requests(Route.QueueList).size
+        rig.awaitUntilOr(45_000, "the filing") { state.queuePlacement.deliveredIds.contains(followupId) && state.items.any { it is UserMessage && it.text == MESSAGE } }
+        rig.awaitUntilOr(10_000, "the read the filing asks for") { server.requests(Route.QueueList).size > readsBeforeFiling && rig.steering.state(agentId).value.queueLoad == com.cursorforandroid.domain.QueueLoad.Loaded }
+        assertThat(rig.steering.state(agentId).value.queue.map { it.id }).contains(followupId)
+        assertThat(state.let { s -> rig.steering.state(agentId).value.placed(s.queuePlacement) }.queue).isEmpty()
+
+        // Two reads overlap: the first held at the server unanswered, the second answered at once — the account still
+        // naming the message — and held on its way back.
+        val late = Fault.Held(processedOnRelease = true)
+        val slow = Fault.Held()
+        server.script(Route.QueueList, late, slow)
+        val first = async { rig.steering.refreshQueue(agentId) }
+        rig.awaitUntilOr(10_000, "the first read at the server") { late.reached }
+        val second = async { rig.steering.refreshQueue(agentId) }
+        rig.awaitUntilOr(10_000, "the second read answered") { slow.reached }
+        // The account lets the message go; the first read is answered now and lands first: the delivery confirmed.
+        server.queueLagMs = 0L
+        late.release()
+        first.await()
+        assertThat(rig.steering.state(agentId).value.queue.map { it.id }).doesNotContain(followupId)
+        rig.awaitUntilOr(5_000, "the delivery confirmed") { state.queuePlacement.deliveredIds.isEmpty() }
+        // The second's answer, from before, lands last.
+        slow.release()
+        second.await()
+        assertWithMessage("the answers, in the order the account made them").that(server.queueAnswers.takeLast(2)).containsExactly(listOf(followupId), emptyList<String>()).inOrder()
+        assertThat(rig.steering.state(agentId).value.queueLoad).isEqualTo(com.cursorforandroid.domain.QueueLoad.Loaded)
+        rig.watch(1_500) {
+            val s = state
+            val controls = rig.steering.state(agentId).value
+            assertWithMessage("the filed message back on the card — placement=${s.queuePlacement}").that(controls.placed(s.queuePlacement).queue.map { it.id }).doesNotContain(followupId)
+            assertWithMessage("the filed message back in the account's list as the controls hold it").that(controls.queue.map { it.id }).doesNotContain(followupId)
+        }
+        assertThat(state.items.count { it is UserMessage && it.text == MESSAGE }).isEqualTo(1)
+        assertOnePlace(followupId, MESSAGE, fromNanos = sentAt)
+    }
+
     /** A real 4 x 3 PNG, one colour: the platform's decoder reads its size off it, as it would off a paste (a fake decodes to nothing). */
     private fun png(): ByteArray = byteArrayOf(
         0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x03,
