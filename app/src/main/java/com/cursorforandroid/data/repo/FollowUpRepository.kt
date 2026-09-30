@@ -1045,9 +1045,10 @@ class FollowUpRepository(
                 modelParams = item.modelParams,
                 modelDisplayName = item.modelDisplayName,
                 showEcho = false,
+                queuedId = item.id,
             ).map { it.id }
         } else {
-            val staged = conversations.stageFollowUp(e.agentId, item.previewText, item.images.map { it.image }, item.files.map { it.file }, show = false)
+            val staged = conversations.stageFollowUp(e.agentId, item.previewText, item.images.map { it.image }, item.files.map { it.file }, show = false, queuedId = item.id)
             sendStagedItem(e, staged, item)
         }
         if (generation.get() != startedIn) return

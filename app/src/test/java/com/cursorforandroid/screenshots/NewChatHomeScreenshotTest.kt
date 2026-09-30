@@ -34,6 +34,7 @@ import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.NewChatHome
+import com.cursorforandroid.domain.NewChatHomeChoice
 import com.cursorforandroid.ui.agents.AgentListUiState
 import com.cursorforandroid.ui.agents.AgentRowActions
 import com.cursorforandroid.ui.agents.Sidebar
@@ -43,6 +44,7 @@ import com.cursorforandroid.ui.home.HomeScreen
 import com.cursorforandroid.ui.home.NewChatHomeCopy
 import com.cursorforandroid.ui.home.NewChatHomeFixtures
 import com.cursorforandroid.ui.home.NewChatHomeTags
+import com.cursorforandroid.ui.home.rememberNewChatHome
 import com.cursorforandroid.ui.navigation.SidebarRail
 import com.cursorforandroid.ui.settings.NewChatHomePickerCopy
 import com.cursorforandroid.ui.settings.NewChatHomePickerTags
@@ -162,7 +164,7 @@ class NewChatHomeScreenshotTest {
     private fun shortcuts() = compose.onAllNodes(hasTestTag(NewChatHomeTags.PROJECT_SHORTCUT)).fetchSemanticsNodes().size
 
     private fun showPage(
-        home: NewChatHome,
+        home: NewChatHome?,
         mode: ThemeMode = ThemeMode.Dark,
         tablet: Boolean = false,
         list: AgentListUiState = NewChatHomeFixtures.list(),
@@ -182,7 +184,8 @@ class NewChatHomeScreenshotTest {
                         onLaunchOpen = {},
                         rowActions = rowActions,
                         modifier = modifier,
-                        home = home,
+                        // Null: nothing chosen in Settings, so the page picks for itself as the shell has it.
+                        home = home ?: rememberNewChatHome(NewChatHomeChoice(null), projectsAvailable, list, account = DEMO_USER.email),
                         projectsAvailable = projectsAvailable,
                         onNewProject = {},
                         onOpenSettings = {},
@@ -380,8 +383,7 @@ class NewChatHomeScreenshotTest {
         capture("272_new_chat_projects_none_yet")
     }
 
-    private fun showSettings(mode: ThemeMode = ThemeMode.Dark, tablet: Boolean = false, isDemo: Boolean = true) {
-        val list = NewChatHomeFixtures.list()
+    private fun showSettings(mode: ThemeMode = ThemeMode.Dark, tablet: Boolean = false, isDemo: Boolean = true, list: AgentListUiState = NewChatHomeFixtures.list()) {
         compose.setContent {
             Scene(mode) {
                 if (tablet) {
@@ -394,7 +396,7 @@ class NewChatHomeScreenshotTest {
                 }
             }
         }
-        compose.waitUntil(30_000) { chosen(NewChatHome.RECENT) }
+        compose.waitUntil(30_000) { NewChatHome.entries.any(::chosen) }
         compose.scrollSettingsGroupToTop(NewChatHomePickerCopy.GROUP)
     }
 
@@ -406,11 +408,8 @@ class NewChatHomeScreenshotTest {
         compose.waitUntil(10_000) { chosen(home) }
     }
 
-    private fun recentChosen(mode: ThemeMode, tablet: Boolean, frame: String) {
-        showSettings(mode, tablet)
-        assertThat(runBlocking { graph.prefs.newChatHome.first() }).isEqualTo(NewChatHome.RECENT)
-        capture(frame)
-    }
+    /** Recent agents tapped: the account has Projects, so with nothing chosen Projects would be the one ringed. */
+    private fun recentChosen(mode: ThemeMode, tablet: Boolean, frame: String) = layoutChosen(NewChatHome.RECENT, mode, tablet, frame)
 
     private fun layoutChosen(home: NewChatHome, mode: ThemeMode, tablet: Boolean, frame: String) {
         showSettings(mode, tablet)
@@ -473,6 +472,41 @@ class NewChatHomeScreenshotTest {
         compose.onNodeWithText(NewChatHomePickerCopy.NEEDS_MODE).performScrollTo()
         compose.waitForIdle()
         capture("281_settings_new_chat_needs_extended")
+    }
+
+    /** Nothing chosen and the account has Projects: the page opens on them. */
+    @Test
+    fun defaultWithProjectsPhoneDark() {
+        showPage(null, list = NewChatHomeFixtures.list().copy(isCurrent = true))
+        compose.waitUntil(10_000) { shortcuts() == 5 }
+        capture("760_new_chat_default_with_projects_phone_dark")
+    }
+
+    /** Nothing chosen and the account has no Projects: the recent chats, as before. */
+    @Test
+    fun defaultWithoutProjectsPhoneDark() {
+        showPage(null, list = NewChatHomeFixtures.withoutProjects().copy(isCurrent = true))
+        compose.waitUntil(10_000) { onScreen(NewChatHomeFixtures.NEWEST_CHAT) }
+        assertThat(shortcuts()).isEqualTo(0)
+        assertThat(onScreen(NewChatHomeCopy.NO_PROJECTS_TITLE)).isFalse()
+        capture("761_new_chat_default_without_projects_phone_dark")
+    }
+
+    /** Settings with nothing chosen, for an account with Projects: Projects ringed, and nothing written. */
+    @Test
+    fun settingsDefaultWithProjectsPhoneDark() {
+        showSettings()
+        assertThat(chosen(NewChatHome.PROJECTS)).isTrue()
+        assertThat(runBlocking { graph.prefs.newChatHomeChoice.first() }.chosen).isNull()
+        capture("762_settings_new_chat_default_with_projects_phone_dark")
+    }
+
+    /** Settings with nothing chosen, for an account without Projects: Recent agents ringed. */
+    @Test
+    fun settingsDefaultWithoutProjectsPhoneDark() {
+        showSettings(list = NewChatHomeFixtures.withoutProjects())
+        assertThat(chosen(NewChatHome.RECENT)).isTrue()
+        capture("763_settings_new_chat_default_without_projects_phone_dark")
     }
 
     private companion object {
