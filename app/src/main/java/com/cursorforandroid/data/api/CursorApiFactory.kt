@@ -30,7 +30,7 @@ class AuthInterceptor(private val apiKeyProvider: () -> String?) : Interceptor {
         val key = apiKeyProvider()
         val original = chain.request()
         val request = original.newBuilder()
-            .header("User-Agent", "cursor-for-android/${BuildConfig.VERSION_NAME}")
+            .header("User-Agent", CursorApiFactory.USER_AGENT)
             .apply {
                 // The SSE client sets `Accept: text/event-stream` itself; never clobber an explicit Accept.
                 if (original.header("Accept") == null) header("Accept", "application/json")
@@ -219,6 +219,9 @@ class OneShotWritesInterceptor : Interceptor {
 }
 
 object CursorApiFactory {
+
+    /** How the app names itself to Cursor's hosts, on every request [AuthInterceptor] sees and every run stream (see [RunStreamMux]). */
+    val USER_AGENT: String = "cursor-for-android/${BuildConfig.VERSION_NAME}"
 
     /**
      * The connection pool and the threads the clients below share: `AppGraph` builds one and hands it to each, so
