@@ -3501,6 +3501,10 @@ class ConversationRepository(
                 if (load.firstPaintMs == null) load.firstPaintMs = (System.nanoTime() - load.startedAtNanos) / 1_000_000
             }
             var project = false
+            // The window short of what the reader came for: the blob work reaches back for the rest (see [runBlobWork]).
+            // Said in the frame that paints it: a frame between with nothing loading reads as a chat at rest, and
+            // its older turns as a page for the screen to ask for itself.
+            var reachingBack = false
             // Rewound: the turns past the point it went back to are gone, and a prompt sent again in one's place is another turn.
             val rewound = known != null && built.turnCount < known.turnCount
             e.publish(
@@ -3525,10 +3529,20 @@ class ConversationRepository(
                     project = projectMode
                     pruneLocal()
                     promptImages = onDevice + promptImages.filterKeys { key -> local.any { it.run.id == key } }
+                    if (blobBacked && built.turnIndexed && reachesBack(built, projectMode, this.window)) {
+                        reachingBack = true
+                        extending = true
+                    }
                 },
-                transform = { copy(isLoading = false, error = null, transcriptError = null, transcriptUnavailable = false, isProjectConversation = project, recordFallback = null) },
+                transform = { copy(isLoading = false, error = null, transcriptError = null, transcriptUnavailable = false, isProjectConversation = project, recordFallback = null, isLoadingOlder = e.loadingOlder || e.extending) },
             )
-            persistRecord(e, built, known, backend, tokens)
+            try {
+                persistRecord(e, built, known, backend, tokens)
+            } catch (c: CancellationException) {
+                // The blob work that would have reached back never starts: "Loading older…" goes with it.
+                if (reachingBack) e.publish(mutate = { extending = false }, transform = { copy(isLoadingOlder = e.loadingOlder) })
+                throw c
+            }
             // Behind what is on screen: the window reaching back to what the reader came for, then the steps left for later.
             if (blobBacked) startBlobWork(e, agentId)
         }
@@ -3699,6 +3713,15 @@ class ConversationRepository(
     /** A drift the background work met (see [RecordPager.Raw.drift]), carried to [startBlobWork]'s handler. */
     private class RecordDrift(override val cause: ConnectRpcException) : Exception(cause.message, cause)
 
+    private fun isCoordinatorWindow(window: RecordWindow, project: Boolean): Boolean =
+        project || window.state?.isRootProject == true || window.turns.any { it.projectMode }
+
+    /** The blob-backed [window] is short of what the reader came for (see [runBlobWork]), and the record has older turns to give. */
+    private fun reachesBack(window: RecordWindow, project: Boolean, want: Int): Boolean {
+        val enough = if (isCoordinatorWindow(window, project)) window.words >= MIN_WINDOW_WORDS && window.turns.any { it.isUserTurn } else window.turns.size >= want
+        return !enough && window.hasOlder && window.turns.size < MAX_WINDOW_TURNS
+    }
+
     private suspend fun runBlobWork(e: Entry, agentId: String, api: ConversationRecordApi) {
         val build = turnBuilder(agentId, images?.forAgent(agentId))
         val backend = session.current
@@ -3711,9 +3734,8 @@ class ConversationRepository(
         while (true) {
             val (window, project, want) = synchronized(e) { Triple(e.recordWindow?.takeIf { it.turnIndexed }, e.projectMode, e.window) }
             window ?: return
-            val coordinator = project || window.state?.isRootProject == true || window.turns.any { it.projectMode }
-            val enough = if (coordinator) window.words >= MIN_WINDOW_WORDS && window.turns.any { it.isUserTurn } else window.turns.size >= want
-            if (enough || !window.hasOlder || window.turns.size >= MAX_WINDOW_TURNS) break
+            if (!reachesBack(window, project, want)) break
+            val coordinator = isCoordinatorWindow(window, project)
             e.publish(mutate = { extending = true }, transform = { copy(isLoadingOlder = true) })
             val pageTurns = if (!coordinator) want - window.turns.size else if (pages++ == 0) FIRST_EXTEND_TURNS else EXTEND_TURNS
             val plan = if (coordinator) TurnPlan.MESSAGES else TurnPlan.FULL
