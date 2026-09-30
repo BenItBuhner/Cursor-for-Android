@@ -171,13 +171,21 @@ jobs:
           ./gradlew :app:testDebugUnitTest -Papp.skipScreenshotTests=true -Papp.testShard=${{ matrix.shard }}
           -Papp.testForks=1 -Papp.versionNameSuffix="${{ steps.stamp.outputs.suffix }}"
 
-      # The JUnit XML always (a megabyte): the per-class times are what the slices are balanced on. The HTML report
-      # only when something failed.
+      # Named for the shard ("1-of-6" .. "6-of-6", "benchmarks"): an artifact name cannot hold the slash.
+      - name: Name the artifacts
+        if: always()
+        id: artifacts
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: echo "suffix=${SHARD//\//-of-}" >> "$GITHUB_OUTPUT"
+
+      # The JUnit XML always (a megabyte): the per-class times are what the slices are balanced on, and a failure's
+      # message and a benchmark's printed numbers are in it. The HTML report only when something failed.
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: unit-tests-results-${{ strategy.job-index }}
+          name: unit-tests-results-${{ steps.artifacts.outputs.suffix }}
           path: app/build/test-results/testDebugUnitTest/
           if-no-files-found: ignore
           retention-days: 14
@@ -186,7 +194,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: unit-test-report-${{ strategy.job-index }}
+          name: unit-test-report-${{ steps.artifacts.outputs.suffix }}
           path: app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
 
