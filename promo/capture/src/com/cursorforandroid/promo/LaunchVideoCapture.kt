@@ -174,6 +174,8 @@ class LaunchVideoCapture {
             // Before the demo is entered, which pins its own showcase chats only while nothing is pinned.
             graph.prefs.pinIfNonePinned(PromoSeeds.pinned)
             graph.session.enterDemo()
+            // Every seeded chat and Project already read, so no Project on the New Chat page wears an unread dot.
+            graph.prefs.markAllRead(PromoSeeds.seeds.associate { it.id to AppClock.now() })
             // The same demo backend under it, which is what the app asks about; only the account's owner is someone else.
             @Suppress("UNCHECKED_CAST")
             val session = SessionManager::class.java.getDeclaredField("_state").apply { isAccessible = true }.get(graph.session) as MutableStateFlow<SessionState>
@@ -286,11 +288,12 @@ class LaunchVideoCapture {
      * One take of the run on [d]'s screen, each step at the same moment of the capture's clock on every device: the
      * last of the Projects on the New Chat page held until it lifts and carried to the front; the task said into the
      * composer's microphone, transcribed into it and sent; the stretch of edits opened as they land, and the first
-     * one's diff; a follow-up typed while the agent works, queued behind the turn and steered into it; and once the
-     * run has opened its pull request and answered, the pull request's section of the details. A wide window pins the
-     * details beside the chat as soon as it opens, where the edits come in as they are made; a phone opens them at
-     * the end. With [probing], every step is looked at (semantics, a still and the moment it came, in the log), and
-     * one that finds nothing to do is noted and passed over.
+     * one's diff, then folded, and the transcript taken back to its end to follow the run again; a follow-up typed
+     * while the agent works, queued behind the turn and steered into it; and once the run has opened its pull request
+     * and answered, the pull request's section of the details. A wide window pins the details beside the chat as soon
+     * as it opens, where the edits come in as they are made; a phone opens them at the end. With [probing], every step
+     * is looked at (semantics, a still and the moment it came, in the log), and one that finds nothing to do is noted
+     * and passed over.
      */
     private inner class Take(private val d: Director, private val name: String, private val probing: Boolean = false) {
         private var began = 0L
@@ -329,8 +332,14 @@ class LaunchVideoCapture {
                 tap("edits", WORKING)
                 d.hold(0.25)
                 tap("diff", editLine("theme.css"), unmerged = true)
-                d.hold(0.7)
                 look("diff")
+                // Opening the stretch left the transcript where it was read; folded, and back to its end, it follows again.
+                at(FOLD_AT)
+                tap("fold", WORKING)
+                at(JUMP_AT)
+                look("folded")
+                tap("jump", LATEST)
+                look("following")
 
                 at(FOLLOW_UP_AT)
                 val followUp = hasSetTextAction() and hasAnyAncestor(hasTestTag("follow-up-composer"))
@@ -411,7 +420,8 @@ class LaunchVideoCapture {
 
         private fun look(step: String) {
             if (!probing) return
-            println("promo: $step at ${elapsedInTake()}ms into the take" + if (sent > 0) " (+${elapsed()}ms)" else "")
+            val (uptime, realtime) = d.clockDrift()
+            println("promo: $step at ${elapsedInTake()}ms into the take" + (if (sent > 0) " (+${elapsed()}ms)" else "") + ", the looper ${uptime}ms and realtime ${realtime}ms ahead")
             d.dump("$name-$step")
             d.still("$name-$step", 0.5f)
         }
@@ -556,12 +566,14 @@ class LaunchVideoCapture {
         // Each step's moment after it, in ms after the send: the run is scripted to the millisecond from there, so
         // these are the same on every device, and every take shows the same thing at the same moment.
         const val PANEL_AT = 900L
-        const val EDITS_AT = 2_300L
-        const val FOLLOW_UP_AT = 4_300L
-        const val STEER_AT = 7_600L
-        const val SHIP_AT = 20_500L
-        const val PULL_REQUEST_AT = 21_400L
-        const val END_AT = 24_000L
+        const val EDITS_AT = 3_400L
+        const val FOLD_AT = 5_000L
+        const val JUMP_AT = 5_400L
+        const val FOLLOW_UP_AT = 5_900L
+        const val STEER_AT = 9_000L
+        const val SHIP_AT = 22_400L
+        const val PULL_REQUEST_AT = 23_300L
+        const val END_AT = 25_800L
 
         /** A hand's move from rest to rest: the minimum-jerk curve, 0 to 1. */
         fun smooth(t: Float): Float = t * t * t * (10 + t * (-15 + 6 * t))
