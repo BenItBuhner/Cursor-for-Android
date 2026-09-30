@@ -23,6 +23,7 @@ import com.cursorforandroid.domain.DeviceTarget
 import com.cursorforandroid.domain.EnvType
 import com.cursorforandroid.domain.ListPreferences
 import com.cursorforandroid.domain.NewChatHome
+import com.cursorforandroid.domain.NewChatHomeChoice
 import com.cursorforandroid.domain.ProjectNotificationPrefs
 import com.cursorforandroid.domain.LocalAgentState
 import com.cursorforandroid.domain.SignInMethod
@@ -460,6 +461,12 @@ class PreferencesStore(
      * Recent until changed; a device preference, kept across sign-outs like the sidebar's folds.
      */
     val newChatHome: Flow<NewChatHome> = data.map { NewChatHome.parse(it[Keys.newChatHome]) }.distinctUntilChanged()
+
+    /**
+     * [newChatHome] as the reader left it: what they chose, or nothing while they never have — the pane then picks by
+     * the account's Projects ([NewChatHome.automatic]) rather than taking Recent as a choice.
+     */
+    val newChatHomeChoice: Flow<NewChatHomeChoice> = data.map { NewChatHomeChoice(NewChatHome.chosen(it[Keys.newChatHome])) }.distinctUntilChanged()
 
     suspend fun setNewChatHome(home: NewChatHome) = edit { it[Keys.newChatHome] = home.key }
 

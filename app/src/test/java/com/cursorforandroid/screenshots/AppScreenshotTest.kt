@@ -46,6 +46,7 @@ import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.domain.ActivityGroup
 import com.cursorforandroid.domain.EnvironmentFilter
 import com.cursorforandroid.domain.ListPreferences
+import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.domain.RunFooter
 import com.cursorforandroid.domain.SourceFilter
 import com.cursorforandroid.domain.StatusFilter
@@ -119,7 +120,11 @@ class AppScreenshotTest {
             SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) },
             appVersion = SCREENSHOT_APP_VERSION,
             agentListDispatcher = Dispatchers.Main,
-        )
+        ).also {
+            // The demo has a Project, so with nothing chosen its New Chat page would open on Projects; these frames are
+            // of the recent chats (their cards, filters and chips), as a reader who chose Recent agents has them.
+            runBlocking { it.prefs.setNewChatHome(NewChatHome.RECENT) }
+        }
     }
 
     @OptIn(ExperimentalMaterial3Api::class)

@@ -211,6 +211,12 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     val conversation: StateFlow<ConversationState> = graph.conversations.state(agentId)
 
     /**
+     * The device queue's rows the chat has filed as bubbles as of now — ahead of the frame on screen, which is
+     * presented after it (see [QueueHandover]).
+     */
+    fun filedFromQueue(): Set<String> = conversation.value.queuePlacement.filedQueueIds
+
+    /**
      * The transcript as the screen draws it: each published state presented into rows off the main thread (see
      * [TranscriptPresenter]) — incrementally, so a live delta or a page of older turns costs its own turns and not
      * the whole chat — with the markdown of the newest page parsed ahead of the rows being composed. Conflated: a

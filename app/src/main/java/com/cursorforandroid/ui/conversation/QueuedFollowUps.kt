@@ -1,6 +1,9 @@
 package com.cursorforandroid.ui.conversation
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -213,9 +216,11 @@ private fun QueuedFollowUpRow(
         // the server took (see QueuedFollowUp.isHeld). The ring is for a first send only.
         val steer = item.steer
         val sending = item.isSending && !item.isHeld && steer == null
+        // A card shown already steering has nothing to fade in from; one the reader steers eases its note in.
+        val steeringAtFirst = remember { steer != null }
         Column(Modifier.weight(1f).padding(vertical = 4.dp).animateContentSize(tween(NoteFadeMs))) {
             // The commands dim with the rest of the line while it goes out.
-            val textColor = if (sending || steer != null) colors.textTertiary else colors.textPrimary
+            val textColor by animateColorAsState(if (sending || steer != null) colors.textTertiary else colors.textPrimary, tween(NoteFadeMs), label = "queue-line")
             QueueLine(words, textColor, motion, anchor, item.id)
             if (item.files.isNotEmpty()) AttachedFileNames(item.files.map { it.file.name })
             // Why it did not go, in the server's words or the connection's: without it the warning is only a riddle.
@@ -225,7 +230,7 @@ private fun QueuedFollowUpRow(
             // A refused tap says why on the one second line the card has: a steer's note, else a held message's wait.
             val saysRefused = refused && item.isOnItsWay
             if (steer != null) {
-                SteerNote(steer, refused = saysRefused)
+                SteerNote(steer, refused = saysRefused, fadeIn = !steeringAtFirst)
             } else {
                 item.steerError?.let { reason ->
                     Text(reason, style = type.small, color = colors.red, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag(QueueSteerErrorTag))
@@ -234,24 +239,27 @@ private fun QueuedFollowUpRow(
             if (item.isHeld) HeldNote(item, refused = saysRefused && steer == null)
         }
         Spacer(Modifier.width(8.dp))
-        if (sending) {
-            Box(Modifier.size(Glyph + 10.dp).semantics { contentDescription = "Sending" }, contentAlignment = Alignment.Center) {
-                SpinnerRing(size = 11.dp)
-            }
-        } else {
-            // A message on its way — a held message's retry out, or a steer the account has not yet shown in the
-            // transcript — keeps its glyphs, dimmed, for as long as that lasts: its request cannot be called back, so
-            // a tap then is refused and the card's second line says why (see RefusableLine).
-            val onItsWay = item.isOnItsWay
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = if (onItsWay) Modifier.testTag(QueueGlyphs.ON_ITS_WAY_TAG).semantics { stateDescription = QueueGlyphs.ON_ITS_WAY } else Modifier,
-            ) {
-                val quiet = if (onItsWay) colors.iconQuaternary else colors.iconTertiary
-                GlyphButton(CursorIcons.Trash, "Remove queued follow-up", quiet, onRemove)
-                GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", quiet, onEdit)
-                GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers, retry = item.warning != null), if (onItsWay) colors.iconQuaternary else colors.iconPrimary, onSteer)
+        // A message on its way — a held message's retry out, or a steer the account has not yet shown in the
+        // transcript — keeps its glyphs, dimmed, for as long as that lasts: its request cannot be called back, so
+        // a tap then is refused and the card's second line says why (see RefusableLine).
+        val onItsWay = item.isOnItsWay
+        val quiet by animateColorAsState(if (onItsWay) colors.iconQuaternary else colors.iconTertiary, tween(NoteFadeMs), label = "queue-glyphs")
+        val arrow by animateColorAsState(if (onItsWay) colors.iconQuaternary else colors.iconPrimary, tween(NoteFadeMs), label = "queue-arrow")
+        Crossfade(sending, animationSpec = tween(NoteFadeMs), label = "queue-ring") { ring ->
+            if (ring) {
+                Box(Modifier.size(Glyph + 10.dp).semantics { contentDescription = "Sending" }, contentAlignment = Alignment.Center) {
+                    SpinnerRing(size = 11.dp)
+                }
+            } else {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = if (onItsWay) Modifier.testTag(QueueGlyphs.ON_ITS_WAY_TAG).semantics { stateDescription = QueueGlyphs.ON_ITS_WAY } else Modifier,
+                ) {
+                    GlyphButton(CursorIcons.Trash, "Remove queued follow-up", quiet, onRemove)
+                    GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", quiet, onEdit)
+                    GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers, retry = item.warning != null), arrow, onSteer)
+                }
             }
         }
     }
@@ -263,12 +271,14 @@ private fun QueuedFollowUpRow(
  * tap refused meanwhile ([refused]) swaps it for why, as a held card's wait does (see [RefusableLine]).
  */
 @Composable
-private fun SteerNote(phase: SteerPhase, refused: Boolean) {
+private fun SteerNote(phase: SteerPhase, refused: Boolean, fadeIn: Boolean) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
     val steered by animateFloatAsState(if (phase == SteerPhase.STEERED) 1f else 0f, tween(NoteFadeMs), label = "steer-note")
+    val shown = remember { Animatable(if (fadeIn) 0f else 1f) }
+    LaunchedEffect(Unit) { shown.animateTo(1f, tween(NoteFadeMs)) }
     RefusableLine(refused) { faded ->
-        Box(faded.fillMaxWidth().testTag(QueueSteerLabelTag).semantics { liveRegion = LiveRegionMode.Polite }) {
+        Box(faded.fillMaxWidth().graphicsLayer { alpha = shown.value }.testTag(QueueSteerLabelTag).semantics { liveRegion = LiveRegionMode.Polite }) {
             Text(
                 QueueCardWords.STEERING, style = type.small, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.graphicsLayer { alpha = 1f - steered }.then(if (phase == SteerPhase.STEERED) Modifier.clearAndSetSemantics {} else Modifier),
@@ -511,7 +521,7 @@ private fun AccountQueueRow(
                 Spacer(Modifier.width(8.dp))
             }
             Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
-                val textColor = if (inFlight) colors.textTertiary else colors.textPrimary
+                val textColor by animateColorAsState(if (inFlight) colors.textTertiary else colors.textPrimary, tween(NoteFadeMs), label = "account-queue-line")
                 QueueLine(words, textColor, motion, anchor, item.id)
                 val names = looks.mapNotNull { it.name }
                 if (names.isNotEmpty()) AttachedFileNames(names)
@@ -520,25 +530,27 @@ private fun AccountQueueRow(
                 item.note?.let { Text(it, style = type.small, color = colors.textQuaternary, maxLines = 2, modifier = Modifier.testTag("account-queue-note")) }
             }
             Spacer(Modifier.width(8.dp))
-            if (inFlight) {
-                Box(Modifier.size(Glyph + 10.dp).semantics { contentDescription = "Sending" }, contentAlignment = Alignment.Center) {
-                    SpinnerRing(size = 11.dp)
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (onMove != null) {
-                        Box {
-                            GlyphButton(CursorIcons.More, "Reorder queued follow-up", colors.iconTertiary) { menuAt = null; menuOpen = true }
-                            CursorMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, at = menuAt) {
-                                // Dimmed at the end of the queue it cannot move past.
-                                CursorMenuItem("Move up", CursorIcons.ArrowUp, enabled = position > 1) { menuOpen = false; onMove(true) }
-                                CursorMenuItem("Move down", CursorIcons.ArrowDown, enabled = position < count) { menuOpen = false; onMove(false) }
+            Crossfade(inFlight, animationSpec = tween(NoteFadeMs), label = "account-queue-ring") { ring ->
+                if (ring) {
+                    Box(Modifier.size(Glyph + 10.dp).semantics { contentDescription = "Sending" }, contentAlignment = Alignment.Center) {
+                        SpinnerRing(size = 11.dp)
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (onMove != null) {
+                            Box {
+                                GlyphButton(CursorIcons.More, "Reorder queued follow-up", colors.iconTertiary) { menuAt = null; menuOpen = true }
+                                CursorMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, at = menuAt) {
+                                    // Dimmed at the end of the queue it cannot move past.
+                                    CursorMenuItem("Move up", CursorIcons.ArrowUp, enabled = position > 1) { menuOpen = false; onMove(true) }
+                                    CursorMenuItem("Move down", CursorIcons.ArrowDown, enabled = position < count) { menuOpen = false; onMove(false) }
+                                }
                             }
                         }
+                        GlyphButton(CursorIcons.Trash, "Remove queued follow-up", colors.iconTertiary, onRemove)
+                        GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", colors.iconTertiary) { text = TextFieldValue(item.text, TextRange(item.text.length)); editing = true; onEditing(true) }
+                        GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers), colors.iconPrimary, onSteer)
                     }
-                    GlyphButton(CursorIcons.Trash, "Remove queued follow-up", colors.iconTertiary, onRemove)
-                    GlyphButton(CursorIcons.Pencil, "Edit queued follow-up", colors.iconTertiary) { text = TextFieldValue(item.text, TextRange(item.text.length)); editing = true; onEditing(true) }
-                    GlyphButton(CursorIcons.ArrowUp, QueueGlyphs.upArrow(steers), colors.iconPrimary, onSteer)
                 }
             }
         }

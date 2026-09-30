@@ -952,7 +952,8 @@ class FollowUpRepository(
             runToFollow(e.agentId).collectLatest { runId ->
                 if (runId != null) {
                     runCatching {
-                        hub.snapshots(e.agentId, runId).transformWhile { emit(it); !it.finished }.collect { }
+                        // Only the end is read here, and a sampled subscriber hears that at once (see LiveRunHub.snapshots).
+                        hub.snapshots(e.agentId, runId, sampleMs = RunMonitor.SAMPLE_MS).transformWhile { emit(it); !it.finished }.collect { }
                     }.onFailure { if (it is CancellationException) throw it }
                 }
             }
@@ -1044,9 +1045,10 @@ class FollowUpRepository(
                 modelParams = item.modelParams,
                 modelDisplayName = item.modelDisplayName,
                 showEcho = false,
+                queuedId = item.id,
             ).map { it.id }
         } else {
-            val staged = conversations.stageFollowUp(e.agentId, item.previewText, item.images.map { it.image }, item.files.map { it.file }, show = false)
+            val staged = conversations.stageFollowUp(e.agentId, item.previewText, item.images.map { it.image }, item.files.map { it.file }, show = false, queuedId = item.id)
             sendStagedItem(e, staged, item)
         }
         if (generation.get() != startedIn) return
