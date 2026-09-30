@@ -542,9 +542,11 @@ class SseRunStreamer(
         /**
          * A stream holds its thread for as long as the run goes on (`execute()` blocks on the socket). Streams get
          * threads of their own, beside the shared IO pool's 64: background live sync holds one per running chat, and
-         * thirty of them in the shared pool left the rest of the app's reads queueing for a thread.
+         * thirty of them in the shared pool left the rest of the app's reads queueing for a thread. Unbounded: every
+         * stream followed needs its reader, all of them multiplexed on the host's one HTTP/2 connection — at 64, a
+         * coordinator's 150 working subagents left 86 of their streams opened and never read.
          */
         @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-        val STREAM_IO = Dispatchers.IO.limitedParallelism(64)
+        val STREAM_IO = Dispatchers.IO.limitedParallelism(Int.MAX_VALUE)
     }
 }
