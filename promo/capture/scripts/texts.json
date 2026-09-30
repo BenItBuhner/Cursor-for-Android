@@ -1,6 +1,5 @@
 {
   "hero.prompt": "Add dark mode to the dashboard",
-  "hero.think": "The dashboard's colors are hard-coded in theme.css. I'll turn them into CSS variables, add a dark set, and give the header a toggle that remembers the choice.",
   "hero.intro": "I'll move the colors into theme tokens, add a dark palette, and put a toggle in the header.",
   "hero.steer.prompt": "Follow the system theme too",
   "hero.adapt": "Got it. Dark mode will follow the system setting, and the toggle overrides it.",

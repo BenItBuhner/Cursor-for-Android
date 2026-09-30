@@ -293,8 +293,6 @@ internal class PromoRunStreamer(
             emit(RunStreamEvent.ToolCall(SseToolCallDto(callId = id, name = name, status = "completed", args = args, result = result)))
         }
 
-        private suspend fun read(n: Int, path: String, ms: Long) = call(id("r$n"), "read_file", args("path" to path), ms)
-
         private suspend fun shell(n: Int, command: String, ms: Long, stdout: String) = call(
             id("t$n"), "run_terminal_cmd", args("command" to command), ms,
             buildJsonObject { put("success", buildJsonObject { put("stdout", stdout); put("exitCode", 0) }) },
@@ -362,11 +360,6 @@ internal class PromoRunStreamer(
         suspend fun hero(agentId: String): Outcome {
             heroAgent = agentId
             pause(400)
-            think("hero.think")
-            pause(150)
-            read(1, "src/styles/theme.css", 450)
-            read(2, "src/components/Header.tsx", 400)
-            pause(150)
             say("hero.intro")
             pause(200)
             edit(1, "src/styles/theme.css", 900)
