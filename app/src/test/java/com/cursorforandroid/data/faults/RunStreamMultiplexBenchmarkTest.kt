@@ -28,7 +28,8 @@ import java.util.concurrent.atomic.AtomicInteger
  * [LiveRunHub][com.cursorforandroid.data.repo.LiveRunHub]. Each stream is one HTTP/2 stream on one connection to the
  * host, and none may wait on another: every run followed takes in what its server writes, as it writes it.
  *
- * `SCALE run-streams` reports the streams the server held and the connections it was opened, the events each run's
+ * `SCALE run-streams` reports how long the fleet took to catch up before it was measured, the streams the server held
+ * and the connections it was opened, the events each run's
  * subscriber was handed per second against those its server wrote, the most any run's subscriber was ever behind its
  * server and the longest any went without an event (its server's silences included: its threads, one a stream, are
  * the test's and not the app's), the threads
@@ -80,7 +81,16 @@ class RunStreamMultiplexBenchmarkTest {
 
         val events = ConcurrentHashMap<String, Int>()
         val jobs: List<Job> = ids.map { id -> rig.scope.launch { rig.hub.snapshots(id, "run-$id").collect { events[id] = it.eventCount } } }
+        // Measured from the moment the fleet flows as it will from then on: every stream held and every run's
+        // subscriber caught up with its server. A cold process spends its first seconds loading and compiling what
+        // the streams run through, and the runs its dispatcher left for last are seconds behind then: a phase opened
+        // while they still catch up reads their catching up as stalls. A fleet that never catches up is measured at
+        // the bound, and fails the phase as it would have.
+        val settleStarted = System.nanoTime()
         Thread.sleep(SETTLE_MS)
+        val caughtUp = { server.liveRunOpen.get() == workers && ids.all { (written["run-$it"]?.get() ?: 0) - (events[it] ?: 0) <= CAUGHT_UP_EVENTS } }
+        while (!caughtUp() && System.nanoTime() - settleStarted < TimeUnit.MILLISECONDS.toNanos(SETTLE_MAX_MS)) Thread.sleep(SAMPLE_MS)
+        val settleMs = (System.nanoTime() - settleStarted) / 1_000_000
 
         val lock = Any()
         val before = ids.associateWith { events[it] ?: 0 }
@@ -140,7 +150,7 @@ class RunStreamMultiplexBenchmarkTest {
         val hub = rig.hub.stats()
         jobs.forEach { it.cancel() }
 
-        val line = "SCALE run-streams workers=$workers serverStreamsPeak=$peakOpen connectionsPeak=$peakConnections " +
+        val line = "SCALE run-streams workers=$workers settleMs=$settleMs serverStreamsPeak=$peakOpen connectionsPeak=$peakConnections " +
             "serverConnections=${server.connections.get()} stalled=$stalled maxLagEvents=${lags.max()} longestSilenceMs=${gaps.max()} " +
             "eventsPerSecPerRun(min=${f(sorted.first())} p50=${f(sorted[sorted.size / 2])} max=${f(sorted.last())}) " +
             "writtenPerSecPerRunP50=${f(writtenRates.sorted()[workers / 2])} minDeliveredShare=${f(share)} " +
@@ -165,6 +175,10 @@ class RunStreamMultiplexBenchmarkTest {
         /** A held stream writes an event, then waits this long: about a hundred a second, never more. */
         const val BEAT_MS = 10L
         const val SETTLE_MS = 4_000L
+        /** The longest the fleet is given to catch up before it is measured regardless. */
+        const val SETTLE_MAX_MS = 30_000L
+        /** Caught up: no run's subscriber more than a tenth of a second's events behind its server. */
+        const val CAUGHT_UP_EVENTS = 10
         const val PHASE_MS = 6_000L
         const val SAMPLE_MS = 100L
         /** A run whose subscriber is this many events behind what its server wrote (a second's worth) is stalled. */
