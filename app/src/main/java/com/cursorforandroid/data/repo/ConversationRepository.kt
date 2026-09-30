@@ -6053,17 +6053,24 @@ class ConversationRepository(
      * request (see [Awaiting.sending]), never as a bubble in the transcript first. Bennett, after the send animation:
      * a message sent to a running agent played the send into a bubble and, a round trip later, popped out of it onto
      * the card. [sendQueuedVia] sends it; [unqueue] turns it into a bubble when the account would not take it.
+     * [replacing]: the bubble of the same message's run request, refused as busy, which the card's row takes the place
+     * of in the same frame — taken down first and the row put up after, the message was in neither for a frame.
      */
-    suspend fun queueAhead(agentId: String, text: String, images: List<PromptImage> = emptyList(), files: List<PromptFile> = emptyList(), followupId: String): StagedFollowUp {
+    suspend fun queueAhead(agentId: String, text: String, images: List<PromptImage> = emptyList(), files: List<PromptFile> = emptyList(), followupId: String, replacing: StagedFollowUp? = null): StagedFollowUp {
         val staged = stageFollowUp(agentId, text, images, files, show = false)
         val e = entry(agentId)
         e.publish(mutate = {
+            if (replacing != null) {
+                local = local.filterNot { it.run.id == replacing.localId }
+                promptImages = promptImages - replacing.localId
+            }
             val key = QueuePlacement.textKey(staged.text)
-            val prior = state.value.items.count { it is UserMessage && QueuePlacement.textKey(it.text) == key }
+            val prior = state.value.items.count { it is UserMessage && it.id != replacing?.localId && QueuePlacement.textKey(it.text) == key }
             val priorTranscript = messages.count { it.type == USER_MESSAGE && QueuePlacement.textKey(it.text) == key }
             val behind = queueTail(except = null)?.id ?: latestRun()?.id?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) }
             awaiting = awaiting + Awaiting(staged, behind, AppClock.now(), followupId = followupId, priorCopies = prior, priorTranscriptCopies = priorTranscript, sending = true)
         })
+        replacing?.let { attachments.discard(it.attachments) }
         return staged
     }
 
