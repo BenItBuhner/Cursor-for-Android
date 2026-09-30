@@ -68,23 +68,36 @@ internal object SubagentStretchScene {
     const val PER_STRETCH = 16
     const val WORKERS = STRETCHES * PER_STRETCH
 
-    val workers = (0 until WORKERS).map { "bc-sub-%03d".format(it) }
+    /** [stretches] turns of the coordinator's, each starting [perStretch] workers. */
+    class Layout(val stretches: Int, val perStretch: Int) {
+        val workers = (0 until stretches * perStretch).map { "bc-sub-%03d".format(it) }
 
-    fun run(worker: Int) = "run-${workers[worker]}"
-
-    /** The workers in the fake server, each with a run under way; before the graph reads the list. */
-    fun install(api: FakeCursorApi, now: Long) {
-        workers.forEachIndexed { i, id -> api.addRunningAgent(id, "Worker $i", "run-$id", createdAt = BigProject.iso(now - 30_000L - i)) }
+        fun run(worker: Int) = "run-${workers[worker]}"
     }
 
-    fun transcript(): List<TimelineItem> = buildList {
-        repeat(STRETCHES) { s ->
+    val standard = Layout(STRETCHES, PER_STRETCH)
+
+    /** Five hundred workers: five turns of a hundred, every stretch's line on the screen with the last one's rows. */
+    val fiveHundred = Layout(5, 100)
+
+    val workers = standard.workers
+
+    fun run(worker: Int) = standard.run(worker)
+
+    /** The workers in the fake server, each with a run under way; before the graph reads the list. */
+    fun install(api: FakeCursorApi, now: Long, layout: Layout = standard) {
+        layout.workers.forEachIndexed { i, id -> api.addRunningAgent(id, "Worker $i", "run-$id", createdAt = BigProject.iso(now - 30_000L - i)) }
+    }
+
+    fun transcript(layout: Layout = standard): List<TimelineItem> = buildList {
+        val workers = layout.workers
+        repeat(layout.stretches) { s ->
             add(UserMessage("u$s", "Batch ${s + 1}."))
             add(
                 ActivityGroup(
                     "g$s",
-                    (0 until PER_STRETCH).map { i ->
-                        val n = s * PER_STRETCH + i
+                    (0 until layout.perStretch).map { i ->
+                        val n = s * layout.perStretch + i
                         ToolCall("t$n", "task", ToolKind.Task, ToolCall.STATUS_COMPLETED, "Worker $n", payload = ToolPayload.Subagent("Worker $n", agentId = workers[n], isBackground = true))
                     },
                 ),
@@ -96,12 +109,12 @@ internal object SubagentStretchScene {
     /** The transcript in a list as the conversation screen draws it, [source] standing for its subagents' activity. */
     @OptIn(ExperimentalComposeRuntimeApi::class, ExperimentalMaterial3Api::class)
     @Composable
-    fun Screen(graph: AppGraph, source: (String) -> Flow<SubagentChild?>, meter: ScaleMeter? = null) {
+    fun Screen(graph: AppGraph, source: (String) -> Flow<SubagentChild?>, meter: ScaleMeter? = null, layout: Layout = standard) {
         if (meter != null) {
             val root = currentComposer.composition
             remember(root) { root.observe(meter.recompositions) }
         }
-        val rows = remember { TranscriptRows.of(transcript(), coordinatorMode = true) }
+        val rows = remember { TranscriptRows.of(transcript(layout), coordinatorMode = true) }
         val index = remember(rows) { SubagentRows.index(rows) }
         val openKey = remember(rows) { rows.filterIsInstance<TranscriptRow.Stretch>().last().key }
         CursorTheme(mode = ThemeMode.Dark) {
@@ -169,5 +182,24 @@ internal object WorkerScript {
     }
 
     private fun call(id: String, name: String, status: String, args: String, result: String?): RunStreamEvent =
-        SseParser.toEvent(SseFrame("tool_call", null, """{"callId":"$id","name":"$name","status":"$status","args":$args${if (result != null) ""","result":$result""" else ""}}"""))!!
+        SseParser.toEvent(SseFrame("tool_call", null, callData(id, name, status, args, result)))!!
+
+    /** [event] as the API writes it: its SSE `event:` name and `data:`. */
+    fun frame(worker: Int, tick: Long): Pair<String, String> {
+        val k = tick + worker * 37L
+        val round = k / ROUND
+        val at = (k % ROUND).toInt()
+        return when {
+            at == 0 && worker % 4 == 0 && round % 2 == 0L -> "tool_call" to callData("step-$worker-$round", "update_current_step", "completed", """{"current_step":"Slice $worker, pass ${round / 2 + 1}"}""", """{"success":{}}""")
+            at <= THINKING -> "thinking" to text("weighing slice $worker option $at. ")
+            at == THINKING + 1 -> "tool_call" to callData("read-$worker-$round", "read_file", "running", """{"target_file":"src/slice$worker/Part$round.kt"}""", null)
+            at == THINKING + 2 -> "tool_call" to callData("read-$worker-$round", "read_file", "completed", """{"target_file":"src/slice$worker/Part$round.kt"}""", """{"success":{"contents":"line","totalLines":1}}""")
+            else -> "assistant" to text(if (at == THINKING + 3) "Part $round of slice $worker: " else "w${at - THINKING - 3} ")
+        }
+    }
+
+    private fun text(value: String) = """{"text":"$value"}"""
+
+    private fun callData(id: String, name: String, status: String, args: String, result: String?) =
+        """{"callId":"$id","name":"$name","status":"$status","args":$args${if (result != null) ""","result":$result""" else ""}}"""
 }
