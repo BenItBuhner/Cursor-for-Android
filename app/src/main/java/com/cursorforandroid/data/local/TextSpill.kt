@@ -21,13 +21,22 @@ import java.util.concurrent.ConcurrentHashMap
  * Each process writes under a directory of its own and clears the ones earlier processes left; the sign-out wipe of
  * the caches' root takes the lot, and a write that outlives the wipe is refused.
  *
- * Nothing is spilled until [install] names a place; texts then stay inline, as they do past [MAX_BYTES] held on disk
- * or when a write fails.
+ * Nothing is spilled until [install] names a place; texts then stay inline, as they do past [MAX_BYTES] held on disk,
+ * past [FLOOR_BYTES] on a device short of room (see [MIN_FREE_BYTES]), or when a write fails.
  */
 object TextSpill {
     /** Shorter texts stay on the heap: a file costs more than they do. */
     const val MIN_CHARS = 4_096
-    const val MAX_BYTES = 64L shl 20
+    /** Held on disk however little room it has left. */
+    const val FLOOR_BYTES = 64L shl 20
+    /**
+     * The most held on disk at once: twice the largest heap the app is given, so the disk's budget is never what
+     * sends texts back onto the heap before the heap itself would be full. The 64 MB it once was ran out first:
+     * twenty held chats' ten-turn windows of files and diffs hold more than that between them.
+     */
+    const val MAX_BYTES = 1L shl 30
+    /** Past [FLOOR_BYTES], the room the device is left for everything else. */
+    const val MIN_FREE_BYTES = 512L shl 20
     /** The texts read back most recently, kept for a row recomposed or reopened. */
     private const val RECENT_CHARS = 256 * 1024
 
@@ -90,7 +99,7 @@ object TextSpill {
         synchronized(held) {
             if (place !== at) return null
             val existing = held[key]
-            if (existing == null && bytes + encoded.size > maxBytes) return null
+            if (existing == null && !fits(at, bytes + encoded.size)) return null
             // A text held already is one file; one the wipe took is written again, or kept on the heap if refused.
             if (existing?.file?.isFile != true && write(at, key, encoded) == null) return null
             val entry = existing ?: Held(File(at.dir, key), encoded.size.toLong()).also {
@@ -102,6 +111,13 @@ object TextSpill {
             holders += Holder(owner, key, at, released)
             return owner
         }
+    }
+
+    /** Whether [after] bytes may be held on disk. Under the lock of [held]. */
+    private fun fits(at: Place, after: Long): Boolean {
+        if (after > maxBytes) return false
+        if (after <= FLOOR_BYTES) return true
+        return at.cache.root.usableSpace - (after - bytes) >= MIN_FREE_BYTES
     }
 
     private fun write(at: Place, key: String, encoded: ByteArray): File? {
