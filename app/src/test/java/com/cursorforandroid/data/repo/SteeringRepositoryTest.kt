@@ -129,7 +129,13 @@ class SteeringRepositoryTest {
 
     private fun agents() = AgentRepository(session, prefs, AttachmentStore(context), cache = null, scope = scope, persistDelayMs = 10, capabilities = capabilities)
 
-    private fun steering(agents: AgentRepository, pollIntervalMs: Long = 60_000, goals: GoalStateApi? = null, clock: () -> Long = { System.nanoTime() / 1_000_000 }) = SteeringRepository(
+    private fun steering(
+        agents: AgentRepository,
+        pollIntervalMs: Long = 60_000,
+        goals: GoalStateApi? = null,
+        clock: () -> Long = { System.nanoTime() / 1_000_000 },
+        onQueueRead: suspend (String, List<PendingFollowup>, Long) -> Unit = { _, _, _ -> },
+    ) = SteeringRepository(
         session,
         agents,
         interactions = account,
@@ -137,6 +143,7 @@ class SteeringRepositoryTest {
         runs = account,
         goals = goals,
         afterAction = { revalidated += it },
+        onQueueRead = onQueueRead,
         scope = scope,
         pollIntervalMs = pollIntervalMs,
         capabilities = capabilities,
@@ -281,6 +288,41 @@ class SteeringRepositoryTest {
             "add:bc-1:Now:null:null:true", "list:bc-1",
         ).inOrder()
         steering.detach("bc-1")
+    }
+
+    /**
+     * The screen draws the card from the queue as last read, through the transcript's placement, and gets both on its
+     * main thread in the order they were published. A read that lets a filed message go drops its hold in the
+     * transcript (`ConversationRepository.noteAccountQueue`); were that heard before the read's own list, a frame would
+     * pair the list still naming the message with the hold already gone, and draw it on the card beside its filing.
+     */
+    @Test
+    fun `a read of the queue is in the controls before the transcript hears of it`() = runBlocking<Unit> {
+        extended = true
+        api.addRunningAgent("bc-1", "Chat", "run-9")
+        val agents = agents()
+        agents.refresh()
+        // What the transcript was told, and what the controls said at that moment (a throw here would be the read's failure).
+        val heard = CopyOnWriteArrayList<Triple<List<String>, List<String>, QueueLoad>>()
+        lateinit var steering: SteeringRepository
+        steering = steering(agents, onQueueRead = { id, pending, _ ->
+            val controls = steering.state(id).value
+            heard += Triple(pending.map { it.id }, controls.queue.map { it.id }, controls.queueLoad)
+        })
+
+        account.queue = listOf(PendingFollowup("fu-1", "First"), PendingFollowup("fu-2", "Second"))
+        steering.refreshQueue("bc-1")
+        // The account lets the first go: the list without it is what the card has by the time the transcript hears.
+        account.queue = listOf(PendingFollowup("fu-2", "Second"))
+        steering.refreshQueue("bc-1")
+        account.queue = emptyList()
+        steering.refreshQueue("bc-1")
+
+        assertThat(heard).containsExactly(
+            Triple(listOf("fu-1", "fu-2"), listOf("fu-1", "fu-2"), QueueLoad.Loaded),
+            Triple(listOf("fu-2"), listOf("fu-2"), QueueLoad.Loaded),
+            Triple(emptyList<String>(), emptyList<String>(), QueueLoad.Loaded),
+        ).inOrder()
     }
 
     @Test
