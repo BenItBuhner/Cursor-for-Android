@@ -391,6 +391,13 @@ class ConversationRepository(
          * [DELIVERY_GRACE_MS] of reads that all agree, it leaves the card whether or not a transcript read got through.
          */
         val unlistedAt: Long? = null,
+        /**
+         * Where the account's record stood when the message was queued (the Beta engine): the index of its newest turn
+         * ([RecordTurn.stepIndex]). A turn the record gains past it with the message's words is the message delivered,
+         * drawn in the transcript while the account's list — seconds behind its runs — still names it (see
+         * [Entry.drawnFromRecord]). Null without a record window.
+         */
+        val recordStep: Int? = null,
     ) {
         fun copy(
             behindRunId: String? = this.behindRunId,
@@ -402,7 +409,7 @@ class ConversationRepository(
             runId: String? = this.runId,
             sending: Boolean = this.sending,
             unlistedAt: Long? = this.unlistedAt,
-        ) = Awaiting(staged, behindRunId, queuedAt, queuedOnAccount, followupId, priorCopies, priorTranscriptCopies, runId, sending, unlistedAt)
+        ) = Awaiting(staged, behindRunId, queuedAt, queuedOnAccount, followupId, priorCopies, priorTranscriptCopies, runId, sending, unlistedAt, recordStep)
 
         /** The same message: the followup id when the send minted one, else the staged copy's own id (an [Awaiting] is replaced by [copy] as it waits). */
         fun sameAs(other: Awaiting): Boolean = if (followupId != null) followupId == other.followupId else staged.localId == other.staged.localId
@@ -728,16 +735,23 @@ class ConversationRepository(
             if (delivered.isNotEmpty()) {
                 // A message filed under its run: off the card while the frame shows its own filing — the transcript's
                 // prompt its run was started by, or its echo standing in until the transcript carries it (a steer's
-                // echo among the run's rows) — which is every frame, bar a conversation rewound past it, when the
-                // account's list (which still names it) is the place it is.
+                // echo among the run's rows), or the record's turn the echo gave way to (see [pruneLocal]) — which is
+                // every frame, bar a conversation rewound past it, when the account's list (which still names it) is
+                // the place it is. The echo goes the moment the record carries the turn, seconds before the list lets
+                // go of the message: without the turn, the list's row came back onto the card beside it (Bennett's
+                // frames of 2026-09-30).
                 val turns = pairing().turns
                 for (d in delivered) {
                     val own = d.localMessageId in onScreen ||
-                        (!d.steered && turns.firstOrNull { it.run?.id == d.runId }?.prompt?.id?.let { it in onScreen } == true)
+                        (!d.steered && turns.firstOrNull { it.run?.id == d.runId }?.prompt?.id?.let { it in onScreen } == true) ||
+                        recordEchoes.any { (step, echo) -> echo.runId == d.runId && recordPromptId(step) in onScreen && echo.text == normalizePrompt(d.staged.text) }
                     if (own) { if (d.followupId != null) ids += d.followupId else texts += QueuePlacement.textKey(d.staged.text) }
                 }
             }
+            val drawn = drawnFromRecord(items)
             for (a in awaiting) {
+                // In the transcript by the record's word, the account's list a read behind: off the card, its row too.
+                if (a in drawn) { if (a.followupId != null) ids += a.followupId else texts += QueuePlacement.textKey(a.staged.text); continue }
                 // Waiting: on the card, from this device's own knowledge, until the frame that files it (see
                 // [fileInFrame]) — with what it carries, as the account's own row would say it (its files by name and
                 // type, its pictures by count), and this device's copies of it for the row's tiles.
@@ -884,6 +898,38 @@ class ConversationRepository(
                 }
             }
             return retired
+        }
+
+        /** The index of the record's newest loaded turn: where a message queued now stands against it (see [Awaiting.recordStep]). */
+        val newestRecordStep: Int? get() = recordWindow?.turns?.lastOrNull()?.stepIndex
+
+        /**
+         * The messages the account still lists that the record has delivered, in the frame [items] (the Beta engine):
+         * the record has more turns opening on the message's words past where it stood when the message was queued
+         * ([Awaiting.recordStep]) than there are messages with those words queued ahead of it, and the frame draws
+         * more copies of them than it did then ([Awaiting.priorCopies]). The account writes a prompt into the record
+         * only on delivery, and its list is seconds behind: the card leaves the message out from the frame that draws
+         * it (see [queuePlacement]), not a list read later — Bennett's frames of 2026-09-30, the second message on the
+         * card and in the transcript at once once the coordinator had answered the first. The rest of the way is
+         * [retireDrawn]'s, or the filing's, once the list lets go of it.
+         */
+        fun drawnFromRecord(items: List<TimelineItem>): Set<Awaiting> {
+            val window = recordWindow ?: return emptySet()
+            if (awaiting.none { it.recordStep != null && it.queuedOnAccount && !it.sending }) return emptySet()
+            val bubbles = local.filterNot { it.filed }.mapTo(HashSet()) { it.message.id }
+            val drawn = HashMap<String, Int>()
+            for (item in items) if (item is UserMessage && item.id !in bubbles) drawn.merge(QueuePlacement.textKey(item.text), 1, Int::plus)
+            val out = HashSet<Awaiting>()
+            awaiting.forEachIndexed { i, a ->
+                val since = a.recordStep ?: return@forEachIndexed
+                if (!a.queuedOnAccount || a.sending) return@forEachIndexed
+                val key = QueuePlacement.textKey(a.staged.text)
+                if ((drawn[key] ?: 0) <= a.priorCopies) return@forEachIndexed
+                // The same words queued ahead of it take the turns past it first, whichever of them the record has.
+                val ahead = (0 until i).count { QueuePlacement.textKey(awaiting[it].staged.text) == key }
+                if (window.turns.count { it.stepIndex > since && it.prompt?.let(QueuePlacement::textKey) == key } > ahead) out += a
+            }
+            return out
         }
 
         private fun storyOf(runId: String): List<TimelineItem>? = live?.takeIf { it.runId == runId }?.items ?: partial[runId] ?: traces[runId]
@@ -1542,7 +1588,7 @@ class ConversationRepository(
             val startedAt = run?.let { parseIsoMillis(it.createdAt).takeIf { ms -> ms > 0 } }
                 ?: timing?.timestampMs?.let { end -> end - (timing.durationMs ?: 0L) }?.takeIf { it > 0 }
             turn.prompt?.let { text ->
-                val promptId = "rec-prompt-${turn.stepIndex}"
+                val promptId = recordPromptId(turn.stepIndex)
                 items += SystemNotifications.parse(promptId, text, startedAt)?.items
                     ?: listOf(UserMessage(promptId, text, startedAt, attachments = inputs.attachments ?: emptyList()))
             }
@@ -1964,6 +2010,8 @@ class ConversationRepository(
                     priorCopies = a.priorCopies,
                     priorTranscriptCopies = a.priorTranscriptCopies,
                     attachments = a.staged.attachments.attachments,
+                    recordStep = a.recordStep,
+                    recordTurnIndexed = record?.readsTurns == true,
                 )
             },
         )
@@ -4812,7 +4860,7 @@ class ConversationRepository(
                 if (awaiting.isEmpty()) {
                     awaiting = cached.awaiting.map { c ->
                         val staged = StagedFollowUp(c.localId, c.text, attachments.staged(c.attachments), c.stagedAtMillis, shown = false, message = V0ConversationMessageDto(c.localId, USER_MESSAGE, c.text), placeholder = c.placeholder)
-                        Awaiting(staged, c.behindRunId, c.queuedAtMillis, c.queuedOnAccount, c.followupId, c.priorCopies, c.priorTranscriptCopies, c.runId)
+                        Awaiting(staged, c.behindRunId, c.queuedAtMillis, c.queuedOnAccount, c.followupId, c.priorCopies, c.priorTranscriptCopies, c.runId, recordStep = c.recordStep?.takeIf { c.recordTurnIndexed == (record?.readsTurns == true) })
                     }
                 }
                 if (promptImages.isEmpty()) promptImages = onDevice
@@ -5725,7 +5773,7 @@ class ConversationRepository(
                 promptImages = promptImages - staged.localId
             }
             val behind = behindRunId ?: latestRun()?.id?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) }
-            awaiting = awaiting + Awaiting(staged, behind, AppClock.now(), followupId = followupId, priorCopies = prior, priorTranscriptCopies = priorTranscript, runId = runId)
+            awaiting = awaiting + Awaiting(staged, behind, AppClock.now(), followupId = followupId, priorCopies = prior, priorTranscriptCopies = priorTranscript, runId = runId, recordStep = newestRecordStep)
         })
     }
 
@@ -5868,7 +5916,7 @@ class ConversationRepository(
                     val key = QueuePlacement.textKey(d.staged.text)
                     val prior = e.state.value.items.count { it is UserMessage && QueuePlacement.textKey(it.text) == key } - 1
                     val priorTranscript = e.messages.count { it.type == USER_MESSAGE && QueuePlacement.textKey(it.text) == key }
-                    e.awaiting = e.awaiting + Awaiting(d.staged.withAttachments(attachments.committed(agentId, d.runId, d.images)), d.runId, now, queuedOnAccount = true, followupId = d.followupId, priorCopies = prior.coerceAtLeast(0), priorTranscriptCopies = priorTranscript)
+                    e.awaiting = e.awaiting + Awaiting(d.staged.withAttachments(attachments.committed(agentId, d.runId, d.images)), d.runId, now, queuedOnAccount = true, followupId = d.followupId, priorCopies = prior.coerceAtLeast(0), priorTranscriptCopies = priorTranscript, recordStep = e.newestRecordStep)
                     d.followupId?.let { e.returned = e.returned + (it to QueuePlacement.RETURNED_NOTE) }
                     false
                 }
@@ -6068,7 +6116,7 @@ class ConversationRepository(
             val prior = state.value.items.count { it is UserMessage && it.id != replacing?.localId && QueuePlacement.textKey(it.text) == key }
             val priorTranscript = messages.count { it.type == USER_MESSAGE && QueuePlacement.textKey(it.text) == key }
             val behind = queueTail(except = null)?.id ?: latestRun()?.id?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) }
-            awaiting = awaiting + Awaiting(staged, behind, AppClock.now(), followupId = followupId, priorCopies = prior, priorTranscriptCopies = priorTranscript, sending = true)
+            awaiting = awaiting + Awaiting(staged, behind, AppClock.now(), followupId = followupId, priorCopies = prior, priorTranscriptCopies = priorTranscript, sending = true, recordStep = newestRecordStep)
         })
         replacing?.let { attachments.discard(it.attachments) }
         return staged
@@ -6614,6 +6662,8 @@ class ConversationRepository(
 
         /** A prompt's text as the server and the phone agree on it: runs of whitespace as one space, trimmed. */
         fun normalizePrompt(text: String): String = QueuePlacement.textKey(text)
+        /** The id the transcript draws the prompt of the record's turn at [stepIndex] under (see [RecordTurn.stepIndex]). */
+        fun recordPromptId(stepIndex: Int): String = "rec-prompt-$stepIndex"
         /**
          * A reply's words as the transcript and a stream both carry them, letters and digits alone: the stream's
          * segments and the transcript's messages split and mark up the same text their own way.
