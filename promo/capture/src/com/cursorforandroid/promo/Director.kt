@@ -25,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -42,7 +43,7 @@ import kotlin.math.roundToInt
 /**
  * A screen the capture poses the app on: its window, and the system bars a device would report around it. The
  * capture has no system UI of its own, so the app is told those bars' insets, lays itself out around them as on the
- * device, and the video draws the bars in the room it left.
+ * device, and the video draws the bars in the room it left. The app follows the system's dark theme, [night].
  */
 data class Screen(
     val name: String,
@@ -52,16 +53,20 @@ data class Screen(
     val statusBarDp: Int,
     val navBarDp: Int,
     val keyboard: Boolean = false,
+    val night: Boolean = true,
 ) {
     val density: Float get() = dpi / 160f
     val widthPx: Int get() = (widthDp * density).roundToInt()
     val heightPx: Int get() = (heightDp * density).roundToInt()
 
+    /** The same screen with the system in its light theme. */
+    val light: Screen get() = copy(night = false)
+
     val qualifiers: String
         get() = buildString {
             append("w${widthDp}dp-h${heightDp}dp-")
             append(if (widthDp > heightDp) "land" else "port")
-            append("-night-")
+            append(if (night) "-night-" else "-notnight-")
             append(if (dpi == 160) "mdpi" else "${dpi}dpi")
             if (keyboard) append("-keysexposed-qwerty")
         }
@@ -108,8 +113,15 @@ class Director(
     private var releaseFrames = 0
     private var emitsSeen = VirtualTime.emits
     private var framesThisRun = 0
+    private var pressed: Pressed? = null
+
+    /** What else each frame's metadata carries about the device around the app, as the take reads it. */
+    var extra: (JsonObjectBuilder.() -> Unit)? = null
 
     private class Finger(val x: Float, val y: Float, val down: Boolean)
+
+    /** A finger held down by [press]: the window it went down in, and where that window's top left is on the screen. */
+    private class Pressed(val root: SemanticsNodeInteraction, val origin: Offset)
 
     private val timings = LinkedHashMap<String, Long>()
 
@@ -314,6 +326,7 @@ class Director(
             }
         }
         if (marks.isNotEmpty()) putJsonArray("marks") { marks.forEach { add(it) } }
+        extra?.invoke(this)
     }
 
     /** The screen as it is now, at full size, for looking at rather than filming. */
@@ -401,6 +414,41 @@ class Director(
         finger = Finger(x, y, down = false)
         releaseFrames = RELEASE_FRAMES
     }
+
+    /**
+     * A finger put down at ([x], [y]) on the screen, into the window whose root [root] matches, and kept down: [moveTo]
+     * carries it and [lift] lifts it. A hold that turns into a drag, which a node's own input cannot do once the node
+     * it started on moves under the finger.
+     */
+    fun press(root: SemanticsMatcher, x: Float, y: Float, label: String? = null) {
+        check(pressed == null) { "A finger is already down" }
+        val window = compose.onNode(root, useUnmergedTree = true)
+        val origin = window.fetchSemanticsNode().positionOnScreen
+        label?.let(::mark)
+        finger = Finger(x, y, down = true)
+        releaseFrames = 0
+        delivered { window.performTouchInput { down(Offset(x, y) - origin) } }
+        pressed = Pressed(window, origin)
+    }
+
+    /** The finger [press] put down, moved to ([x], [y]) on the screen before the next frame. */
+    fun moveTo(x: Float, y: Float) {
+        val held = checkNotNull(pressed) { "No finger is down" }
+        finger = Finger(x, y, down = true)
+        delivered { held.root.performTouchInput { moveTo(Offset(x, y) - held.origin) } }
+    }
+
+    fun lift() {
+        val held = checkNotNull(pressed) { "No finger is down" }
+        val at = checkNotNull(finger)
+        delivered { held.root.performTouchInput { up() } }
+        pressed = null
+        finger = Finger(at.x, at.y, down = false)
+        releaseFrames = RELEASE_FRAMES
+    }
+
+    /** Where [node] is on the screen: its centre. */
+    fun centerOf(node: SemanticsNodeInteraction): Offset = center(node.fetchSemanticsNode()).let { (x, y) -> Offset(x, y) }
 
     /** [text] typed into [field] a key at a time, at a quick typist's uneven pace (about 14 characters a second). */
     fun type(field: SemanticsNodeInteraction, text: String) {

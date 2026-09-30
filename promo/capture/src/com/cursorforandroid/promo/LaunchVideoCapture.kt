@@ -1,5 +1,7 @@
 package com.cursorforandroid.promo
 
+import android.Manifest
+import android.app.Notification
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -7,6 +9,9 @@ import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
@@ -15,6 +20,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -22,20 +28,33 @@ import com.cursorforandroid.AppGraph
 import com.cursorforandroid.CursorApp
 import com.cursorforandroid.DeferredStartup
 import com.cursorforandroid.MainActivity
+import com.cursorforandroid.R
 import com.cursorforandroid.data.demo.DemoStore
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.data.repo.CursorBackend
+import com.cursorforandroid.data.repo.ExtendedMode
 import com.cursorforandroid.data.repo.ReviewRepository
+import com.cursorforandroid.data.repo.RunMonitor
 import com.cursorforandroid.data.repo.SessionManager
 import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.domain.CursorUser
+import com.cursorforandroid.notifications.LiveNotificationRenderer
+import com.cursorforandroid.notifications.LiveNotificationRenderer.LiveLook
 import com.cursorforandroid.ui.conversation.QueueGlyphs
+import com.cursorforandroid.ui.home.NewChatHomeTags
+import com.cursorforandroid.ui.home.ProjectShortcutCopy
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -51,23 +70,27 @@ import java.nio.ByteBuffer
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
-/** [Screen.Phone], [Screen.Foldable] and [Screen.Tablet] as `@Config` needs them, as constants; [stage] checks they still agree. */
+/** The [Screen]s as `@Config` needs them, as constants; [stage] checks they still agree. */
 private const val PHONE = "w411dp-h923dp-port-night-420dpi"
 private const val FOLDABLE = "w791dp-h820dp-port-night-420dpi"
 private const val TABLET = "w1280dp-h800dp-land-night-320dpi"
+private const val PHONE_LIGHT = "w411dp-h923dp-port-notnight-420dpi"
+private const val FOLDABLE_LIGHT = "w791dp-h820dp-port-notnight-420dpi"
+private const val TABLET_LIGHT = "w1280dp-h800dp-land-notnight-320dpi"
 
 /**
  * The launch video's footage: the app itself, signed in to the capture's account with its scripted backend behind
  * it, driven a frame at a time by a [Director] and filmed to `promo/capture/out`. Each device's take is one
- * continuous take of the same run (see [take]), each step at the same moment of the capture's clock, so the video
+ * continuous take of the same run (see [Take]), each step at the same moment of the capture's clock, so the video
  * can cut between the devices and set them side by side at any moment of it.
  *
  * Run through `promo/capture/run.sh <test>`: the harness is not part of the app's build.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = PHONE)
+@Config(sdk = [35], qualifiers = PHONE, shadows = [PromoMediaRecorder::class])
 class LaunchVideoCapture {
 
     @get:Rule
@@ -79,6 +102,7 @@ class LaunchVideoCapture {
     private var director: Director? = null
     private lateinit var graph: AppGraph
     private lateinit var streamer: PromoRunStreamer
+    private var posted: Pair<LiveLook, Notification>? = null
 
     private val clock = AppClock.nowMillis
     private val settle = DeferredStartup.settleMs
@@ -87,9 +111,10 @@ class LaunchVideoCapture {
 
     @Before
     fun stage() {
-        check(Screen.Phone.qualifiers == PHONE && Screen.Foldable.qualifiers == FOLDABLE && Screen.Tablet.qualifiers == TABLET) {
-            "The @Config qualifiers no longer match the screens"
-        }
+        check(
+            Screen.Phone.qualifiers == PHONE && Screen.Foldable.qualifiers == FOLDABLE && Screen.Tablet.qualifiers == TABLET &&
+                Screen.Phone.light.qualifiers == PHONE_LIGHT && Screen.Foldable.light.qualifiers == FOLDABLE_LIGHT && Screen.Tablet.light.qualifiers == TABLET_LIGHT,
+        ) { "The @Config qualifiers no longer match the screens" }
         TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
         Locale.setDefault(Locale.US)
         VirtualTime.reset()
@@ -104,6 +129,7 @@ class LaunchVideoCapture {
         director?.printTimings()
         runCatching { director?.endSegment() }
         runCatching { sink?.close() }
+        runCatching { if (::graph.isInitialized) graph.runMonitor.stop() }
         runCatching { controller?.pause()?.stop()?.destroy() }
         shadowOf(Looper.getMainLooper()).idle()
         AppClock.nowMillis = clock
@@ -113,10 +139,11 @@ class LaunchVideoCapture {
     }
 
     /**
-     * The app launched on [screen] as someone who has been using it for a while: their week of chats on the Cesium
-     * repository, two of them pinned, and the repository and model chosen in the composer; nothing new to read, the
-     * notification question answered. The account is the demo's, which the app runs as it runs any other, under the
-     * capture's name for its owner rather than the demo's.
+     * The app launched on [screen] as someone who has been using it for a while, in Extended mode: their week of
+     * chats on the Cesium repository, two of them pinned, their Projects on the New Chat page, and the repository and
+     * model chosen in the composer; nothing new to read, the microphone and notifications allowed. The account is
+     * the demo's, which the app runs as it runs any other, under the capture's name for its owner rather than the
+     * demo's. The live notification's run monitor follows what runs, as the notification's service would.
      */
     private fun launch(screen: Screen, name: String): Director {
         val store = DemoStore(PromoSeeds.seeds)
@@ -125,17 +152,25 @@ class LaunchVideoCapture {
         val review = PromoReview(script)
         streamer = PromoRunStreamer(store, script, steering, review)
         val backend = CursorBackend(PromoCursorApi(store), streamer, isDemo = true)
-        graph = AppGraph(app, SecureKeyStore(app) { app.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, demo = backend)
+        graph = AppGraph(
+            app,
+            SecureKeyStore(app) { app.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) },
+            demo = backend,
+            transcriptionApi = PromoTranscription(HERO_PROMPT),
+        )
         CursorApp::class.java.getDeclaredField("graph").apply { isAccessible = true }.set(app, graph)
         ReviewRepository::class.java.getDeclaredField("demo").apply { isAccessible = true }.set(graph.reviews, review)
+        extend(graph)
         PromoSeeds.install(graph)
         steering.install(graph.followUps)
         steering.queueRead = { agentId -> graph.conversations.noteAccountQueue(agentId, emptyList()) }
         steering.placed = { agentId -> graph.followUps.state(agentId).value.queue.isEmpty() }
+        shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
         runBlocking {
             graph.prefs.setComposerDefaults(repoUrl = CESIUM_REPO, ref = "main", modelId = "composer-2.5", params = mapOf("fast" to "true"))
             graph.prefs.setWhatsNewReadVersion(graph.appVersion)
             graph.prefs.setNotificationPermissionAsked()
+            graph.prefs.setProjectOrder(PromoSeeds.projectOrder)
             // Before the demo is entered, which pins its own showcase chats only while nothing is pinned.
             graph.prefs.pinIfNonePinned(PromoSeeds.pinned)
             graph.session.enterDemo()
@@ -149,14 +184,57 @@ class LaunchVideoCapture {
         compose.waitUntil(30_000) { compose.onAllNodes(hasText(HOME_PLACEHOLDER, substring = true)).fetchSemanticsNodes().isNotEmpty() }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
+        // Its periodic refresh runs on the wall clock, which a take spends minutes of; nothing new would come of it.
+        RunMonitor::class.java.getDeclaredField("refreshIntervalMs").apply { isAccessible = true }.setLong(graph.runMonitor, Long.MAX_VALUE)
+        graph.runMonitor.start()
         val frames = FrameSink(File(Promo.out, name), Promo.preview).also { sink = it }
-        return Director(compose, launched, frames, screen).also { director = it }
+        return Director(compose, launched, frames, screen).also {
+            director = it
+            it.extra = { live() }
+        }
+    }
+
+    /**
+     * Extended mode, as far as the screens go: the Projects on the New Chat page and dictation in the composer. What
+     * the mode lets the app do on the account stays as the setting has it, off (see [ExtendedMode.capabilities]), so
+     * nothing reaches for the account service the demo does not have.
+     */
+    private fun extend(graph: AppGraph) {
+        ExtendedMode::class.java.getDeclaredField("enabled").apply { isAccessible = true }.set(graph.extendedMode, flowOf(true))
+        AppGraph::class.java.getDeclaredField("voiceInput").apply { isAccessible = true }.set(graph, flowOf(true))
+    }
+
+    /**
+     * The live notification as the app would post it this frame, for the video to show in the shade: what
+     * [LiveNotificationRenderer] builds for the run monitor's state, with its chronometer's reading.
+     */
+    private fun JsonObjectBuilder.live() {
+        val look = LiveNotificationRenderer.look(app, graph.runMonitor.state.value)
+        if (look == LiveLook.Connecting) return
+        val notification = posted?.takeIf { it.first == look }?.second ?: LiveNotificationRenderer.live(app, look).also { posted = look to it }
+        val extras = notification.extras
+        putJsonObject("live") {
+            put("app", app.getString(R.string.app_name))
+            put("title", extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
+            put("text", extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+            put("sub", extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString())
+            if (extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER)) put("elapsedMs", VirtualTime.wallMillis() - notification.`when`)
+            put("indeterminate", extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE))
+            putJsonArray("actions") { notification.actions.orEmpty().forEach { add(it.title.toString()) } }
+        }
     }
 
     private fun finish(name: String) {
         director?.endSegment()
         PacingLog.write(File(Promo.out, "$name/pacing.json"))
         PacingLog.check()
+    }
+
+    private fun film(screen: Screen, name: String, scale: Float) {
+        val d = launch(screen, name)
+        d.segment(name, scale)
+        Take(d, name).play()
+        finish(name)
     }
 
     /** The phone's take at half size, with the screen's semantics and a still at each step, going on past a step that finds nothing to do. */
@@ -168,67 +246,82 @@ class LaunchVideoCapture {
         finish("probe")
     }
 
+    /** [probe] with the system in its light theme. */
+    @Test
+    @Config(qualifiers = PHONE_LIGHT)
+    fun probeLight() {
+        val d = launch(Screen.Phone.light, "probe-light")
+        d.segment("probe-light", 0.5f)
+        Take(d, "probe-light", probing = true).play()
+        finish("probe-light")
+    }
+
     /** Pixel 9: the video's spine. */
     @Test
-    fun phone() {
-        val d = launch(Screen.Phone, "phone")
-        d.segment("phone", 1f)
-        Take(d, "phone").play()
-        finish("phone")
-    }
+    fun phone() = film(Screen.Phone, "phone", 1f)
 
     /** Pixel 9 Pro Fold, open: the chat with its details pinned beside it. */
     @Test
     @Config(qualifiers = FOLDABLE)
-    fun foldable() {
-        val d = launch(Screen.Foldable, "foldable")
-        d.segment("foldable", 0.75f)
-        Take(d, "foldable").play()
-        finish("foldable")
-    }
+    fun foldable() = film(Screen.Foldable, "foldable", 0.75f)
 
     /** Pixel Tablet on its side: the sidebar, the chat and its details. */
     @Test
     @Config(qualifiers = TABLET)
-    fun tablet() {
-        val d = launch(Screen.Tablet, "tablet")
-        d.segment("tablet", 0.75f)
-        Take(d, "tablet").play()
-        finish("tablet")
-    }
+    fun tablet() = film(Screen.Tablet, "tablet", 0.75f)
+
+    @Test
+    @Config(qualifiers = PHONE_LIGHT)
+    fun phoneLight() = film(Screen.Phone.light, "phone-light", 1f)
+
+    @Test
+    @Config(qualifiers = FOLDABLE_LIGHT)
+    fun foldableLight() = film(Screen.Foldable.light, "foldable-light", 0.75f)
+
+    @Test
+    @Config(qualifiers = TABLET_LIGHT)
+    fun tabletLight() = film(Screen.Tablet.light, "tablet-light", 0.75f)
 
     /**
-     * One take of the run on [d]'s screen, each step at the same moment after the send on every device: the task typed
-     * into the home screen's composer and sent; the stretch of edits opened as they land, and the first one's diff; a
-     * follow-up typed while the agent works, queued behind the turn and steered into it, the transcript caught up to
-     * see it land; and once the run has opened its pull request and answered, the pull request's section of the
-     * details. A wide window pins the details beside the chat as soon as it opens, where the edits come in as they
-     * are made; a phone opens them at the end. With [probing], every step is looked at (semantics, a still and the
-     * moment it came, in the log), and one that finds nothing to do is noted and passed over.
+     * One take of the run on [d]'s screen, each step at the same moment of the capture's clock on every device: the
+     * last of the Projects on the New Chat page held until it lifts and carried to the front; the task said into the
+     * composer's microphone, transcribed into it and sent; the stretch of edits opened as they land, and the first
+     * one's diff; a follow-up typed while the agent works, queued behind the turn and steered into it; and once the
+     * run has opened its pull request and answered, the pull request's section of the details. A wide window pins the
+     * details beside the chat as soon as it opens, where the edits come in as they are made; a phone opens them at
+     * the end. With [probing], every step is looked at (semantics, a still and the moment it came, in the log), and
+     * one that finds nothing to do is noted and passed over.
      */
     private inner class Take(private val d: Director, private val name: String, private val probing: Boolean = false) {
+        private var began = 0L
         private var sent = 0L
         private val wide = d.screen.widthDp >= WIDE_DP
 
         fun play() {
             try {
-                d.hold(1.0)
+                began = VirtualTime.nowMs
+                before(HOLD_AT)
                 look("home")
-                val field = hasSetTextAction()
-                tap("composer", field)
-                d.hold(0.3)
-                d.type(d.node(field), HERO_PROMPT)
-                d.hold(0.45)
-                look("typed")
-                tap("send", hasTestTag("composer-main"))
+                arrange()
+                look("arranged")
+
+                before(MIC_AT)
+                tap("mic", MAIN)
+                before(STOP_AT)
+                look("listening")
+                tap("stop", MAIN)
+                look("transcribing")
+                until("the words", 4.0) { fieldText(hasSetTextAction()) == HERO_PROMPT }
+                look("dictated")
+                before(SEND_AT)
+                tap("send", MAIN)
                 sent = VirtualTime.nowMs
+                if (probing) println("promo: sent at ${sent - began}ms into the take")
                 until("the chat", 10.0) { d.exists(hasTestTag("chat-header")) }
                 if (wide) {
                     at(PANEL_AT)
                     tap("panel", hasContentDescription("Open panel"))
                 }
-                at(THINKING_AT)
-                look("thinking")
 
                 at(EDITS_AT)
                 until("the edits", 3.0) { d.exists(WORKING) }
@@ -245,14 +338,13 @@ class LaunchVideoCapture {
                 d.hold(0.25)
                 d.type(d.node(followUp), STEER_PROMPT)
                 d.hold(0.25)
-                tap("queue", hasTestTag("composer-main"))
+                tap("queue", MAIN)
                 at(STEER_AT)
                 look("queued")
                 steer()
                 until("the steer", 3.0) { d.exists(hasText(STEERED, substring = true)) }
                 look("steered")
-                at(LATEST_AT)
-                if (d.exists(LATEST)) tap("latest", LATEST) else if (probing) println("promo: the transcript was following at +${elapsed()}ms")
+                if (probing && d.exists(LATEST)) println("promo: the transcript is not following at +${elapsed()}ms")
                 until("the steer's message", 6.0) { d.exists(said(STEER_PROMPT)) && graph.followUps.state(heroAgent()).value.queue.isEmpty() }
                 look("filed")
                 until("the change of plan", 6.0) { d.exists(said(ADAPTED)) }
@@ -277,15 +369,60 @@ class LaunchVideoCapture {
             }
         }
 
+        /**
+         * The Project that is last on the page lifted and carried to the front: pressed and held through the menu the
+         * hold opens, until the shortcut lifts under the finger; carried over the others, which make room, to the
+         * first slot at a hand's pace; and set down there.
+         */
+        private fun arrange() {
+            val moved = SHORTCUT and hasText(PromoSeeds.MOVED_PROJECT)
+            if (!d.exists(moved)) {
+                check(probing) { "No ${PromoSeeds.MOVED_PROJECT} shortcut to move" }
+                println("promo: no ${PromoSeeds.MOVED_PROJECT} shortcut at ${elapsedInTake()}ms")
+                d.dump("$name-missing-shortcut")
+                return
+            }
+            val first = compose.onAllNodes(SHORTCUT).fetchSemanticsNodes().minWith(compareBy<SemanticsNode>({ it.positionOnScreen.y }, { it.positionOnScreen.x }))
+            val from = d.centerOf(d.node(moved))
+            val to = first.positionOnScreen.let { at -> androidx.compose.ui.geometry.Offset(at.x + first.size.width / 2f, at.y + first.size.height / 2f) }
+            d.press(isRoot() and hasAnyDescendant(SHORTCUT), from.x, from.y, label = "hold")
+            until("the menu", 2.0) { d.exists(hasText("Copy link")) }
+            look("menu")
+            until("the lift", 2.0) { d.exists(ARRANGING) }
+            if (probing) println("promo: lifted at ${elapsedInTake()}ms")
+            d.frames(LIFT_FRAMES)
+            look("lifted")
+            for (i in 1..CARRY_FRAMES) {
+                val t = smooth(i / CARRY_FRAMES.toFloat())
+                d.moveTo(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)
+                d.frame()
+            }
+            d.frames(DROP_FRAMES)
+            d.lift()
+            d.mark("dropped")
+            if (probing) println("promo: dropped at ${elapsedInTake()}ms")
+        }
+
         private fun elapsed() = VirtualTime.nowMs - sent
+
+        private fun elapsedInTake() = VirtualTime.nowMs - began
 
         private fun heroAgent(): String = checkNotNull(streamer.heroAgent) { "The run has not started" }
 
         private fun look(step: String) {
             if (!probing) return
-            println("promo: $step at +${elapsed()}ms")
+            println("promo: $step at ${elapsedInTake()}ms into the take" + if (sent > 0) " (+${elapsed()}ms)" else "")
             d.dump("$name-$step")
             d.still("$name-$step", 0.5f)
+        }
+
+        /** Films until [ms] into the take, before the send; a probe that is already past it says by how much. */
+        private fun before(ms: Long) {
+            if (probing && elapsedInTake() > ms) {
+                println("promo: already ${elapsedInTake() - ms}ms past ${ms}ms into the take")
+                return
+            }
+            d.at(began + ms)
         }
 
         /** Films until [ms] after the send; a probe that is already past it says by how much. */
@@ -301,7 +438,7 @@ class LaunchVideoCapture {
             try {
                 d.until(what, seconds, condition)
                 d.mark(what)
-                if (probing) println("promo: $what at +${elapsed()}ms")
+                if (probing) println("promo: $what at ${elapsedInTake()}ms into the take" + if (sent > 0) " (+${elapsed()}ms)" else "")
             } catch (e: IllegalStateException) {
                 if (!probing) throw e
                 println("promo: never saw $what")
@@ -311,11 +448,16 @@ class LaunchVideoCapture {
         private fun tap(what: String, matcher: SemanticsMatcher, unmerged: Boolean = false) {
             if (!d.exists(matcher, unmerged)) {
                 check(probing) { "Nothing to tap for $what" }
-                println("promo: nothing to tap for $what at +${elapsed()}ms")
+                println("promo: nothing to tap for $what at ${elapsedInTake()}ms")
                 d.dump("$name-missing-${what.replace(' ', '-')}")
                 return
             }
             d.tap(d.node(matcher, unmerged), label = what)
+        }
+
+        private fun fieldText(matcher: SemanticsMatcher): String? {
+            if (!d.exists(matcher)) return null
+            return d.node(matcher).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text
         }
 
         /**
@@ -391,20 +533,37 @@ class LaunchVideoCapture {
 
         val USER = CursorUser(apiKeyName = "Android", email = "alex@example.com", firstName = "Alex", lastName = "Rivera", userId = null)
 
+        /** The composer's main disc: the microphone while the composer is empty, the stop while it records, then the send. */
+        val MAIN = hasTestTag("composer-main")
+        val SHORTCUT = hasTestTag(NewChatHomeTags.PROJECT_SHORTCUT)
+        val ARRANGING = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, ProjectShortcutCopy.ARRANGING)
+
         /** The stretch the run is working in, rather than the home list's or the panel's "Working". */
         val WORKING = hasText("Working") and hasAnyAncestor(hasTestTag("stretch"))
         val LATEST = hasContentDescription("Scroll to latest")
 
-        // Each step's moment, in ms after the send: the run is scripted to the millisecond from there, so these are the
-        // same on every device, and every take shows the same thing at the same moment.
-        const val PANEL_AT = 1_000L
-        const val THINKING_AT = 1_800L
-        const val EDITS_AT = 4_900L
-        const val FOLLOW_UP_AT = 6_900L
-        const val STEER_AT = 9_500L
-        const val LATEST_AT = 10_500L
-        const val SHIP_AT = 23_400L
-        const val PULL_REQUEST_AT = 24_300L
-        const val END_AT = 27_000L
+        /** Frames the lifted shortcut is held still before it is carried, carried for, and held on its new slot before it is let go. */
+        const val LIFT_FRAMES = 8
+        const val CARRY_FRAMES = 40
+        const val DROP_FRAMES = 5
+
+        // The steps before the send, in ms into the take: the same on every device, as the video cuts between them.
+        const val HOLD_AT = 900L
+        const val MIC_AT = 3_500L
+        const val STOP_AT = 6_100L
+        const val SEND_AT = 7_300L
+
+        // Each step's moment after it, in ms after the send: the run is scripted to the millisecond from there, so
+        // these are the same on every device, and every take shows the same thing at the same moment.
+        const val PANEL_AT = 900L
+        const val EDITS_AT = 2_300L
+        const val FOLLOW_UP_AT = 4_300L
+        const val STEER_AT = 7_600L
+        const val SHIP_AT = 20_500L
+        const val PULL_REQUEST_AT = 21_400L
+        const val END_AT = 24_000L
+
+        /** A hand's move from rest to rest: the minimum-jerk curve, 0 to 1. */
+        fun smooth(t: Float): Float = t * t * t * (10 + t * (-15 + 6 * t))
     }
 }

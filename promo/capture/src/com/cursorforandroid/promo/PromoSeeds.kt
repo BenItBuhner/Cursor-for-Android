@@ -8,11 +8,14 @@ import com.cursorforandroid.data.repo.PullRequestLookup
 import com.cursorforandroid.data.repo.PullRequestRepository
 import com.cursorforandroid.data.repo.PullRequestSource
 import com.cursorforandroid.domain.AgentSource
+import com.cursorforandroid.domain.ProjectAppearance
 import com.cursorforandroid.domain.PullRequestState
 
 /**
- * The account the capture signs in to: a week of someone's agents on one product, most of them landed, one still
- * working. The demo's own seeds show off every corner of the app; these are what a user's list looks like.
+ * The account the capture signs in to: a week of someone's agents on one product, all of them landed, and the
+ * Projects they keep the product's parts in. The demo's own seeds show off every corner of the app; these are what a
+ * user's list looks like. Nothing else is running, so the run the capture starts is the one the live notification
+ * follows.
  */
 internal object PromoSeeds {
     private const val MIN = 60_000L
@@ -21,11 +24,29 @@ internal object PromoSeeds {
 
     private fun pr(n: Int) = "$CESIUM_REPO/pull/$n"
 
+    private class Project(val id: String, val name: String, val icon: String, val color: String, val ageMillis: Long, val prompt: String, val reply: String)
+
+    /** The Projects pinned to the New Chat page, in the order they are arranged there before the take moves one. */
+    private val projects = listOf(
+        Project("bc-promo-0101", "Cesium web", "globe", "blue", 3 * HOUR, "Coordinate the web app's work.", "Three agents landed their changes today; nothing is waiting on review."),
+        Project("bc-promo-0102", "Billing", "credit-card", "purple", 5 * HOUR, "Coordinate the billing work.", "Invoicing and metering are split, and the webhook retries are safe."),
+        Project("bc-promo-0103", "Design system", "palette", "magenta", DAY, "Coordinate the design system.", "The tokens are in one place now; the components read them."),
+        Project("bc-promo-0104", "Data pipeline", "database", "orange", DAY + 4 * HOUR, "Coordinate the data pipeline.", "The nightly export runs in half the time."),
+        Project("bc-promo-0105", "Docs", "book-open", "yellow", 2 * DAY, "Coordinate the docs.", "Every public route is documented, with an example."),
+        Project("bc-promo-0106", "Android app", "mobile", "green", 3 * DAY, "Coordinate the Android app.", "The release build is signed and the store listing is ready."),
+    )
+
+    /** The Project the take lifts and moves to the front. */
+    const val MOVED_PROJECT = "Android app"
+
+    val projectOrder: List<String> = projects.map { it.id }
+
     val seeds: List<DemoData.Seed> = listOf(
         DemoData.Seed(
             id = "bc-promo-0001", name = "Speed up search indexing", repo = CESIUM_REPO, ageMillis = 6 * MIN,
-            runStatus = "RUNNING", lifecycle = "ACTIVE",
+            runStatus = "FINISHED", branch = "cursor/search-indexing-6b1f", prUrl = pr(220), prState = PullRequestState.Open, durationMs = 12 * MIN,
             prompt = "Indexing a large workspace takes 40 seconds. Profile it and make it fast.",
+            replies = listOf("Files are read in parallel now and unchanged ones are skipped, so a large workspace indexes in 6 seconds."),
         ),
         DemoData.Seed(
             id = "bc-promo-0002", name = "Fix flaky checkout test", repo = CESIUM_REPO, ageMillis = 18 * MIN,
@@ -79,7 +100,14 @@ internal object PromoSeeds {
             prompt = "Split the billing service into invoicing and metering, without changing behavior.",
             replies = listOf("Billing is two services now, invoicing and metering, behind the same interface. Every existing test passes unchanged."),
         ),
-    )
+    ) + projects.map { project ->
+        DemoData.Seed(
+            id = project.id, name = project.name, repo = CESIUM_REPO, ageMillis = project.ageMillis,
+            runStatus = "FINISHED", durationMs = 4 * MIN,
+            prompt = project.prompt,
+            replies = listOf(project.reply),
+        )
+    }
 
     /** Pinned before the demo is entered, which pins its own showcase chats only when nothing is pinned yet. */
     val pinned: List<String> = listOf("bc-promo-0001", "bc-promo-0009")
@@ -87,14 +115,18 @@ internal object PromoSeeds {
     private val pullRequestStates: Map<String, PullRequestState> =
         seeds.mapNotNull { seed -> seed.prUrl?.let { url -> seed.prState?.let { url to it } } }.toMap()
 
+    /** What the account's list says about the Projects' chats: that each is a Project, and how it looks. */
+    private val composers: List<ComposerSnapshot> = projects.map { project ->
+        ComposerSnapshot(project.id, isProject = true, projectAppearance = ProjectAppearance(icon = project.icon, colorId = project.color))
+    }
+
     /**
      * What the account's list says about these chats, in place of what it says about the demo's: where each was
-     * started, and that none of them is a Project. And where their pull requests stand; one the capture's run opens
-     * is open.
+     * started, and which are Projects. And where their pull requests stand; one the capture's run opens is open.
      */
     fun install(graph: AppGraph) {
         set(AgentRepository::class.java, graph.agents, "demoSources", seeds.associate { it.id to it.source })
-        set(AgentRepository::class.java, graph.agents, "demoComposers", emptyList<ComposerSnapshot>())
+        set(AgentRepository::class.java, graph.agents, "demoComposers", composers)
         set(PullRequestRepository::class.java, graph.pullRequests, "demo", object : PullRequestSource {
             override suspend fun lookup(url: String): PullRequestLookup = PullRequestLookup.Found(pullRequestStates[url] ?: PullRequestState.Open)
         })
