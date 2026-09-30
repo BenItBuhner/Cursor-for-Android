@@ -1111,10 +1111,17 @@ class ConversationRepository(
             return if (outlived) status else RunStatus.UNKNOWN
         }
 
-        /** The newest run of the list whose record calls it active, other than a run this device stopped or saw end. */
+        /** The newest run of the list whose record calls it active, other than a run this device stopped or saw end, or one still [toStart]. */
         fun newestListedActive(): RunDto? =
-            runs.filter { it.statusEnum().isActive && it.id != cancelledRunId && it.id != cancelledAs && agents.endedStatus(agentId, it.id) == null }
+            runs.filter { it.statusEnum().isActive && it.id != cancelledRunId && it.id != cancelledAs && agents.endedStatus(agentId, it.id) == null && !toStart(it) }
                 .maxByOrNull { parseIsoMillis(it.createdAt) }
+
+        /**
+         * [run] is one the account named for a message on the card, its record still `CREATING`: the run that message
+         * starts, not the turn under way — it holds nothing to follow until it runs (see [hasStarted]). Read off the
+         * record in hand, so a next-run look that reads it from the agent's record never follows it either.
+         */
+        fun toStart(run: RunDto): Boolean = run.statusEnum() == RunStatus.CREATING && awaiting.any { it.runId == run.id }
 
         /**
          * The account called the chat running after [atMillis], by more than [STALE_RUN_RECORD_SLACK_MS]: the row's own
@@ -1215,11 +1222,16 @@ class ConversationRepository(
         /**
          * Whether [runId], a run the account named for a message waiting behind [behindRunId], has started: it is
          * followed, or over, or the run it waited behind is — the account starts the next run the moment a turn ends.
-         * A run it waited behind that this device does not know holds nothing up.
+         * A run it waited behind that this device does not know holds nothing up. Never while the list has the named
+         * run still `CREATING` ([toStart]): behind a Project's injected turn — which no listed run stands for, the run
+         * it waited behind over — that is all there is to say the turn goes on, and the message is on the card until
+         * the run runs or the transcript carries its copy (see [fileInFrame]).
          */
         fun hasStarted(runId: String, behindRunId: String?): Boolean {
             if (live?.runId == runId || runId in traces) return true
-            if (runs.firstOrNull { it.id == runId }?.let { statusOf(it).isTerminal } == true) return true
+            val listed = runs.firstOrNull { it.id == runId }
+            if (listed?.let { statusOf(it).isTerminal } == true) return true
+            if (listed?.statusEnum() == RunStatus.CREATING) return false
             val behind = behindRunId?.let { runById(it) } ?: return true
             if (live?.runId == behind.id && isFollowingLive()) return false
             return !statusOf(behind).isActive
@@ -1228,15 +1240,22 @@ class ConversationRepository(
         /**
          * The newest run of the chat still to run or running, other than [except]: the turn under way, or the newest
          * run already waiting behind it (see [waitingRuns]) — what a message the account takes now waits behind. Null
-         * when nothing is under way, when the account starts a message's run at once.
+         * when nothing is under way, when the account starts a message's run at once. The turn under way is not always
+         * the newest run listed: the older run the account went on with past a newer one it cancelled, followed (see
+         * [latestRun]); a Project's injected turn — a worker's report, a timer — which no listed run stands for, the
+         * account calling the chat running since the newest run's record was written (see [chatStatus]), that run
+         * standing for the turn. Bennett's frames of 2026-09-30: a message taken behind a worker's report read as a run
+         * started, the sent bubble under "Starting…" while the account held it on its queue, and every send after too.
          */
         fun queueTail(except: String?): RunDto? {
             val waiting = waitingRuns()
-            val tail = (runs + local.filter { it.filed }.map { it.run })
-                .filter { it.id != except && !it.id.startsWith(LOCAL_RUN_PREFIX) }
-                .maxByOrNull { parseIsoMillis(it.createdAt) } ?: return null
-            val underWay = tail.id in waiting || (live?.runId == tail.id && isFollowingLive()) || statusOf(tail).isActive
-            return tail.takeIf { underWay }
+            val known = (runs + local.filter { it.filed }.map { it.run }).filter { it.id != except && !it.id.startsWith(LOCAL_RUN_PREFIX) }
+            val tail = known.maxByOrNull { parseIsoMillis(it.createdAt) } ?: return null
+            if (tail.id in waiting || (live?.runId == tail.id && isFollowingLive()) || statusOf(tail).isActive) return tail
+            live?.runId?.takeIf { it != except && isFollowingLive() }?.let { followed -> known.firstOrNull { it.id == followed } }?.let { return it }
+            known.filter { statusOf(it).isActive }.maxByOrNull { parseIsoMillis(it.createdAt) }?.let { return it }
+            // The account's list alone, not the row: a run this device takes for started is patched onto the row at once.
+            return tail.takeIf { accountRunningSince(parseIsoMillis(it.updatedAt), rowToo = false) }
         }
 
         /** The workers last reported to the agent list from this transcript (see [coordinatorLineage]); null before any. */
@@ -3944,8 +3963,9 @@ class ConversationRepository(
             synchronized(e) { e.runById(id) }?.takeIf { it.statusEnum().isActive }
                 ?: runCatching { net(agentId, "run"); agents.runRecord(agentId, id, api) }.getOrElse { t -> if (t is CancellationException) throw t; null }
         }
-        // Active as this device knows it: the run it stopped is not the next one to follow, whatever its record says yet.
-        val run = named?.takeIf { e.statusOf(it).isActive } ?: runOutlivingEnd(e, endedRunId) ?: return false
+        // Active as this device knows it: the run it stopped is not the next one to follow, whatever its record says yet,
+        // nor the run a message on the card is still to start (see [Entry.toStart]).
+        val run = named?.takeIf { e.statusOf(it).isActive && !synchronized(e) { e.toStart(it) } } ?: runOutlivingEnd(e, endedRunId) ?: return false
         var follow = false
         e.publish(mutate = {
             if (runs.none { it.id == run.id }) runs = listOf(run) + runs
@@ -3982,7 +4002,7 @@ class ConversationRepository(
             ?.let { agents.applyAccountSnapshots(listOf(it)) }
         val run = runCatching { net(agentId, "run"); agents.runRecord(agentId, candidate.id, session.current.api) }.getOrElse { t -> if (t is CancellationException) throw t; null } ?: return null
         if (!run.statusEnum().isActive) e.publish(mutate = { runs = runs.map { if (it.id == run.id) run else it } })
-        return run.takeIf { e.statusOf(it).isActive }
+        return run.takeIf { e.statusOf(it).isActive && !synchronized(e) { e.toStart(it) } }
     }
 
     /** The chat as the reader has it is at rest: read, no turn under way, nothing followed. */
