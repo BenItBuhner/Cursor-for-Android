@@ -3451,8 +3451,10 @@ class ConversationRepository(
         if (raw.isSuccess && rawWindow == null && blobBacked) {
             // No turns named for a chat with a finished run: not an empty chat but an answer in a shape this build did
             // not expect (the state absent, or elsewhere) — said as such, never a silent switch to the documented path.
+            // Only a finished run says so: a run cancelled or failed before its turn began leaves none, and a turn under
+            // way may not be named yet (Bennett's chat of 2026-09-30: a cancelled run and a running one, no turn named).
             val page = runPage.await().getOrNull()
-            if (page?.items?.any { it.statusEnum().isTerminal } == true) {
+            if (page?.items?.any { it.statusEnum() == RunStatus.FINISHED } == true) {
                 val state = stateRead.await().getOrNull()
                 val shape = ConnectRpcException(200, SHAPE_MISMATCH, "Cursor's account named no turns for this chat (${state?.shape?.ifBlank { null } ?: "no state"})", path = ConnectRpc.path(HeadlessConversationApi.SERVICE, ConversationStateReader.METHOD))
                 val message = shape.message ?: SHAPE_MISMATCH
@@ -3464,8 +3466,10 @@ class ConversationRepository(
         }
         if (raw.isSuccess && rawWindow == null) {
             // Nothing in the record for this chat: the documented endpoints are its only account — with the run page
-            // read beside the record, so the fallback does not ask for it again.
-            e.publish(mutate = { recordEmpty = true; recordError = null; recordRefusedUntil = 0L }, transform = { copy(recordFallback = null) })
+            // read beside the record, so the fallback does not ask for it again. For good only when no turn is under
+            // way: one that is may be named by the next read.
+            val underWay = runPage.await().getOrNull()?.items?.any { it.statusEnum().isActive } == true
+            e.publish(mutate = { recordEmpty = !underWay; recordError = null; recordRefusedUntil = 0L }, transform = { copy(recordFallback = null) })
             stateRead.cancel()
             return@coroutineScope RecordLoad(served = false, runPage = runPage.await())
         }
