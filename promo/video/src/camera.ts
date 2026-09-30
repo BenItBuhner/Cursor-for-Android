@@ -1,6 +1,6 @@
 import { AT, beat, HERO, whenShown } from "./edit";
 import { easeInOut, lerp, progress } from "./math";
-import { mark, stream } from "./takes";
+import { mark } from "./takes";
 
 export type Framing = "wide" | "tall";
 
@@ -13,9 +13,16 @@ export type Shot = { at: number; dur: number; zoom: number; fx: number; fy: numb
 const shown = (take: number) => whenShown(HERO, take);
 const DIFF = shown(mark("phone", "diff")) + 6;
 const LATEST = shown(mark("phone", "latest"));
-const ADAPT = shown(stream("phone", "hero.adapt").from);
 const DETAILS = shown(mark("phone", "details"));
 const PULL_REQUEST = shown(mark("phone", "pull request")) + 8;
+
+/** The frames of the 16:9 cut kept as stills: the Android card, the first diff open, the pull request, the lineup. */
+export const STILLS = {
+  android: AT.android + 50,
+  code: AT.steer - 20,
+  ship: PULL_REQUEST + 62,
+  lineup: AT.end - 30,
+};
 
 /** The phone's shots through the four moments: pushed in on what each one is about. */
 export const HERO_SHOTS: Record<Framing, Shot[]> = {
@@ -26,8 +33,7 @@ export const HERO_SHOTS: Record<Framing, Shot[]> = {
     { at: AT.code, dur: 26, zoom: 2.05, fx: 0.5, fy: 0.15, x: 0.69, y: 0.35 },
     { at: DIFF, dur: 40, zoom: 2, fx: 0.5, fy: 0.4, x: 0.69, y: 0.5 },
     { at: AT.steer, dur: 26, zoom: 2, fx: 0.5, fy: 0.88, x: 0.69, y: 0.62 },
-    { at: LATEST + 4, dur: 30, zoom: 2, fx: 0.5, fy: 0.8, x: 0.69, y: 0.56 },
-    { at: ADAPT, dur: 24, zoom: 2.05, fx: 0.5, fy: 0.8, x: 0.69, y: 0.54 },
+    { at: LATEST + 4, dur: 30, zoom: 2.05, fx: 0.5, fy: 0.8, x: 0.69, y: 0.55 },
     { at: AT.ship, dur: 22, zoom: 2, fx: 0.5, fy: 0.82, x: 0.69, y: 0.56 },
     { at: DETAILS, dur: 24, zoom: 1.75, fx: 0.5, fy: 0.3, x: 0.69, y: 0.45 },
     { at: PULL_REQUEST, dur: 34, zoom: 2.1, fx: 0.5, fy: 0.74, x: 0.69, y: 0.5 },
@@ -39,13 +45,20 @@ export const HERO_SHOTS: Record<Framing, Shot[]> = {
     { at: AT.code, dur: 26, zoom: 1.45, fx: 0.5, fy: 0.2, x: 0.5, y: 0.42 },
     { at: DIFF, dur: 40, zoom: 1.4, fx: 0.5, fy: 0.45, x: 0.5, y: 0.6 },
     { at: AT.steer, dur: 26, zoom: 1.4, fx: 0.5, fy: 0.86, x: 0.5, y: 0.72 },
-    { at: LATEST + 4, dur: 30, zoom: 1.4, fx: 0.5, fy: 0.8, x: 0.5, y: 0.68 },
-    { at: ADAPT, dur: 24, zoom: 1.45, fx: 0.5, fy: 0.8, x: 0.5, y: 0.66 },
+    { at: LATEST + 4, dur: 30, zoom: 1.45, fx: 0.5, fy: 0.8, x: 0.5, y: 0.67 },
     { at: AT.ship, dur: 22, zoom: 1.4, fx: 0.5, fy: 0.8, x: 0.5, y: 0.66 },
     { at: DETAILS, dur: 24, zoom: 1.3, fx: 0.5, fy: 0.35, x: 0.5, y: 0.55 },
     { at: PULL_REQUEST, dur: 34, zoom: 1.5, fx: 0.5, fy: 0.74, x: 0.5, y: 0.62 },
   ],
 };
+
+// A shot that took over mid-move would start from where the one before was headed, not from where it had got to.
+for (const shots of Object.values(HERO_SHOTS)) {
+  shots.forEach((shot, i) => {
+    const next = shots[i + 1];
+    if (next && next.at < shot.at + shot.dur) throw new Error(`The shot at ${next.at} takes over before the one at ${shot.at} settles`);
+  });
+}
 
 export type Camera = Omit<Shot, "at" | "dur">;
 

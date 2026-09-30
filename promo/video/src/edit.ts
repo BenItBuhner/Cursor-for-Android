@@ -15,7 +15,7 @@ export const AT = {
   /** The prompt is sent on this beat. */
   send: beat(10),
   code: beat(13),
-  steer: beat(21),
+  steer: beat(22),
   ship: beat(30),
   lineup: beat(36),
   end: beat(44),
