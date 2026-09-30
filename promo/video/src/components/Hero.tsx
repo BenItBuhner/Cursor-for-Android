@@ -1,73 +1,64 @@
 import type React from "react";
-import { cameraAt, HERO_SHOTS, type Framing } from "../camera";
-import { AT, HERO, MOMENTS, takeFrame } from "../edit";
-import { progress, snap } from "../math";
-import { COLOR } from "../theme";
+import { cameraAt, HERO_SHOTS, TALL_TOP, type Framing } from "../camera";
+import { AT, HEROES, MOMENTS, shadeAt, takeFrame } from "../edit";
+import { easeOut, progress } from "../math";
+import type { Theme } from "../takes";
 import { Device, screenHeight } from "./Device";
-import { Headline } from "./Headline";
+import { Headline, LEADING } from "./Headline";
 import { Screen } from "./Screen";
 
 /**
- * Where the hero goes in each framing: the phone's screen width at the camera's resting zoom, and the headline's size
- * and place. Tall frames keep the headline in a band at the top that the phone passes under.
+ * Where the hero goes in each framing: the phone's screen width at the camera's resting zoom, and the headline's size.
+ * A wide frame sets the headline at [left], centred down the frame beside the phone; a tall one centres it across the
+ * frame, over the phone, in the room over the screen's top ([TALL_TOP]) less [clear].
  */
 const LAYOUT = {
-  wide: { rest: 404, size: 150, left: 150, band: 0 },
-  tall: { rest: 640, size: 124, left: 0, band: 500 },
+  wide: { rest: 404, size: 150, left: 150 },
+  tall: { rest: 614, size: 124, clear: 24 },
 } as const;
 
 /** Frames the phone takes to rise into the frame as the first moment starts. */
-const ENTER = 24;
+const ENTER = 28;
 
-export const Hero: React.FC<{ framing: Framing; f: number; width: number; height: number }> = ({ framing, f, width, height }) => {
-  const layout = LAYOUT[framing];
-  const cam = cameraAt(HERO_SHOTS[framing], f);
-  const w = layout.rest * cam.zoom;
-  const h = screenHeight("phone", w);
-  const entered = snap(progress(f, AT.start, AT.start + ENTER));
+export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; width: number; height: number }> = ({
+  framing,
+  theme,
+  f,
+  width,
+  height,
+}) => {
+  const reel = HEROES[theme];
+  const cam = cameraAt(HERO_SHOTS[theme][framing], f);
+  const w = LAYOUT[framing].rest * cam.zoom;
+  const h = screenHeight(reel.take, w);
+  const entered = easeOut(progress(f, AT.organize, AT.organize + ENTER));
   const x = cam.x * width - cam.fx * w;
-  const y = cam.y * height - cam.fy * h + (1 - entered) * height * 0.7;
+  const y = cam.y * height - cam.fy * h + (1 - entered) * height * 0.75;
   return (
     <>
-      <Device take="phone" x={x} y={y} width={w}>
-        <Screen take="phone" frame={takeFrame(HERO, f)} width={w} />
+      <Device take={reel.take} x={x} y={y} width={w}>
+        <Screen take={reel.take} frame={takeFrame(reel, f)} width={w} shade={shadeAt(f)} />
       </Device>
-      {layout.band > 0 ? (
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width,
-            height: layout.band,
-            background: `linear-gradient(180deg, ${COLOR.stage} 0%, ${COLOR.stage} 82%, rgba(247,247,244,0) 100%)`,
-          }}
-        />
-      ) : null}
       {MOMENTS.map((moment) => {
         if (f < moment.at || f >= moment.until) return null;
-        const block = moment.lines.length * layout.size;
-        return framing === "wide" ? (
+        if (framing === "wide") {
+          const { size, left } = LAYOUT.wide;
+          const block = moment.wide.length * size * LEADING;
+          return <Headline key={moment.at} lines={moment.wide} f={f} at={moment.at} until={moment.until} size={size} x={left} y={(height - block) / 2} />;
+        }
+        const { size, clear } = LAYOUT.tall;
+        const block = moment.tall.length * size * LEADING;
+        const room = TALL_TOP * height - clear;
+        return (
           <Headline
             key={moment.at}
-            lines={moment.lines}
+            lines={moment.tall}
             f={f}
             at={moment.at}
             until={moment.until}
-            size={layout.size}
-            x={layout.left}
-            y={(height - block) / 2}
-          />
-        ) : (
-          <Headline
-            key={moment.at}
-            lines={moment.lines}
-            f={f}
-            at={moment.at}
-            until={moment.until}
-            size={layout.size}
+            size={size}
             x={0}
-            y={(layout.band * 0.86 - block) / 2 + 20}
+            y={(room - block) / 2}
             align="center"
           />
         );

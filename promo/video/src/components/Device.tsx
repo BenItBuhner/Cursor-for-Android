@@ -1,12 +1,14 @@
 import type React from "react";
-import { takes, type TakeId } from "../takes";
+import { takes, type DeviceId, type TakeId } from "../takes";
 
 /** A device's glass around its screen, as fractions of the screen's shorter side. */
-const GLASS: Record<TakeId, { bezel: number; radius: number }> = {
+const GLASS: Record<DeviceId, { bezel: number; radius: number }> = {
   phone: { bezel: 0.021, radius: 0.105 },
   foldable: { bezel: 0.017, radius: 0.05 },
   tablet: { bezel: 0.034, radius: 0.05 },
 };
+
+const glassOf = (take: TakeId) => GLASS[takes[take].device];
 
 /** The screen's height for [width] pixels across, as the take has it. */
 export const screenHeight = (take: TakeId, width: number) => (width * takes[take].height) / takes[take].width;
@@ -14,7 +16,7 @@ export const screenHeight = (take: TakeId, width: number) => (width * takes[take
 /** How far the device reaches past its screen on each side, in pixels, for a screen [width] across. */
 export function deviceMargin(take: TakeId, width: number): number {
   const short = Math.min(width, screenHeight(take, width));
-  return short * GLASS[take].bezel + rimOf(short);
+  return short * glassOf(take).bezel + rimOf(short);
 }
 
 const rimOf = (short: number) => Math.max(1.5, short * 0.0045);
@@ -30,10 +32,11 @@ export const Device: React.FC<{ take: TakeId; x: number; y: number; width: numbe
   width,
   children,
 }) => {
+  const device = takes[take].device;
   const height = screenHeight(take, width);
   const short = Math.min(width, height);
-  const bezel = short * GLASS[take].bezel;
-  const radius = short * GLASS[take].radius;
+  const bezel = short * glassOf(take).bezel;
+  const radius = short * glassOf(take).radius;
   const rim = rimOf(short);
   const edge = bezel + rim;
   return (
@@ -49,14 +52,14 @@ export const Device: React.FC<{ take: TakeId; x: number; y: number; width: numbe
         boxShadow: `0 ${short * 0.06}px ${short * 0.14}px -${short * 0.03}px rgba(20,18,11,0.42), 0 ${short * 0.012}px ${short * 0.03}px rgba(20,18,11,0.2)`,
       }}
     >
-      {take === "phone" ? <PhoneButtons width={width} height={height} edge={edge} rim={rim} /> : null}
+      {device === "phone" ? <PhoneButtons width={width} height={height} edge={edge} rim={rim} /> : null}
       <div style={{ position: "absolute", inset: rim, borderRadius: radius + bezel, background: "#050506" }} />
       <div style={{ position: "absolute", left: edge, top: edge, width, height, borderRadius: radius, overflow: "hidden", isolation: "isolate" }}>
         {children}
-        {take === "foldable" ? <Crease width={width} height={height} /> : null}
-        {take !== "tablet" ? <PunchHole take={take} width={width} height={height} /> : null}
+        {device === "foldable" ? <Crease width={width} height={height} /> : null}
+        {device !== "tablet" ? <PunchHole take={take} width={width} height={height} /> : null}
       </div>
-      {take === "tablet" ? (
+      {device === "tablet" ? (
         <div
           style={{
             position: "absolute",
@@ -77,8 +80,9 @@ export const Device: React.FC<{ take: TakeId; x: number; y: number; width: numbe
 const PunchHole: React.FC<{ take: TakeId; width: number; height: number }> = ({ take, width, height }) => {
   const t = takes[take];
   const scale = width / t.width;
-  const d = Math.min(width, height) * (take === "phone" ? 0.028 : 0.019);
-  const cx = take === "phone" ? width / 2 : width * 0.8;
+  const phone = t.device === "phone";
+  const d = Math.min(width, height) * (phone ? 0.028 : 0.019);
+  const cx = phone ? width / 2 : width * 0.8;
   const cy = ((t.statusBar[0] ?? 0) * scale) / 2;
   return (
     <div

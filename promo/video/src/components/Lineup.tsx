@@ -1,13 +1,13 @@
 import type React from "react";
 import type { Framing } from "../camera";
 import { AT, beat, LINEUP, lineupReel, takeFrame } from "../edit";
-import { clamp01, easeInOut, lerp, progress, snap } from "../math";
-import { DP_WIDTH, type TakeId } from "../takes";
+import { clamp01, easeInOut, easeOut, lerp, progress } from "../math";
+import { DP_WIDTH, takeOf, type DeviceId, type TakeId, type Theme } from "../takes";
 import { Device, deviceMargin, screenHeight } from "./Device";
 import { Headline } from "./Headline";
 import { Screen } from "./Screen";
 
-type Slot = { take: TakeId; x: number; y: number; width: number };
+type Slot = { device: DeviceId; take: TakeId; x: number; y: number; width: number };
 type Box = { left: number; top: number; right: number; bottom: number };
 
 /**
@@ -15,20 +15,21 @@ type Box = { left: number; top: number; right: number; bottom: number };
  * three sizes, back to front: a row standing on one line in a wide frame; in a tall one, the foldable and the phone
  * standing in front of the tablet.
  */
-function slots(framing: Framing, width: number, height: number): Slot[] {
-  const size = (take: TakeId, dpPx: number) => {
-    const w = DP_WIDTH[take] * dpPx;
-    return { w, h: screenHeight(take, w), m: deviceMargin(take, w) };
+function slots(framing: Framing, theme: Theme, width: number, height: number): Slot[] {
+  const size = (device: DeviceId, dpPx: number) => {
+    const take = takeOf(device, theme);
+    const w = DP_WIDTH[device] * dpPx;
+    return { take, w, h: screenHeight(take, w), m: deviceMargin(take, w) };
   };
   if (framing === "wide") {
     const dpPx = 0.6;
     const gap = 64;
     const floor = height * 0.9;
-    const sizes = LINEUP.map((take) => size(take, dpPx));
+    const sizes = LINEUP.map((device) => size(device, dpPx));
     let left = (width - sizes.reduce((sum, s) => sum + s.w + 2 * s.m, 0) - gap * (LINEUP.length - 1)) / 2;
-    return LINEUP.map((take, i) => {
+    return LINEUP.map((device, i) => {
       const s = sizes[i]!;
-      const slot = { take, x: left + s.m, y: floor - s.h, width: s.w };
+      const slot = { device, take: s.take, x: left + s.m, y: floor - s.h, width: s.w };
       left += s.w + 2 * s.m + gap;
       return slot;
     });
@@ -45,9 +46,9 @@ function slots(framing: Framing, width: number, height: number): Slot[] {
   const row = foldable.w + 2 * foldable.m + gap + phone.w + 2 * phone.m;
   const rowLeft = (width - row) / 2;
   return [
-    { take: "tablet", x: (width - tablet.w) / 2, y: top + tablet.m, width: tablet.w },
-    { take: "foldable", x: rowLeft + foldable.m, y: floor - foldable.h, width: foldable.w },
-    { take: "phone", x: rowLeft + foldable.w + 2 * foldable.m + gap + phone.m, y: floor - phone.h, width: phone.w },
+    { device: "tablet", take: tablet.take, x: (width - tablet.w) / 2, y: top + tablet.m, width: tablet.w },
+    { device: "foldable", take: foldable.take, x: rowLeft + foldable.m, y: floor - foldable.h, width: foldable.w },
+    { device: "phone", take: phone.take, x: rowLeft + foldable.w + 2 * foldable.m + gap + phone.m, y: floor - phone.h, width: phone.w },
   ];
 }
 
@@ -81,7 +82,7 @@ type View = { zoom: number; cx: number; cy: number; x: number; y: number };
  * (up to [maxZoom]); or, once they would fit no larger than they stand, as all three do, the lineup as it stands.
  */
 function shot(all: Slot[], n: number, room: Box, maxZoom: number): View {
-  const box = boxOf(all.filter((s) => LINEUP.indexOf(s.take) < n));
+  const box = boxOf(all.filter((s) => LINEUP.indexOf(s.device) < n));
   const cx = (box.left + box.right) / 2;
   const cy = (box.top + box.bottom) / 2;
   const fit = Math.min((room.right - room.left) / (box.right - box.left), (room.bottom - room.top) / (box.bottom - box.top));
@@ -92,7 +93,7 @@ function shot(all: Slot[], n: number, room: Box, maxZoom: number): View {
 const landAt = (i: number) => AT.lineup + beat(i);
 
 /** Frames a device takes to land, and the camera to reframe as it does, starting a little before. */
-const LAND = 18;
+const LAND = 20;
 const REFRAME = 30;
 const LEAD = 12;
 
@@ -119,28 +120,33 @@ function viewAt(framing: Framing, all: Slot[], width: number, height: number, f:
  * The three devices landing one a beat, each named as it lands, all playing the same moment of the run in step: the
  * camera in on the phone, pulling back as the foldable and the tablet land beside it.
  */
-export const Lineup: React.FC<{ framing: Framing; f: number; width: number; height: number }> = ({ framing, f, width, height }) => {
-  const push = 1 + 0.03 * progress(f, AT.lineup, AT.end);
+export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width: number; height: number }> = ({
+  framing,
+  theme,
+  f,
+  width,
+  height,
+}) => {
   const size = framing === "wide" ? 104 : 112;
   const lines = framing === "wide" ? ["Phone. Foldable. Tablet."] : ["Phone.", "Foldable.", "Tablet."];
-  const all = slots(framing, width, height);
+  const all = slots(framing, theme, width, height);
   const view = viewAt(framing, all, width, height, f);
   return (
-    <div style={{ position: "absolute", inset: 0, transform: `scale(${push})` }}>
+    <>
       {all.map((slot) => {
-        const i = LINEUP.indexOf(slot.take);
-        const landed = snap(progress(f, landAt(i), landAt(i) + LAND));
+        const i = LINEUP.indexOf(slot.device);
+        const landed = easeOut(progress(f, landAt(i), landAt(i) + LAND));
         const x = view.x + (slot.x - view.cx) * view.zoom;
         const y = view.y + (slot.y - view.cy) * view.zoom;
         const w = slot.width * view.zoom;
         return (
           <div
-            key={slot.take}
+            key={slot.device}
             style={{
               position: "absolute",
               inset: 0,
-              opacity: clamp01((f - landAt(i) + 1) / 3),
-              transform: `translateY(${(1 - landed) * 70}px) scale(${0.94 + 0.06 * landed})`,
+              opacity: clamp01((f - landAt(i) + 1) / 4),
+              transform: `translateY(${(1 - landed) * 80}px) scale(${0.95 + 0.05 * landed})`,
               transformOrigin: `${x + w / 2}px ${y + screenHeight(slot.take, w)}px`,
             }}
           >
@@ -160,6 +166,6 @@ export const Lineup: React.FC<{ framing: Framing; f: number; width: number; heig
         align="center"
         wordAt={LINEUP.map((_, i) => landAt(i))}
       />
-    </div>
+    </>
   );
 };

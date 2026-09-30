@@ -1,9 +1,9 @@
-// Renders the launch video from the capture's takes: the cues and the score, the 16:9 cut, the 9:16 cut and the stills,
-// into out/, and copies them to --dest if given.
+// Renders the launch video from the capture's takes: the cues and the score, the 16:9 cut, the 9:16 cut, the stills and
+// the side-by-side of the app's two themes, into out/, and copies them to --dest if given.
 //
-//   npx tsx scripts/render.ts [--only=wide,tall,stills] [--dest=DIR] [--concurrency=3]
+//   npx tsx scripts/render.ts [--only=wide,tall,stills,compare] [--dest=DIR] [--concurrency=3]
 //
-// Needs the takes (promo/capture/run.sh phone, foldable and tablet, then `npm run footage`), and python3 with
+// Needs the takes (promo/capture/run.sh for each device, dark and light, then `npm run footage`), and python3 with
 // scripts/requirements.txt for the score.
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
@@ -17,14 +17,14 @@ const args: Record<string, string> = Object.fromEntries(
     return [k!, v ?? "true"];
   }),
 );
-const only = new Set((args.only ?? "wide,tall,stills").split(","));
+const only = new Set((args.only ?? "wide,tall,stills,compare").split(","));
 const concurrency = args.concurrency ?? "3";
 const out = join(video, "out");
 
-const NAME = "cursor-for-android-launch";
+const NAME = "cursor-for-android";
 const CUTS = [
-  { key: "wide", composition: "Launch", framing: "wide", file: `${NAME}.mp4` },
-  { key: "tall", composition: "LaunchVertical", framing: "tall", file: `${NAME}-vertical.mp4` },
+  { key: "wide", composition: "Launch", framing: "wide", file: `${NAME}-launch.mp4` },
+  { key: "tall", composition: "LaunchVertical", framing: "tall", file: `${NAME}-launch-vertical.mp4` },
 ];
 
 function run(command: string, argv: string[]) {
@@ -36,26 +36,37 @@ function run(command: string, argv: string[]) {
 if (!existsSync(join(video, "public", "footage", "takes.json"))) run("node", ["scripts/footage.mjs"]);
 // The edit reads the takes, so it is loaded only once they are there.
 const { STILLS } = await import("../src/camera");
-
-run("npx", ["tsx", "scripts/cues.ts"]);
-run("python3", ["scripts/music.py", "public/audio/score.wav"]);
+const { THEME } = await import("../src/edit");
+const { COMPARE } = await import("../src/components/Compare");
 
 mkdirSync(out, { recursive: true });
 const made: string[] = [];
+if (only.has("wide") || only.has("tall")) {
+  run("npx", ["tsx", "scripts/cues.ts"]);
+  run("python3", ["scripts/music.py", "public/audio/score.wav"]);
+}
 for (const cut of CUTS) {
   if (!only.has(cut.key)) continue;
   const file = join(out, cut.file);
-  const props = JSON.stringify({ framing: cut.framing, music: true });
+  const props = JSON.stringify({ framing: cut.framing, music: true, theme: THEME });
   run("npx", ["remotion", "render", cut.composition, file, `--props=${props}`, `--concurrency=${concurrency}`]);
   made.push(file);
 }
 if (only.has("stills")) {
-  const props = JSON.stringify({ framing: "wide", music: false });
+  const props = JSON.stringify({ framing: "wide", music: false, theme: THEME });
   for (const [name, frame] of Object.entries(STILLS)) {
-    const file = join(out, `${NAME}-${name}.png`);
+    const file = join(out, `${NAME}-launch-${name}.png`);
     run("npx", ["remotion", "still", "Launch", file, `--frame=${frame}`, "--image-format=png", `--props=${props}`]);
     made.push(file);
   }
+}
+if (only.has("compare")) {
+  const clip = join(out, `${NAME}-light-vs-dark.mp4`);
+  run("npx", ["remotion", "render", "Compare", clip, `--concurrency=${concurrency}`]);
+  made.push(clip);
+  const still = join(out, `${NAME}-light-vs-dark.png`);
+  run("npx", ["remotion", "still", "Compare", still, `--frame=${COMPARE.still}`, "--image-format=png"]);
+  made.push(still);
 }
 
 if (args.dest) {

@@ -33,14 +33,17 @@ def midi(note: float) -> float:
 
 A1, C2, D2, F1, G1 = 33, 36, 38, 29, 31
 # One chord a part, the notes of the pad (MIDI) and the bass's root: Am9, Am7 from the drop, Fmaj9, Dm9, Cmaj9, Fmaj9,
-# G6/9, and Am9 again for the end, each voiced to keep the notes it shares with the last where they were.
+# G6/9, Fmaj9 and G6/9 under the lineup, and Am9 again for the end, each voiced to keep the notes it shares with the
+# last where they were.
 CHORDS = {
     "intro": ([57, 60, 64, 67, 71], A1),
     "android": ([57, 60, 64, 67], A1),
-    "start": ([57, 60, 64, 67], A1),
-    "code": ([53, 57, 60, 64, 67], F1),
-    "steer": ([50, 53, 57, 60, 64], D2),
-    "ship": ([52, 55, 59, 62, 64], C2),
+    "organize": ([57, 60, 64, 67], A1),
+    "dictate": ([53, 57, 60, 64, 67], F1),
+    "code": ([50, 53, 57, 60, 64], D2),
+    "steer": ([52, 55, 59, 62, 64], C2),
+    "live": ([53, 57, 60, 64, 67], F1),
+    "ship": ([55, 59, 62, 64, 69], G1),
     "lineup": ([53, 57, 60, 64, 67], F1),
     "lift": ([55, 59, 62, 64, 69], G1),
     "end": ([57, 60, 64, 67, 71], A1),
@@ -277,7 +280,19 @@ LEVEL = {
     "tap": 0.09,
 }
 # How far each part's pad opens: the top of its harmonics, in Hz.
-PAD_TOP = {"intro": 2300, "android": 2100, "start": 2400, "code": 2700, "steer": 2850, "ship": 3100, "lineup": 4000, "lift": 4400, "end": 3400}
+PAD_TOP = {
+    "intro": 2300,
+    "android": 2100,
+    "organize": 2400,
+    "dictate": 2550,
+    "code": 2700,
+    "steer": 2850,
+    "live": 2950,
+    "ship": 3100,
+    "lineup": 4000,
+    "lift": 4400,
+    "end": 3400,
+}
 # The shaker's sixteenths, the off-beat eighth leant on.
 SHAKE = (0.45, 0.3, 0.8, 0.3)
 
@@ -302,10 +317,12 @@ def score(cues: dict) -> np.ndarray:
 
     # The groove, from the green card to the end card, a part at a time.
     parts = [
-        ("android", at["android"], at["start"]),
-        ("start", at["start"], at["code"]),
+        ("android", at["android"], at["organize"]),
+        ("organize", at["organize"], at["dictate"]),
+        ("dictate", at["dictate"], at["code"]),
         ("code", at["code"], at["steer"]),
-        ("steer", at["steer"], at["ship"]),
+        ("steer", at["steer"], at["live"]),
+        ("live", at["live"], at["ship"]),
         ("ship", at["ship"], at["lineup"]),
         ("lineup", at["lineup"], at["lineup"] + 4 * fps * beat),
         ("lift", at["lineup"] + 4 * fps * beat, at["end"]),
@@ -336,7 +353,7 @@ def score(cues: dict) -> np.ndarray:
             mix.add(t + beat / 2, closed, lv["hat"], pan=0.18)
             for q, velocity in enumerate(SHAKE):
                 mix.add(t + beat * q / 4, shake, lv["shaker"] * velocity, pan=0.3)
-            if name not in ("android", "start"):
+            if name not in ("android", "organize"):
                 for q in (0.25, 0.75):
                     mix.add(t + beat * q, closed, lv["sixteenths"], pan=-0.22)
             if lineup or name == "ship":

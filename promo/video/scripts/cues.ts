@@ -5,8 +5,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AT, BPM, beat, DURATION, FPS, HERO, LINEUP, lineupReel, takeFrame, type Reel } from "../src/edit";
-import { takes } from "../src/takes";
+import { AT, BPM, beat, DURATION, FPS, HEROES, LINEUP, lineupReel, SHADE, takeFrame, THEME, type Reel } from "../src/edit";
+import { takeOf, takes } from "../src/takes";
 
 /** The most take frames one frame of the video moves through that still count as playing, not a cut. */
 const PLAYING = 4;
@@ -24,15 +24,21 @@ function taps(reel: Reel, from: number, until: number): number[] {
   return out;
 }
 
+/** The notification shade's finger, coming down to pull it and to fling it (edit.ts shadeAt). */
+const swipes = [SHADE.pull.at, SHADE.fling.at - 4];
+
 const video = join(dirname(fileURLToPath(import.meta.url)), "..");
 const cues = {
   fps: FPS,
   bpm: BPM,
   frames: DURATION,
+  theme: THEME,
   at: AT,
   lands: LINEUP.map((_, i) => AT.lineup + beat(i)),
-  taps: [...taps(HERO, AT.start, AT.lineup), ...taps(lineupReel("phone"), AT.lineup, AT.end)],
+  taps: [...taps(HEROES[THEME], AT.organize, AT.lineup), ...swipes, ...taps(lineupReel(takeOf("phone", THEME)), AT.lineup, AT.end)].sort(
+    (a, b) => a - b,
+  ),
 };
 mkdirSync(join(video, "public", "audio"), { recursive: true });
 writeFileSync(join(video, "public", "audio", "cues.json"), `${JSON.stringify(cues, null, 2)}\n`);
-console.log(`cues: ${cues.frames} frames at ${cues.bpm} bpm, taps at ${cues.taps.join(", ")}`);
+console.log(`cues: ${cues.frames} frames at ${cues.bpm} bpm in the ${cues.theme} cut, taps at ${cues.taps.join(", ")}`);
