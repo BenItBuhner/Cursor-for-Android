@@ -130,11 +130,14 @@ export const HERO: Reel = {
   ]),
 };
 
-/** Each device's take in the lineup: the same stretch, the edits landing and the first diff opening, in step. */
+/**
+ * Each device's take in the lineup: the same stretch, the edits landing and the first diff opening, in step. Held to
+ * the capture's own steps, which every take films on the same frames; a take's stream can land a frame or two apart.
+ */
 export const lineupReel = (take: TakeId): Reel => ({
   take,
   until: AT.end,
-  cuts: [{ at: AT.lineup, take: stream(take, "src/styles/theme.css").to - 23 }],
+  cuts: [{ at: AT.lineup, take: mark(take, "edits") - 25 }],
 });
 
 export const LINEUP: TakeId[] = ["phone", "foldable", "tablet"];
