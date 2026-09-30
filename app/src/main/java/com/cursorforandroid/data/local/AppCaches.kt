@@ -236,6 +236,13 @@ data class CachedAwaiting(
     val priorTranscriptCopies: Int = 0,
     /** Its staged copies (see `AttachmentStore.staged`), to be filed under the run it starts. */
     val attachments: List<MessageAttachment> = emptyList(),
+    /**
+     * Where the account's record stood when it was queued (`ConversationRepository.Awaiting.recordStep`): a turn index
+     * of the blob-backed record when [recordTurnIndexed], else a step index of the step-indexed one — read against a
+     * window of the same kind alone.
+     */
+    val recordStep: Int? = null,
+    val recordTurnIndexed: Boolean = false,
 )
 
 /**

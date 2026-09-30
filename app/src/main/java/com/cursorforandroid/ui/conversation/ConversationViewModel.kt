@@ -697,6 +697,10 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         }
         val accountQueue = caps.accountQueue && !graph.session.isDemo
         val waiting = graph.followUps.state(agentId).value.queue.isNotEmpty()
+        // Messages on the account's card are the server's to deliver first: a new one goes behind them, as the
+        // placeholder says it will ("queues on your account"). Sent as a run request instead, it was refused as busy
+        // and, the account's answer taken for a run started, shown sent under "Starting…" — every send after a reload.
+        val accountHolds = accountQueue && controls.value.queue.isNotEmpty()
         val message = OutgoingMessages.Draft(
             // The account's follow-up refuses a message with no text; an attachment-only one says what it carries.
             text = text.ifEmpty { if (withFiles) attachmentOnlyText(images.size, attached.size) else QueuedFollowUp.IMAGE_ONLY_TEXT },
@@ -710,7 +714,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         when {
             // Mid-turn in Extended mode: into the account's queue, behind the turn under way — on the card above the
             // composer from the tap, never a bubble first, until it is delivered (see ConversationRepository.queueAhead).
-            busy && accountQueue -> {
+            (busy || accountHolds) && accountQueue -> {
                 dispatch(message, graph.outgoing.accountRoute(agentId, message, queued = true))
                 return Sent.Queued(text)
             }
