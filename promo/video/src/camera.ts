@@ -1,6 +1,6 @@
 import { AT, beat, HERO, whenShown } from "./edit";
 import { easeInOut, lerp, progress } from "./math";
-import { mark } from "./takes";
+import { mark, stream } from "./takes";
 
 export type Framing = "wide" | "tall";
 
@@ -11,6 +11,7 @@ export type Framing = "wide" | "tall";
 export type Shot = { at: number; dur: number; zoom: number; fx: number; fy: number; x: number; y: number };
 
 const shown = (take: number) => whenShown(HERO, take);
+const EDITING = shown(stream("phone", "src/styles/theme.css").from);
 const DIFF = shown(mark("phone", "diff")) + 6;
 const LATEST = shown(mark("phone", "latest"));
 const DETAILS = shown(mark("phone", "details"));
@@ -31,24 +32,26 @@ export const HERO_SHOTS: Record<Framing, Shot[]> = {
     { at: AT.start + 26, dur: 44, zoom: 2, fx: 0.5, fy: 0.15, x: 0.69, y: 0.38 },
     { at: AT.send + 6, dur: 30, zoom: 2, fx: 0.5, fy: 0.12, x: 0.69, y: 0.34 },
     { at: AT.code, dur: 26, zoom: 2.05, fx: 0.5, fy: 0.15, x: 0.69, y: 0.35 },
+    { at: EDITING, dur: 100, zoom: 2.25, fx: 0.5, fy: 0.2, x: 0.69, y: 0.42 },
     { at: DIFF, dur: 40, zoom: 2, fx: 0.5, fy: 0.4, x: 0.69, y: 0.5 },
     { at: AT.steer, dur: 26, zoom: 2, fx: 0.5, fy: 0.88, x: 0.69, y: 0.62 },
     { at: LATEST + 4, dur: 30, zoom: 2.05, fx: 0.5, fy: 0.8, x: 0.69, y: 0.55 },
     { at: AT.ship, dur: 22, zoom: 2, fx: 0.5, fy: 0.82, x: 0.69, y: 0.56 },
-    { at: DETAILS, dur: 24, zoom: 1.75, fx: 0.5, fy: 0.3, x: 0.69, y: 0.45 },
-    { at: PULL_REQUEST, dur: 34, zoom: 2.1, fx: 0.5, fy: 0.74, x: 0.69, y: 0.5 },
+    { at: DETAILS, dur: 30, zoom: 1.9, fx: 0.5, fy: 0.68, x: 0.69, y: 0.5 },
+    { at: PULL_REQUEST, dur: 34, zoom: 2.1, fx: 0.5, fy: 0.76, x: 0.69, y: 0.5 },
   ],
   tall: [
     { at: AT.start, dur: 0, zoom: 1, fx: 0.5, fy: 0.3, x: 0.5, y: 0.56 },
     { at: AT.start + 26, dur: 44, zoom: 1.4, fx: 0.5, fy: 0.15, x: 0.5, y: 0.4 },
     { at: AT.send + 6, dur: 30, zoom: 1.4, fx: 0.5, fy: 0.12, x: 0.5, y: 0.38 },
     { at: AT.code, dur: 26, zoom: 1.45, fx: 0.5, fy: 0.2, x: 0.5, y: 0.42 },
+    { at: EDITING, dur: 100, zoom: 1.52, fx: 0.5, fy: 0.22, x: 0.5, y: 0.46 },
     { at: DIFF, dur: 40, zoom: 1.4, fx: 0.5, fy: 0.45, x: 0.5, y: 0.6 },
     { at: AT.steer, dur: 26, zoom: 1.4, fx: 0.5, fy: 0.86, x: 0.5, y: 0.72 },
     { at: LATEST + 4, dur: 30, zoom: 1.45, fx: 0.5, fy: 0.8, x: 0.5, y: 0.67 },
     { at: AT.ship, dur: 22, zoom: 1.4, fx: 0.5, fy: 0.8, x: 0.5, y: 0.66 },
-    { at: DETAILS, dur: 24, zoom: 1.3, fx: 0.5, fy: 0.35, x: 0.5, y: 0.55 },
-    { at: PULL_REQUEST, dur: 34, zoom: 1.5, fx: 0.5, fy: 0.74, x: 0.5, y: 0.62 },
+    { at: DETAILS, dur: 30, zoom: 1.4, fx: 0.5, fy: 0.66, x: 0.5, y: 0.62 },
+    { at: PULL_REQUEST, dur: 34, zoom: 1.5, fx: 0.5, fy: 0.76, x: 0.5, y: 0.62 },
   ],
 };
 
