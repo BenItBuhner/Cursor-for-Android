@@ -13,7 +13,6 @@ export type Shot = { at: number; dur: number; zoom: number; fx: number; fy: numb
 const shown = (take: number) => whenShown(HERO, take);
 const EDITING = shown(stream("phone", "src/styles/theme.css").from);
 const DIFF = shown(mark("phone", "diff")) + 6;
-const LATEST = shown(mark("phone", "latest"));
 const DETAILS = shown(mark("phone", "details"));
 const PULL_REQUEST = shown(mark("phone", "pull request")) + 8;
 
@@ -25,7 +24,10 @@ export const STILLS = {
   lineup: AT.end - 30,
 };
 
-/** The phone's shots through the four moments: pushed in on what each one is about. */
+/**
+ * The phone's shots through the four moments: pushed in on what each one is about. The steer's holds from the
+ * follow-up to the answer, still while the app scrolls to the steer's message, which a move would read as a cut over.
+ */
 export const HERO_SHOTS: Record<Framing, Shot[]> = {
   wide: [
     { at: AT.start, dur: 0, zoom: 1, fx: 0.5, fy: 0.5, x: 0.69, y: 0.5 },
@@ -35,7 +37,6 @@ export const HERO_SHOTS: Record<Framing, Shot[]> = {
     { at: EDITING, dur: 100, zoom: 2.25, fx: 0.5, fy: 0.2, x: 0.69, y: 0.42 },
     { at: DIFF, dur: 40, zoom: 2, fx: 0.5, fy: 0.4, x: 0.69, y: 0.5 },
     { at: AT.steer, dur: 26, zoom: 2, fx: 0.5, fy: 0.88, x: 0.69, y: 0.62 },
-    { at: LATEST + 4, dur: 30, zoom: 2.05, fx: 0.5, fy: 0.8, x: 0.69, y: 0.55 },
     { at: AT.ship, dur: 22, zoom: 2, fx: 0.5, fy: 0.82, x: 0.69, y: 0.56 },
     { at: DETAILS, dur: 30, zoom: 1.9, fx: 0.5, fy: 0.68, x: 0.69, y: 0.5 },
     { at: PULL_REQUEST, dur: 34, zoom: 2.1, fx: 0.5, fy: 0.76, x: 0.69, y: 0.5 },
@@ -48,7 +49,6 @@ export const HERO_SHOTS: Record<Framing, Shot[]> = {
     { at: EDITING, dur: 100, zoom: 1.52, fx: 0.5, fy: 0.22, x: 0.5, y: 0.46 },
     { at: DIFF, dur: 40, zoom: 1.4, fx: 0.5, fy: 0.45, x: 0.5, y: 0.6 },
     { at: AT.steer, dur: 26, zoom: 1.4, fx: 0.5, fy: 0.86, x: 0.5, y: 0.72 },
-    { at: LATEST + 4, dur: 30, zoom: 1.45, fx: 0.5, fy: 0.8, x: 0.5, y: 0.67 },
     { at: AT.ship, dur: 22, zoom: 1.4, fx: 0.5, fy: 0.8, x: 0.5, y: 0.66 },
     { at: DETAILS, dur: 30, zoom: 1.4, fx: 0.5, fy: 0.66, x: 0.5, y: 0.62 },
     { at: PULL_REQUEST, dur: 34, zoom: 1.5, fx: 0.5, fy: 0.76, x: 0.5, y: 0.62 },
