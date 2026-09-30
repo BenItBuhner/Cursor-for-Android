@@ -234,9 +234,9 @@ class LaunchVideoCapture {
                 until("the edits", 3.0) { d.exists(WORKING) }
                 look("working")
                 tap("edits", WORKING)
-                at(DIFF_AT)
+                d.hold(0.25)
                 tap("diff", editLine("theme.css"), unmerged = true)
-                at(DIFF_AT + 700)
+                d.hold(0.7)
                 look("diff")
 
                 at(FOLLOW_UP_AT)
@@ -400,10 +400,9 @@ class LaunchVideoCapture {
         const val PANEL_AT = 1_000L
         const val THINKING_AT = 1_800L
         const val EDITS_AT = 4_900L
-        const val DIFF_AT = 5_500L
-        const val FOLLOW_UP_AT = 6_300L
-        const val STEER_AT = 8_900L
-        const val LATEST_AT = 9_900L
+        const val FOLLOW_UP_AT = 6_900L
+        const val STEER_AT = 9_500L
+        const val LATEST_AT = 10_500L
         const val SHIP_AT = 23_400L
         const val PULL_REQUEST_AT = 24_300L
         const val END_AT = 27_000L
