@@ -1096,14 +1096,36 @@ class ConversationRepository(
          * how being what the next read of its record says — [RunStatus.UNKNOWN] until then, never running. The case
          * is a load whose run page was read before a steer's Stop of a turn the page did not hold yet, landing after
          * it: followed as the turn under way, that page's run put the spinner back on a turn long over and held the
-         * steered message behind a stream that had nothing to say.
+         * steered message behind a stream that had nothing to say. Unless the account's list called the chat running
+         * after that end, and the run is the newest the list still has active: the account went on with it (see
+         * [latestRun], [runOutlivingEnd]). The end is placed on this device's clock, so only the list's word — read on
+         * the same clock — is set against it, never the row's server-dated status.
          */
         fun statusOf(run: RunDto): RunStatus {
             val status = run.statusEnum()
             if (!status.isActive) return status
             if (run.id == cancelledRunId || run.id == cancelledAs) return RunStatus.CANCELLED
             agents.endedStatus(agentId, run.id)?.let { return it }
-            return if (agents.endedBefore(agentId, run)) RunStatus.UNKNOWN else status
+            if (!agents.endedBefore(agentId, run)) return status
+            val outlived = agents.endedNotedAt(agentId)?.let { accountRunningSince(it, rowToo = false) } == true && newestListedActive()?.id == run.id
+            return if (outlived) status else RunStatus.UNKNOWN
+        }
+
+        /** The newest run of the list whose record calls it active, other than a run this device stopped or saw end. */
+        fun newestListedActive(): RunDto? =
+            runs.filter { it.statusEnum().isActive && it.id != cancelledRunId && it.id != cancelledAs && agents.endedStatus(agentId, it.id) == null }
+                .maxByOrNull { parseIsoMillis(it.createdAt) }
+
+        /**
+         * The account called the chat running after [atMillis], by more than [STALE_RUN_RECORD_SLACK_MS]: the row's own
+         * status ([rowToo]), or the chat's word in the account's list (Extended mode). Never over a run this device stopped.
+         */
+        fun accountRunningSince(atMillis: Long, rowToo: Boolean = true): Boolean {
+            val row = agents.agent(agentId) ?: return false
+            if (cancelledRunId != null && row.latestRunId == cancelledRunId) return false
+            val word = agents.runningScan.value.accountWord[agentId]
+            return (rowToo && row.isRunning && row.updatedAtMillis > atMillis + STALE_RUN_RECORD_SLACK_MS) ||
+                (word?.running == true && word.atMillis > atMillis + STALE_RUN_RECORD_SLACK_MS)
         }
 
         /**
@@ -1874,14 +1896,20 @@ class ConversationRepository(
          * agent's record names an active run dated behind it (a server clock off, a run made on another host): the
          * record's run is the turn under way. Dated only, the load put the chat back on the finished run, the look for
          * the next run put it on the new one and read the chat again, round trip after round trip while the turn ran.
+         * Nor when the account has called the chat running since the newest run's record was written: the run still
+         * active behind it is the one the account went on with — the server cancels a follow-up's run of its own and
+         * runs on with the turn it was sent into (Bennett's chat of 2026-09-30, a newer run cancelled over the older
+         * one still running: dated only, the chat sat on the cancelled run and never followed the turn under way).
          */
         fun latestRun(): RunDto? {
             val waiting = waitingRuns()
             val candidates = (runs + local.filter { it.filed }.map { it.run }).filter { waiting.isEmpty() || it.id !in waiting }
             val newest = candidates.maxByOrNull { parseIsoMillis(it.createdAt) } ?: return null
             if (newest.statusEnum().isActive || candidates.none { it.statusEnum().isActive }) return newest
-            val named = agents.agent(agentId)?.latestRunId?.takeUnless { it == newest.id } ?: return newest
-            return candidates.firstOrNull { it.id == named && statusOf(it).isActive } ?: newest
+            val named = agents.agent(agentId)?.latestRunId?.takeUnless { it == newest.id }
+            if (named != null) candidates.firstOrNull { it.id == named && statusOf(it).isActive }?.let { return it }
+            if (!accountRunningSince(parseIsoMillis(newest.updatedAt))) return newest
+            return candidates.filter { statusOf(it).isActive }.maxByOrNull { parseIsoMillis(it.createdAt) } ?: newest
         }
 
 
@@ -3879,7 +3907,8 @@ class ConversationRepository(
 
     /**
      * One look for a run of the chat other than [endedRunId] that is active: the agent's record (`GET /v1/agents/{id}`)
-     * names it; it is read by id, merged and followed. True when one was found and is followed now.
+     * names it; it is read by id, merged and followed — or, when the run it names is the one that ended, the run the
+     * account went on with behind it (see [runOutlivingEnd]). True when one was found and is followed now.
      */
     private suspend fun followNextRun(e: Entry, endedRunId: String?): Boolean {
         val agentId = e.agentId
@@ -3888,11 +3917,13 @@ class ConversationRepository(
         // finish the stream saw would otherwise put the spinner back on the finished run).
         net(agentId, "agent")
         val detail = runCatching { api.getAgent(agentId) }.getOrElse { t -> if (t is CancellationException) throw t; null }
-        val latestId = (detail?.latestRunId ?: agents.agent(agentId)?.latestRunId)?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) || it == endedRunId } ?: return false
-        val known = synchronized(e) { e.runById(latestId) }
-        val run = known?.takeIf { it.statusEnum().isActive } ?: runCatching { net(agentId, "run"); agents.runRecord(agentId, latestId, api) }.getOrElse { t -> if (t is CancellationException) throw t; null } ?: return false
+        val latestId = (detail?.latestRunId ?: agents.agent(agentId)?.latestRunId)?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) || it == endedRunId }
+        val named = latestId?.let { id ->
+            synchronized(e) { e.runById(id) }?.takeIf { it.statusEnum().isActive }
+                ?: runCatching { net(agentId, "run"); agents.runRecord(agentId, id, api) }.getOrElse { t -> if (t is CancellationException) throw t; null }
+        }
         // Active as this device knows it: the run it stopped is not the next one to follow, whatever its record says yet.
-        if (!e.statusOf(run).isActive) return false
+        val run = named?.takeIf { e.statusOf(it).isActive } ?: runOutlivingEnd(e, endedRunId) ?: return false
         var follow = false
         e.publish(mutate = {
             if (runs.none { it.id == run.id }) runs = listOf(run) + runs
@@ -3909,6 +3940,24 @@ class ConversationRepository(
         // A new run is where a message the account queued from here lands (see [expectDelivery]).
         requestAdoption(e)
         return true
+    }
+
+    /**
+     * The run the account went on with past the end of a newer one, which the agent's record still names: the server
+     * cancels a follow-up's own run and runs on with the turn the follow-up was sent into (Bennett's chat of
+     * 2026-09-30: the next-run look found only the cancelled run, and the chat sat on it, running and following
+     * nothing). The newest run the list still has active other than [endedRunId], its record read again by id and
+     * the account asked again: followed only when both still call it under way (see [Entry.statusOf]). One the
+     * record calls over is merged as such, and asked about no more.
+     */
+    private suspend fun runOutlivingEnd(e: Entry, endedRunId: String?): RunDto? {
+        val agentId = e.agentId
+        val candidate = synchronized(e) { e.newestListedActive() }?.takeUnless { it.id == endedRunId } ?: return null
+        composerStatus?.let { poll -> runCatching { poll(agentId) }.getOrElse { t -> if (t is CancellationException) throw t; null } }
+            ?.let { agents.applyAccountSnapshots(listOf(it)) }
+        val run = runCatching { net(agentId, "run"); agents.runRecord(agentId, candidate.id, session.current.api) }.getOrElse { t -> if (t is CancellationException) throw t; null } ?: return null
+        if (!run.statusEnum().isActive) e.publish(mutate = { runs = runs.map { if (it.id == run.id) run else it } })
+        return run.takeIf { e.statusOf(it).isActive }
     }
 
     /** The chat as the reader has it is at rest: read, no turn under way, nothing followed. */
