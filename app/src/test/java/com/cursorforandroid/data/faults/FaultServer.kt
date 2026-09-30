@@ -159,6 +159,13 @@ class FaultServer(
      * for the tests written before the record carried deliveries.
      */
     @Volatile var recordsDeliveries = false
+    /**
+     * Chats the account is on a turn of that the agent's latest run is not: a Project's injected turn (a worker's
+     * report, a timer), which runs with no run in the `/v1` list, or an older run the account went on with past a newer
+     * one it cancelled. A follow-up joins the queue behind that turn — named a run in a Project (see [namesQueuedRuns])
+     * — and `POST /runs` is refused as busy, until [endAccountTurn].
+     */
+    val accountTurns: MutableSet<String> = ConcurrentHashMap.newKeySet()
     /** Whether the account may start the next run on a queued message on its own the moment the turn ends (see [endTurn]); tests deliver by hand otherwise. */
     @Volatile var autoDeliver = false
     /** The followups delivered, in order, and the run each started (a steer's run is the one it was delivered into). */
@@ -513,7 +520,7 @@ class FaultServer(
         val agent = agents[agentId] ?: return notFound()
         // One turn at a time, as the real server has it: a second request while the latest run is under way is
         // refused as busy — which is what a duplicate of an accepted follow-up meets.
-        val onATurn = agent.latestRunId?.let { runs[it]?.status }?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } == true
+        val onATurn = agentId in accountTurns || agent.latestRunId?.let { runs[it]?.status }?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } == true
         if (busy || onATurn) return json(409, error("agent_busy", "Agent is busy."))
         if (!processed) return json(500, error("not_processed", "The fault said this request was never processed."))
         val sequence = ids.incrementAndGet()
@@ -591,7 +598,7 @@ class FaultServer(
         val synchronous = body["synchronous"]?.jsonPrimitive?.booleanOrNull == true
         val agent = agents[agentId] ?: return json(404, connectError("not_found", "no such composer"))
         if (!processed) return json(500, connectError("internal", "The fault said this request was never processed."))
-        val onATurn = agent.latestRunId?.let { runs[it]?.status }?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } == true
+        val onATurn = agentId in accountTurns || agent.latestRunId?.let { runs[it]?.status }?.let { com.cursorforandroid.domain.RunStatus.parse(it).isActive } == true
         if (onATurn && !synchronous) {
             if (!namesQueuedRuns) {
                 pending.getOrPut(agentId) { CopyOnWriteArrayList() } += Pending(followupId, text, clock())
@@ -771,6 +778,21 @@ class FaultServer(
         agents[agentId] = agent.copy(status = "IDLE", updatedAt = endedAt)
         v0[agentId]?.let { v0[agentId] = it.copy(status = "FINISHED") }
         // The account's list says the turn is over too; still saying running, it kept a chat at RUNNING in Extended mode.
+        composers[agentId]?.takeIf { it.running }?.let { composers[agentId] = it.copy(running = false) }
+        return if (autoDeliver) deliverNext(agentId, nextLog) else null
+    }
+
+    /**
+     * The turn [accountTurns] holds [agentId] on ends — [runId], when it is a listed run (the older one the account
+     * went on with), FINISHED with its result — and the account's list says the chat is idle; then, with
+     * [autoDeliver], the next queued message is delivered.
+     */
+    fun endAccountTurn(agentId: String, runId: String? = null, durationMs: Long = 40_000L, nextLog: List<Pair<String, String>> = emptyList()): RunDto? {
+        accountTurns.remove(agentId)
+        runId?.let { id ->
+            runs[id]?.let { run -> runs[id] = run.copy(status = "FINISHED", durationMs = durationMs, updatedAt = Instant.ofEpochMilli(clock()).toString(), result = null) }
+            appendRunEvents(id, listOf("result" to """{"runId":"$id","status":"FINISHED","text":"","durationMs":$durationMs}"""))
+        }
         composers[agentId]?.takeIf { it.running }?.let { composers[agentId] = it.copy(running = false) }
         return if (autoDeliver) deliverNext(agentId, nextLog) else null
     }
