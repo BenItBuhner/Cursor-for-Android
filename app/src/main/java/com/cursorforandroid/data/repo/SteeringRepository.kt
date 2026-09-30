@@ -59,8 +59,9 @@ class SteeringRepository(
     /** Runs after an action the transcript should reflect (an answer, a hold): the conversation's revalidation. */
     private val afterAction: suspend (String) -> Unit = {},
     /**
-     * Hands every read of the account's queue to the transcript (`ConversationRepository.noteAccountQueue`), with when
-     * the read began: the transcript files the messages the account has delivered and confirms the ones it has let go.
+     * Hands every read of the account's queue to the transcript (`ConversationRepository.noteAccountQueue`) — what of
+     * it stands (see [QueueReads]) — with when the read began: the transcript files the messages the account has
+     * delivered and confirms the ones it has let go.
      */
     private val onQueueRead: suspend (agentId: String, pending: List<PendingFollowup>, readAtMillis: Long) -> Unit = { _, _, _ -> },
     /** A queued message the reader deleted from the card, once the account has taken it off its queue (`ConversationRepository.queuedDeleted`). */
@@ -85,9 +86,8 @@ class SteeringRepository(
     private val pollers = ConcurrentHashMap<String, Job>()
     /** Per chat: when the goal was last asked for, by [monotonicMillis]. */
     private val goalReadAt = ConcurrentHashMap<String, Long>()
-    /** Per chat: how many reads of its queue have begun, and the newest of them applied (see [applyQueueRead]). */
-    private val queueReads = ConcurrentHashMap<String, AtomicLong>()
-    private val queueApplied = HashMap<String, Long>()
+    /** Per chat: its reads of the queue, and what they have told this device (see [QueueReads]). */
+    private val queueReads = ConcurrentHashMap<String, QueueReads>()
 
     init {
         scope.launch { session.backend.drop(1).collect { reset() } }
@@ -185,28 +185,77 @@ class SteeringRepository(
         f.update { it.copy(queueLoad = QueueLoad.Loading) }
         // When the read began, by the app's clock: the transcript reads the answer against what happened meanwhile.
         val readAt = AppClock.now()
-        val read = queueReads.getOrPut(agentId) { AtomicLong() }.incrementAndGet()
+        val reads = queueReads(agentId)
+        val read = reads.begun.incrementAndGet()
         try {
             val pending = api.listPending(agentId)
-            if (!applyQueueRead(agentId, read) { f.update { it.copy(queue = pending, queueLoad = QueueLoad.Loaded) } }) return
-            onQueueRead(agentId, pending, readAt)
+            val shown = reads.land(read, pending) { standing -> f.update { it.copy(queue = standing, queueLoad = QueueLoad.Loaded) } } ?: return
+            onQueueRead(agentId, shown, readAt)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            applyQueueRead(agentId, read) { f.update { it.copy(queueLoad = QueueLoad.Unavailable(describe(t))) } }
+            reads.fail(read) { f.update { it.copy(queueLoad = QueueLoad.Unavailable(describe(t))) } }
         }
     }
 
+    private fun queueReads(agentId: String): QueueReads = queueReads.getOrPut(agentId) { QueueReads() }
+
     /**
-     * Applies read number [read] of [agentId]'s queue unless a read begun after it has been applied already: reads
-     * overlap (the poll, the one a filing asks for, the one after an edit), and an older answer landing last put a
-     * message the account had let go of — and the transcript had taken — back on the card beside it.
+     * One chat's reads of its queue. They overlap — the poll, the one a filing asks for, the one after an edit — and the
+     * account answers them in any order, its answers carrying nothing to order them by: an older answer landing last
+     * put a message the account had let go of, and the transcript had taken, back on the card beside it.
+     *
+     * What this device can be sure of is what had landed before a read began. An answer to a read begun before the
+     * newest one applied is dropped. A message the account was known to hold — listed by an answer that had landed, or
+     * sent from here — that an answer to a read begun after that no longer lists has been let go of; an answer to a
+     * read begun before that one landed may have been made before the account let go, and does not bring it back. An
+     * answer to a read begun after was made after: its word stands, a message listed again with it.
      */
-    private inline fun applyQueueRead(agentId: String, read: Long, apply: () -> Unit): Boolean = synchronized(queueApplied) {
-        if (read < (queueApplied[agentId] ?: 0L)) return false
-        queueApplied[agentId] = read
-        apply()
-        true
+    private class QueueReads {
+        /** How many reads have begun: a read's number is the count as it begins, and an answer lands at the count then. */
+        val begun = AtomicLong()
+        private var applied = 0L
+        /** By followup id, the messages the account is known to hold, and how many reads had begun once it was known. */
+        private val held = HashMap<String, Long>()
+        /** By followup id, the messages the account has let go of, and how many reads had begun when the answer saying so landed. */
+        private val letGo = HashMap<String, Long>()
+
+        /** The answer to read [read]: what of [pending] stands, [publish]ed and returned; null when a read begun after it has been applied already. */
+        @Synchronized
+        fun land(read: Long, pending: List<PendingFollowup>, publish: (List<PendingFollowup>) -> Unit): List<PendingFollowup>? {
+            if (read < applied) return null
+            applied = read
+            val landed = begun.get()
+            val listed = pending.mapTo(HashSet()) { it.id }
+            val shown = pending.filter { p -> letGo[p.id]?.let { read > it } ?: true }
+            held.filter { (id, since) -> since < read && id !in listed }.keys.forEach { id ->
+                held.remove(id)
+                letGo[id] = landed
+            }
+            shown.forEach { p ->
+                letGo.remove(p.id)
+                held.putIfAbsent(p.id, landed)
+            }
+            // An answer to a read begun no later than this one is dropped from now on: nothing it could bring back needs keeping out.
+            letGo.values.removeAll { it <= read }
+            publish(shown)
+            return shown
+        }
+
+        /** Read [read] failed: [publish]ed unless a read begun after it has been applied already. */
+        @Synchronized
+        fun fail(read: Long, publish: () -> Unit) {
+            if (read < applied) return
+            applied = read
+            publish()
+        }
+
+        /** The account took [followupId] from here: an answer to a read begun after this that does not list it has been let go of. */
+        @Synchronized
+        fun sent(followupId: String) {
+            letGo.remove(followupId)
+            held.putIfAbsent(followupId, begun.get())
+        }
     }
 
     /**
@@ -220,7 +269,10 @@ class SteeringRepository(
      */
     suspend fun sendFollowup(agentId: String, followup: AccountFollowup, now: Boolean = false, refresh: Boolean = true): Result<String?> =
         action(agentId, "send", needs = { it.accountQueue || it.agentModes }, api = { queueApi }) { api ->
-            api.addFollowup(agentId, followup, synchronous = now).also { if (refresh) refreshQueue(agentId) }
+            api.addFollowup(agentId, followup, synchronous = now).also {
+                queueReads(agentId).sent(followup.followupId)
+                if (refresh) refreshQueue(agentId)
+            }
         }
 
     suspend fun updatePending(agentId: String, followupId: String, text: String): Result<Unit> =
@@ -309,6 +361,7 @@ class SteeringRepository(
         pollers.clear()
         attached.clear()
         goalReadAt.clear()
+        queueReads.clear()
     }
 
     /** The run the account is on as far as this device knows; never a prompt's local placeholder. */
