@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Films one take of the launch video into promo/capture/out/<test>/.
+# Films one take of the launch video into promo/capture/out/<take>/, e.g. out/phone/ or out/phone-light/.
 #
 #   promo/capture/run.sh <test> [preview] [frames]
 #
-#   test     a test of LaunchVideoCapture: probe, phone, foldable, tablet, renderCheck
+#   test     a test of LaunchVideoCapture: probe, phone, foldable, tablet, renderCheck,
+#            or the light theme's probeLight, phoneLight, foldableLight, tabletLight
 #   preview  keep every Nth frame as a PNG and encode nothing (0, the default, films the take)
 #   frames   stop the take after this many frames
 #
