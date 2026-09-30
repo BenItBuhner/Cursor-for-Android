@@ -1,8 +1,8 @@
 import type React from "react";
 import type { Framing } from "../camera";
 import { AT } from "../edit";
-import { clamp01, easeOut, progress, snap } from "../math";
-import { COLOR, DISPLAY, SANS } from "../theme";
+import { clamp01, easeOut, progress } from "../math";
+import { COLOR, SANS, TRACK } from "../theme";
 import { AppIcon } from "./AppIcon";
 
 export const REPO = "github.com/BenItBuhner/cursor-for-android";
@@ -12,16 +12,15 @@ export const DISCLAIMER = "Unofficial client for Cursor Cloud Agents. Not affili
 export const EndCard: React.FC<{ framing: Framing; f: number; width: number; height: number }> = ({ framing, f, width, height }) => {
   const wide = framing === "wide";
   const icon = wide ? 168 : 196;
-  const title = wide ? 112 : 96;
+  const title = wide ? 112 : 92;
   const url = wide ? 36 : 34;
   const rise = (at: number, by: number) => {
-    const p = easeOut(progress(f, at, at + 20));
+    const p = easeOut(progress(f, at, at + 22));
     return { opacity: clamp01((f - at + 1) / 8), transform: `translateY(${(1 - p) * by}px)` };
   };
-  const landed = snap(progress(f, AT.end, AT.end + 16));
-  const push = 1 + 0.025 * progress(f, AT.end, AT.end + 240);
+  const landed = easeOut(progress(f, AT.end, AT.end + 18));
   return (
-    <div style={{ position: "absolute", inset: 0, transform: `scale(${push})` }}>
+    <div style={{ position: "absolute", inset: 0 }}>
       <div
         style={{
           position: "absolute",
@@ -33,17 +32,17 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
           alignItems: "center",
         }}
       >
-        <div style={{ transform: `scale(${0.6 + 0.4 * landed})`, opacity: clamp01((f - AT.end + 1) / 3) }}>
+        <div style={{ transform: `scale(${0.82 + 0.18 * landed})`, opacity: clamp01((f - AT.end + 1) / 5) }}>
           <AppIcon size={icon} glow={0.3} />
         </div>
         <div
           style={{
             marginTop: icon * 0.26,
-            fontFamily: DISPLAY,
-            fontWeight: 700,
+            fontFamily: SANS,
+            fontWeight: 500,
             fontSize: title,
             lineHeight: 1.05,
-            letterSpacing: "-0.042em",
+            letterSpacing: TRACK.display,
             color: COLOR.ink,
             whiteSpace: "nowrap",
             ...rise(AT.end + 5, title * 0.35),
@@ -55,9 +54,9 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
           style={{
             marginTop: title * 0.34,
             fontFamily: SANS,
-            fontWeight: 500,
+            fontWeight: 400,
             fontSize: url,
-            letterSpacing: "-0.01em",
+            letterSpacing: TRACK.text,
             color: COLOR.inkSoft,
             whiteSpace: "nowrap",
             ...rise(AT.end + 12, url * 0.6),
@@ -77,6 +76,7 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
           fontWeight: 400,
           fontSize: wide ? 22 : 24,
           lineHeight: 1.4,
+          letterSpacing: TRACK.text,
           color: COLOR.inkSoft,
           padding: `0 ${width * 0.08}px`,
           ...rise(AT.end + 20, 10),

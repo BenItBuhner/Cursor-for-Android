@@ -1,66 +1,45 @@
 import type React from "react";
 import type { Framing } from "../camera";
 import { AT } from "../edit";
-import { clamp01, easeOut, lerp, progress, snap } from "../math";
-import { COLOR, DISPLAY } from "../theme";
+import { clamp01, easeOut, progress } from "../math";
+import { COLOR, SANS, TRACK } from "../theme";
 import { AppIcon } from "./AppIcon";
-
-/** "Cursor" set in the display face at 1px, tracked as the headlines are. */
-const WORDMARK_EM = 2.86;
 
 /**
  * The open: the app's icon lands in the middle of the frame, then slides aside for the wordmark, which comes out from
- * behind it on the next beat.
+ * behind it on the next beat. Icon and wordmark stand in one row, laid out by the face's own widths and centred on the
+ * frame, and the row is held over to the right until the slide by as much as puts the icon alone in the middle. The
+ * wordmark's box starts under the icon's middle, so the word slides out from behind it.
  */
-export const TitleCard: React.FC<{ framing: Framing; f: number; width: number; height: number }> = ({ framing, f, width, height }) => {
+export const TitleCard: React.FC<{ framing: Framing; f: number; width: number; height: number }> = ({ framing, f }) => {
   const icon = framing === "wide" ? 232 : 184;
   const size = framing === "wide" ? 210 : 164;
   const gap = icon * 0.24;
-  const word = size * WORDMARK_EM;
-  const lockup = icon + gap + word;
-  const landed = snap(progress(f, AT.title, AT.title + 16));
-  const slide = easeOut(progress(f, AT.wordmark, AT.wordmark + 22));
-  const iconLeft = lerp(width / 2 - icon / 2, width / 2 - lockup / 2, slide);
-  const wordLeft = width / 2 - lockup / 2 + icon + gap / 2;
-  const push = 1 + 0.03 * progress(f, AT.title, AT.android);
+  const landed = easeOut(progress(f, AT.title, AT.title + 18));
+  const slide = easeOut(progress(f, AT.wordmark, AT.wordmark + 26));
   return (
-    <div style={{ position: "absolute", inset: 0, transform: `scale(${push})` }}>
-      <div
-        style={{
-          position: "absolute",
-          left: wordLeft,
-          top: height / 2 - size * 0.6,
-          width: word + gap,
-          height: size * 1.2,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            paddingLeft: gap / 2,
-            transform: `translateX(${(1 - slide) * -100}%)`,
-            fontFamily: DISPLAY,
-            fontWeight: 700,
-            fontSize: size,
-            lineHeight: 1.2,
-            letterSpacing: "-0.042em",
-            color: COLOR.ink,
-            whiteSpace: "nowrap",
-          }}
-        >
-          Cursor
+    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", transform: `translateX(calc((50% - ${icon / 2}px) * ${1 - slide}))` }}>
+        <div style={{ position: "relative", zIndex: 1, transform: `scale(${0.82 + 0.18 * landed})`, opacity: clamp01((f - AT.title + 1) / 5) }}>
+          <AppIcon size={icon} glow={0.35} />
         </div>
-      </div>
-      <div
-        style={{
-          position: "absolute",
-          left: iconLeft,
-          top: height / 2 - icon / 2,
-          transform: `scale(${0.55 + 0.45 * landed})`,
-          opacity: clamp01((f - AT.title + 1) / 3),
-        }}
-      >
-        <AppIcon size={icon} glow={0.35} />
+        <div style={{ marginLeft: -icon / 2, overflow: "hidden" }}>
+          <div
+            style={{
+              paddingLeft: icon / 2 + gap,
+              transform: `translateX(${(slide - 1) * 100}%)`,
+              fontFamily: SANS,
+              fontWeight: 500,
+              fontSize: size,
+              lineHeight: 1.2,
+              letterSpacing: TRACK.display,
+              color: COLOR.ink,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Cursor
+          </div>
+        </div>
       </div>
     </div>
   );
