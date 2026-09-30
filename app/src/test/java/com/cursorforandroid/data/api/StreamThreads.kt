@@ -21,10 +21,12 @@ internal object StreamThreads {
 
     /**
      * [readers]: the stream multiplexer's own threads and every thread parked inside the stream reader (through
-     * OkHttp, a stream holds one for as long as it is open). [servers]: threads serving the test's streams. [total]:
-     * every live thread.
+     * OkHttp, a stream holds one for as long as it is open). [servers]: threads serving the test's streams, its
+     * server's idle pool included. [total]: every live thread; [app], those that are not the server's.
      */
-    class Census(val readers: List<String>, val servers: Int, val total: Int)
+    class Census(val readers: List<String>, val servers: Int, val total: Int) {
+        val app: Int get() = total - servers
+    }
 
     fun census(): Census {
         val infos = runCatching { dump?.invoke(bean, false, false) as? Array<*> }.getOrNull().orEmpty().filterNotNull()
