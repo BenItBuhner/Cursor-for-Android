@@ -760,6 +760,41 @@ class LiveRunHubTest {
     }
 
     @Test
+    fun `a run only the notification follows holds its quiet connection - a chat arriving on it gets the stall watch`() = runBlocking {
+        hub = stallingHub()
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
+        streamer.emit("run-1", RunStreamEvent.Assistant("Hello"))
+        // What the live notification subscribes as: watched, sampled, shown what the run is doing rather than every word.
+        val follower = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 100).collect { } }
+        awaitUntil { snapshot()?.items?.isNotEmpty() == true }
+
+        // The open connection hears nothing more of the run for many stall windows: it is held, not taken up again.
+        streamer.strand("run-1")
+        delay(1_500)
+        assertThat(connections()).isEqualTo(1)
+        assertThat(api.getRunCalls).isEqualTo(0)
+        assertThat(current().reconnecting).isFalse()
+        assertThat(current().finished).isFalse()
+
+        // A chat opens on the run: the stall window counts from now, and the stream is taken up again from its last event.
+        streamer.emit("run-1", RunStreamEvent.Assistant(" world"))
+        val chat = scope.launch { hub.snapshots("bc-1", "run-1").collect { } }
+        awaitUntil { (snapshot()?.items?.lastOrNull() as? AssistantMessage)?.markdown == "Hello world" }
+        assertThat(connections()).isEqualTo(2)
+        assertThat(api.getRunCalls).isEqualTo(1)
+        assertThat(current().reconnecting).isFalse()
+
+        // The chat leaves; the notification's connection goes on being held through the next quiet spell.
+        chat.cancel()
+        streamer.strand("run-1")
+        delay(1_500)
+        assertThat(connections()).isEqualTo(2)
+        assertThat(api.getRunCalls).isEqualTo(1)
+        follower.cancel()
+    }
+
+    @Test
     fun `a run in a long quiet step is looked at less and less often, never given up on`() = runBlocking {
         hub = stallingHub(stallMs = 100, stallMaxMs = 400)
         api.addRunningAgent("bc-1", "Agent", "run-1")
