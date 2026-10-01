@@ -112,6 +112,11 @@ class LiveRunHub(
      */
     private val stallTimeoutMs: Long = STALL_TIMEOUT_MS,
     private val stallMaxMs: Long = STALL_MAX_MS,
+    /**
+     * How recently a held connection must have opened or told of the run for a chat arriving on it to take it as
+     * current rather than verify it (see [follow]); a connection quiet for longer is verified the moment a chat comes.
+     */
+    private val arrivalTrustMs: Long = ARRIVAL_TRUST_MS,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     /** Everything known about a run right now. Items are the same timeline entries the conversation renders. */
@@ -645,10 +650,16 @@ class LiveRunHub(
             // arriving on a pass already open — the chat opened, or the app back in front with it — does not wait a
             // window to learn whether that connection is dead: the pass is let go at once, the record asked, and the
             // stream taken up from the last event applied. A pass a chat was on from its start has a connection it
-            // opened itself, and nothing to verify.
+            // opened itself, and nothing to verify; nor does one that opened, or told of the run, within
+            // [arrivalTrustMs] — a chat subscribing beside the notification as both start, or taking up its own pass
+            // again as its load lands. Should that one fall silent, it is verified once it has been for that long.
             if (stallMs <= 0) emptyFlow() else entry.stallWatchedChanges().withIndex().flatMapLatest { (change, shown) ->
                 if (!shown) emptyFlow() else flow<Any> {
-                    if (change > 0) emit(ChatArrived)
+                    if (change > 0) {
+                        val left = arrivalTrustMs - (System.nanoTime() - heardAt.get()) / NANOS_PER_MS
+                        if (left > 0) delay(left)
+                        emit(ChatArrived)
+                    }
                     while (true) {
                         val left = stallMs - (System.nanoTime() - heardAt.get()) / NANOS_PER_MS
                         if (left > 0) {
@@ -687,8 +698,9 @@ class LiveRunHub(
                     ChatArrived -> {
                         // Whether the pass was watched before the chat came is not asked: a connection held for the
                         // notification was watched all along, and whether it is still a connection to the run is
-                        // what the chat needs to know now.
-                        if (live === entry.live && !live.finished && entry.endSaidAt.value == 0L) throw StallNow
+                        // what the chat needs to know now. An event since the chat came has answered that already.
+                        val quiet = System.nanoTime() - heardAt.get() >= arrivalTrustMs * NANOS_PER_MS
+                        if (quiet && live === entry.live && !live.finished && entry.endSaidAt.value == 0L) throw StallNow
                         return@collect
                     }
                     Unwatched -> { unwatched = true; windowStartedAt = System.nanoTime(); return@collect }
@@ -1045,6 +1057,8 @@ class LiveRunHub(
         const val TERMINAL_GRACE_MS = 15_000L
         /** See [stallTimeoutMs]: a turn under way says something within this on a stream that still carries it, but for a long tool call. */
         const val STALL_TIMEOUT_MS = 30_000L
+        /** See [arrivalTrustMs]: a connection that spoke this recently is one a resume would only open again. */
+        const val ARRIVAL_TRUST_MS = 2_000L
         /**
          * The longest a pass that keeps hearing nothing goes between two resumes. Each resume is a record read and a
          * stream reopened, for every followed run — eight followed agents inside long tool calls paid 1.5 requests
