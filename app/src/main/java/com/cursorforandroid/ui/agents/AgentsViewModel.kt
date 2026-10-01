@@ -20,6 +20,7 @@ import com.cursorforandroid.domain.ListPreferences
 import com.cursorforandroid.domain.PendingWork
 import com.cursorforandroid.domain.KnownRoot
 import com.cursorforandroid.domain.LocalAgentState
+import com.cursorforandroid.domain.ProjectArrangement
 import com.cursorforandroid.domain.SortOrder
 import com.cursorforandroid.domain.SourceFilter
 import com.cursorforandroid.domain.StatusFilter
@@ -526,6 +527,9 @@ class AgentsViewModel(
 
     /** The Projects arranged on the New Chat page, first to last; the sidebar's Projects group follows (see [LocalAgentState.projectOrder]). */
     fun setProjectOrder(ids: List<String>) = viewModelScope.launch { graph.prefs.setProjectOrder(ids) }
+
+    /** The Projects as left on the New Chat page: their order, and the ones hidden there (see [LocalAgentState.hiddenProjectIds]). */
+    fun arrangeProjects(arrangement: ProjectArrangement) = viewModelScope.launch { graph.prefs.setProjectArrangement(arrangement) }
 
     /** Marks every loaded conversation read at its current `updatedAt`, the same stamp opening a chat would write. */
     fun markAllRead() = viewModelScope.launch {
