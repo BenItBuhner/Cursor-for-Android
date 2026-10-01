@@ -216,7 +216,11 @@ jobs:
         with:
           fetch-tags: true # the version is derived from the release tags (app/build.gradle.kts)
 
+      # The shards share one set of dependencies, so the first saves the Gradle caches for all six (on main; see the
+      # action): one gradle-home entry and one build-cache bundle per push instead of six of each.
       - uses: ./.github/actions/android-toolchain
+        with:
+          cache-read-only: ${{ matrix.shard != '1/6' }}
 
       # The same compile the tests need, with the same stamp, so its outputs land in the build cache for the next runs.
       - name: Warm the Gradle caches (the tree is proved by ${{ needs.proof.outputs.run }})
