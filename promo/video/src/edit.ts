@@ -16,13 +16,13 @@ export const AT = {
   dictate: beat(11),
   code: beat(18),
   steer: beat(30),
-  live: beat(38),
-  ship: beat(43),
-  lineup: beat(49),
-  end: beat(57),
+  live: beat(40),
+  ship: beat(45),
+  lineup: beat(51),
+  end: beat(58),
 };
 
-export const DURATION = AT.end + beat(8);
+export const DURATION = AT.end + beat(7);
 
 /** The app's theme the cut is rendered in: the phone, the lineup and the score all follow it. */
 export const THEME: Theme = "dark";
@@ -130,25 +130,36 @@ export function shadeAt(f: number, moves: ShadeMoves = SHADE): Shade {
   return { open, finger };
 }
 
+/** Frames the answer to the steer is left up to be read once it has landed, before the shade comes down over it. */
+const READ = 45;
+
 /**
  * [take]'s run through the six moments, from its own marks, so a device's dark and light takes cut alike. A Project is
  * held, lifted and carried to the front, and the part ends as it settles; the task is said into the microphone, the
  * listening shown at twice the take's pace, the words landing (less the one frame the composer's footer drops its label
- * on as they do) and sent; the chat opens and the run writes its edits, the first one's diff opened and folded away
- * again, and the follow-up field tapped; a follow-up is typed at three times the pace, queued, steered (the wait for
- * the steer to be taken at three times too) and answered, the answer left up to be read; the notification shade pulled
- * down over the run as it tests and opens its pull request, the run's wait on its checks cut out under the shade as it
- * flies back up; and the answer, with the pull request's section of the details. Everything the run streams plays as
- * the capture filmed it, and the cuts leave out whole stretches of the run rather than any of what it says.
+ * on as they do) and sent; the chat opens and the run writes its first edit, opened as it is written so its diff lands
+ * in view, folded away again, and the follow-up field tapped; a follow-up is typed as the run writes the rest of its
+ * edits, queued, steered (the wait for the steer to be taken at three times the pace) and answered, the answer left up
+ * to be read; the notification shade pulled down over the run as it tests and opens its pull request, the run's wait on
+ * its checks cut out under the shade as it flies back up; and the answer, with the pull request's section of the
+ * details. Everything the run streams plays as the capture filmed it, and the cuts leave out whole stretches of the run
+ * rather than any of what it says.
  */
 export function hero(take: TakeId): Reel {
   const m = (name: string) => mark(take, name);
   const s = (key: string) => stream(take, key);
   /** The frame the composer's footer shows with no label, between "Transcribing…" and its fade out. */
   const blink = m("the words") + 1;
-  const typing = m("follow-up") + 8;
-  /** Where "Watch it code." picks the run up: as far before the follow-up's typing as the part is long. */
-  const coding = typing - (AT.steer - AT.code);
+  const waiting = { from: m("steer") + 6, to: m("the steer") - 2, speed: 3 };
+  const answered = s("hero.adapt").to + READ;
+  /**
+   * Where "Queue it. Steer it." picks the run up: as far before the wait for the steer as the part has room for once
+   * the wait and the answer have theirs. The edits the run writes under the typing hold it to the take's own pace.
+   */
+  const queueing =
+    waiting.from - (AT.live - AT.steer - Math.round((waiting.to - waiting.from) / waiting.speed) - (answered - waiting.to));
+  /** Where "Watch it code." picks the run up: as far before that as the part is long. */
+  const coding = queueing - (AT.steer - AT.code);
   /** The tests running as the shade comes down, the step moving on to the pull request once it is down. */
   const shaded = liveStep(take, "Running gh pr create --fill").from - 70;
   const answering = s("hero.final").from - 10;
@@ -171,12 +182,7 @@ export function hero(take: TakeId): Reel {
       {
         at: AT.steer,
         until: AT.live,
-        pieces: [
-          { from: typing, to: m("queue") - 9, speed: 3 },
-          { from: m("queue") - 9, to: m("steer") + 6 },
-          { from: m("steer") + 6, to: m("the steer") - 2, speed: 3 },
-          { from: m("the steer") - 2 },
-        ],
+        pieces: [{ from: queueing, to: waiting.from }, waiting, { from: waiting.to, to: answered }],
       },
       {
         at: AT.live,
@@ -199,8 +205,11 @@ export function hero(take: TakeId): Reel {
   if (takeFrame(reel, AT.dictate) < organized) throw new Error(`${take}: "Say what you want." goes back to ${takeFrame(reel, AT.dictate)}`);
   const sendAt = whenShown(reel, m("send"));
   if (sendAt >= AT.code) throw new Error(`${take}: the prompt is sent at ${sendAt}, after "Say what you want." ends`);
-  const read = takeFrame(reel, AT.live - 1) - s("hero.adapt").to;
-  if (read < 45) throw new Error(`${take}: the answer to the steer is up for ${read} frames before the shade`);
+  const lead = whenShown(reel, m("mic")) - AT.dictate;
+  if (lead < 8) throw new Error(`${take}: the microphone is tapped ${lead} frames into "Say what you want."`);
+  if (queueing <= m("follow-up") || queueing > m("follow-up") + 20) {
+    throw new Error(`${take}: "Queue it. Steer it." picks the run up at ${queueing}, not as the follow-up starts to be typed`);
+  }
   return reel;
 }
 
@@ -209,14 +218,19 @@ export const heroTake = (theme: Theme) => takeOf("phone", theme);
 export const HEROES: Record<Theme, Reel> = { dark: hero(heroTake("dark")), light: hero(heroTake("light")) };
 
 /**
- * Each device's take in the lineup: the same stretch, the first diff tapped open once the last device has landed and
- * the camera settled on all three, and folded away again, in step. Held to the capture's own steps, which every take
- * films on the same frames.
+ * Frames into the lineup the first diff lands on every device: once the last has landed and the camera settled on all
+ * three, and late enough that every lineup ends before the diff's fold is tapped.
+ */
+export const LINEUP_DIFF = 83;
+
+/**
+ * Each device's take in the lineup: the same stretch, the first edit open as it is written and its diff landing at
+ * [LINEUP_DIFF], in step. Held to the capture's own steps, which every take films on the same frames.
  */
 export const lineupReel = (take: TakeId): Reel => ({
   take,
   until: AT.end,
-  cuts: [{ at: AT.lineup, take: mark(take, "diff") - 74 }],
+  cuts: [{ at: AT.lineup, take: mark(take, "the diff") - LINEUP_DIFF }],
 });
 
 export const LINEUP = ["phone", "foldable", "tablet"] as const;
