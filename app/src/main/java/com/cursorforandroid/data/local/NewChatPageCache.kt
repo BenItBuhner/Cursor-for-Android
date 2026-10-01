@@ -34,8 +34,11 @@ data class NewChatPageSnapshot(
 ) {
     val choice: NewChatHomeChoice get() = NewChatHomeChoice(NewChatHome.chosen(chosenHome))
 
-    /** The shortcuts the page drew: its Projects, the hidden ones left off. */
-    fun projectRows(): List<AgentRow> = projects.filterNot { it.agent.id in hiddenProjectIds }.map(CachedShortcutRow::toRow)
+    /**
+     * Every Project the page had, the hidden ones among them: the page leaves [hiddenProjectIds] off itself, as it does
+     * once the settings are read, so a page whose Projects are all hidden opens on its "hidden" row rather than none.
+     */
+    fun projectRows(): List<AgentRow> = projects.map(CachedShortcutRow::toRow)
 
     companion object {
         fun of(user: CursorUser, choice: NewChatHomeChoice, extendedMode: Boolean, projects: List<AgentRow>, hidden: Set<String> = emptySet()) = NewChatPageSnapshot(

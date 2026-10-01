@@ -336,7 +336,8 @@ class AgentsViewModel(
      * they are never shown again.
      */
     private val seedAccount: String? = signedInAccount()
-    private val seedRows = AtomicReference(graph.caches.newChatPage.seed(signedInUser())?.projectRows().orEmpty())
+    private val seed = graph.caches.newChatPage.seed(signedInUser())
+    private val seedRows = AtomicReference(seed?.projectRows().orEmpty())
 
     private fun signedInUser() = (graph.session.state.value as? SessionState.SignedIn)?.user
 
@@ -387,7 +388,12 @@ class AgentsViewModel(
         // Grouping, filtering and sorting a few hundred rows is cheap, but not free on every keystroke of the search
         // field or every streamed patch; it runs off the main thread and only the result reaches the UI.
         .flowOn(graph.agentListDispatcher)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentListUiState(projectRows = seedRows.get()))
+        // Until the settings are read, the snapshot's hidden set is the one the page leaves its seeded Projects off by.
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            AgentListUiState(projectRows = seedRows.get(), local = LocalAgentState(hiddenProjectIds = seed?.hiddenProjectIds.orEmpty())),
+        )
 
     init {
         // A Project the list names but lacks is fetched by id so its workers can sit under it rather than under a
