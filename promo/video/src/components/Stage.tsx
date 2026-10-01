@@ -1,5 +1,5 @@
 import type React from "react";
-import { AT, SWEEPS } from "../edit";
+import { SWEEPS } from "../edit";
 import { easeOut, progress } from "../math";
 import { COLOR } from "../theme";
 
@@ -47,7 +47,7 @@ export const Stage: React.FC<{ f: number; width: number; height: number }> = ({ 
             left: -band + (width + 2 * band) * sweep,
             transform: "skewX(-14deg)",
             background:
-              "linear-gradient(90deg, rgba(255,243,226,0) 0%, rgba(255,243,226,0.035) 35%, rgba(255,243,226,0.075) 50%, rgba(255,243,226,0.035) 65%, rgba(255,243,226,0) 100%)",
+              "linear-gradient(90deg, rgba(255,243,226,0) 0%, rgba(255,243,226,0.06) 35%, rgba(255,243,226,0.13) 50%, rgba(255,243,226,0.06) 65%, rgba(255,243,226,0) 100%)",
           }}
         />
       ) : null}
@@ -60,20 +60,4 @@ export const Stage: React.FC<{ f: number; width: number; height: number }> = ({ 
       />
     </div>
   );
-};
-
-/**
- * The flash through white the Android card cuts to the hero on: up over the card's last frames, gone over the hero's
- * first, warm rather than pure white. Its opacity at [f].
- */
-export const FLASH = { rise: 3, fall: 16 };
-export function flashAt(f: number): number {
-  if (f < AT.organize - FLASH.rise || f >= AT.organize + FLASH.fall) return 0;
-  if (f < AT.organize) return progress(f, AT.organize - FLASH.rise, AT.organize) ** 2 * 0.9;
-  return (1 - easeOut(progress(f, AT.organize, AT.organize + FLASH.fall))) * 0.95;
-}
-
-export const Flash: React.FC<{ f: number }> = ({ f }) => {
-  const a = flashAt(f);
-  return a > 0 ? <div style={{ position: "absolute", inset: 0, background: "#FFF6E6", opacity: a, pointerEvents: "none" }} /> : null;
 };

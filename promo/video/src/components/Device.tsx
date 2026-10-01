@@ -68,18 +68,20 @@ export const Device: React.FC<{
         width: outer,
         height: height + 2 * edge,
         borderRadius: radius + edge,
-        background: "linear-gradient(150deg, #7a7a82 0%, #2a2a2f 18%, #1a1a1e 55%, #2e2e33 82%, #84848c 100%)",
-        boxShadow: `0 ${short * 0.1}px ${short * 0.26}px -${short * 0.04}px rgba(0,0,0,0.7), 0 ${short * 0.02}px ${short * 0.05}px rgba(0,0,0,0.5), 0 0 ${short * 0.5}px rgba(255,236,210,0.045)`,
+        // The frame, graphite, caught by the stage's light at its top left and bottom right, with a hair of rim light
+        // all round so it stands off the dark stage.
+        background: "linear-gradient(150deg, #a8a8b0 0%, #3c3c42 16%, #26262b 50%, #3a3a40 84%, #b0b0b8 100%)",
+        boxShadow: `0 0 0 1px rgba(255,246,232,0.09), 0 ${short * 0.1}px ${short * 0.26}px -${short * 0.04}px rgba(0,0,0,0.7), 0 ${short * 0.02}px ${short * 0.05}px rgba(0,0,0,0.5), 0 0 ${short * 0.5}px rgba(255,236,210,0.06)`,
       }}
     >
-      <div style={{ position: "absolute", inset: 0, borderRadius: radius + edge, overflow: "hidden" }}>{glint(0.5, 22)}</div>
+      <div style={{ position: "absolute", inset: 0, borderRadius: radius + edge, overflow: "hidden" }}>{glint(0.85, 22)}</div>
       {device === "phone" ? <PhoneButtons width={width} height={height} edge={edge} rim={rim} /> : null}
       <div style={{ position: "absolute", inset: rim, borderRadius: radius + bezel, background: "#050506" }} />
       <div style={{ position: "absolute", left: edge, top: edge, width, height, borderRadius: radius, overflow: "hidden", isolation: "isolate" }}>
         {children}
         {device === "foldable" ? <Crease width={width} height={height} /> : null}
         {device !== "tablet" ? <PunchHole take={take} width={width} height={height} /> : null}
-        {glint(0.05, 30)}
+        {glint(0.08, 30)}
       </div>
       {device === "tablet" ? (
         <div

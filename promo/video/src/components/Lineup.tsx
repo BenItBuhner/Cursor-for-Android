@@ -94,8 +94,9 @@ function shot(all: Slot[], n: number, room: Box, maxZoom: number): View {
 
 const landAt = (i: number) => AT.lineup + beat(i);
 
-/** Frames a device takes to land. */
-const LAND = 20;
+/** Frames a device takes to land, and how far it rises as it does. */
+const LAND = 14;
+const LAND_RISE = 60;
 
 /**
  * The camera's turn round the lineup, at an even pace from cut to cut: from the first [turn] to the second about the
@@ -127,16 +128,13 @@ function viewAt(framing: Framing, all: Slot[], width: number, height: number, f:
   };
 }
 
-/**
- * The push through the phone into the end card: over the lineup's last [PUSH.frames] the whole lineup swells about the
- * phone's screen by [PUSH.by], gathering pace into the cut, as the stage closes over it for the last [PUSH.dim].
- */
-const PUSH = { frames: 16, by: 0.55, dim: 7 };
+/** Frames before the end card the stage closes over the lineup, so the card lands out of a dark beat. */
+const DIP = 10;
 
 /**
  * The three devices landing one a beat, each named as it lands, all playing the same moment of the run in step: the
  * camera in on the phone, pulling back in one long move as the foldable and the tablet land beside it, and turning
- * round all three; then pushing through the phone into the end card.
+ * round all three; then the stage closes over them into the end card.
  */
 export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width: number; height: number }> = ({
   framing,
@@ -153,14 +151,10 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
   const p = progress(f, AT.lineup, AT.end);
   const origin = `${width / 2}px ${height / 2}px`;
   const sheen = sweepAt(f);
-  const phone = all.find((s) => s.device === "phone")!;
-  const through = easeIn(progress(f, AT.end - PUSH.frames, AT.end));
-  const dim = progress(f, AT.end - PUSH.dim, AT.end) ** 1.5;
-  const px = view.x + (phone.x + phone.width / 2 - view.cx) * view.zoom;
-  const py = view.y + (phone.y + screenHeight(phone.take, phone.width) * 0.5 - view.cy) * view.zoom;
+  const dim = easeIn(progress(f, AT.end - DIP, AT.end));
   return (
     <>
-      <div style={{ position: "absolute", inset: 0, transformOrigin: `${px}px ${py}px`, transform: `scale(${1 + PUSH.by * through})` }}>
+      <div style={{ position: "absolute", inset: 0 }}>
         <div style={{ position: "absolute", inset: 0, perspective: LENS[framing].perspective, perspectiveOrigin: origin }}>
           <div
             style={{
@@ -182,8 +176,9 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
                   style={{
                     position: "absolute",
                     inset: 0,
-                    opacity: clamp01((f - landAt(i) + 1) / 4),
-                    transform: `translateY(${(1 - landed) * 80}px) scale(${0.95 + 0.05 * landed})`,
+                    // The phone is there on the cut; the others come up out of the stage as they land.
+                    opacity: i === 0 ? 1 : clamp01((f - landAt(i) + 1) / 3),
+                    transform: `translateY(${(1 - landed) * LAND_RISE}px) scale(${0.95 + 0.05 * landed})`,
                     transformOrigin: `${x + w / 2}px ${y + screenHeight(slot.take, w)}px`,
                   }}
                 >

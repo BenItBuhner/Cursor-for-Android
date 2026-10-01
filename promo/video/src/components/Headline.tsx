@@ -1,5 +1,6 @@
 import type React from "react";
-import { clamp01, easeIn, easeOut, lerp, progress } from "../math";
+import { clamp01, easeInOut, easeOut, lerp, progress } from "../math";
+import { textWidth } from "../measure";
 import { COLOR, SANS, TRACK, WGHT } from "../theme";
 
 /** A line's height, in the type's size: a block of n lines stands n * size * LEADING tall. */
@@ -11,10 +12,10 @@ const STAGGER = 1.1;
 /** A second line's reveal and waves run this many frames behind the first's, so a sweep crosses the block on a diagonal. */
 const LAG = 6;
 /** The exit: frames a glyph takes to wipe up out of its line, and the frames between one glyph's start and the next's. */
-const CLEAR = 9;
-const CLEAR_STAGGER = 0.35;
-/** The tracking, tightening from the first value to [TRACK.display] as the type lands. */
-const TRACK_FROM = "-0.008em";
+const CLEAR = 12;
+const CLEAR_STAGGER = 0.5;
+/** The tracking, in ems, tightening from the first value to [TRACK.display] as the type lands. */
+const TRACK_FROM = -0.008;
 
 /**
  * A weight wave: a crest in the type's weight that sweeps across the text from the left edge to the right over [frames]
@@ -60,8 +61,9 @@ type Glyph = { ch: string; u: number; start: number; waves: readonly Wave[] };
  * [wordAt], each word from its own frame), one after another from left to right and the second line a little behind
  * the first: it comes up out of a mask, blurred, light and loose, and lands sharp, at its weight and tracked in, as a
  * weight wave sweeps across the line behind the landing glyphs; a gentler wave breathes across it before, given
- * [until], it wipes up and out of its line glyph by glyph, done on [until]'s frame. The block is laid out as its parent
- * has it; [align] sets the lines' alignment within it.
+ * [until], it wipes up and out of its line glyph by glyph, done on [until]'s frame. Each glyph stands centred in a cell
+ * as wide as it runs at rest, so the line holds still as the waves swell and thin the glyphs. The block is laid out as
+ * its parent has it; [align] sets the lines' alignment within it.
  */
 export const Kinetic: React.FC<{
   lines: readonly string[];
@@ -81,11 +83,11 @@ export const Kinetic: React.FC<{
   const n = glyphs.length;
   const last = Math.max(...glyphs.map((g) => g.start));
   const landed = easeOut(progress(f, at, last + RISE));
-  const tracking = `calc(${TRACK_FROM} + (${TRACK.display} - ${TRACK_FROM}) * ${landed})`;
+  const tracking = lerp(TRACK_FROM, parseFloat(TRACK.display), landed) * size;
   const clearFrom = until === undefined ? Infinity : until - CLEAR - CLEAR_STAGGER * (n - 1);
   let k = 0;
   return (
-    <div style={{ fontFamily: SANS, fontSize: size, lineHeight: LEADING, letterSpacing: tracking, color, textAlign: align, whiteSpace: "pre" }}>
+    <div style={{ fontFamily: SANS, fontSize: size, lineHeight: LEADING, color, textAlign: align, whiteSpace: "pre" }}>
       {glyphLines.map((line, i) => (
         <div
           key={lines[i]}
@@ -102,18 +104,25 @@ export const Kinetic: React.FC<{
             const rise = easeOut(progress(f, g.start, g.start + RISE));
             const leaveAt = clearFrom + CLEAR_STAGGER * k;
             k++;
-            const leave = easeIn(progress(f, leaveAt, leaveAt + CLEAR));
+            const leave = easeInOut(progress(f, leaveAt, leaveAt + CLEAR));
             const wght = lerp(WGHT.min, weightAt(g.u, f, g.waves), rise);
             const y = (1 - rise) * 0.5 - leave * 0.6;
             const blur = (1 - rise) * 0.05 * size;
             const opacity = clamp01(rise ** 0.6) * (1 - leave);
+            const last = j === line.length - 1;
+            const cell = textWidth(g.ch, size, REST);
+            // The glyph, wider or narrower than its cell at this weight, centred in it.
+            const centre = (cell - textWidth(g.ch, size, Math.round(wght))) / 2;
             return (
               <span
                 key={`${g.ch}-${j}`}
                 style={{
                   display: "inline-block",
+                  width: cell,
+                  marginRight: last ? 0 : tracking,
+                  textAlign: "left",
                   fontVariationSettings: `"wght" ${wght.toFixed(1)}`,
-                  transform: `translateY(${(y * 100).toFixed(2)}%)`,
+                  transform: `translateX(${centre.toFixed(2)}px) translateY(${(y * 100).toFixed(2)}%)`,
                   filter: blur > 0.15 ? `blur(${blur.toFixed(2)}px)` : undefined,
                   opacity,
                 }}

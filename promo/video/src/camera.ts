@@ -252,24 +252,24 @@ type Ink = { rising: Box; standing: Box; leaving: Box };
  * last, when they show over their lines), less its last [GONE], when it is all but gone.
  */
 const RISING = 44;
-const LEAVING = 14;
+const LEAVING = 22;
 const GONE = 4;
 const INK: Record<Framing, Record<string, Ink>> = {
   wide: {
-    "Organize projects.": { rising: [154, 404, 757, 711], standing: [156, 406, 755, 707], leaving: [156, 382, 751, 707] },
-    "Say what you want.": { rising: [150, 406, 787, 711], standing: [150, 406, 785, 707], leaving: [152, 382, 779, 707] },
-    "Watch it code.": { rising: [152, 404, 725, 711], standing: [154, 406, 721, 677], leaving: [154, 382, 717, 677] },
-    "Queue it. Steer it.": { rising: [154, 404, 745, 711], standing: [154, 406, 741, 677], leaving: [156, 382, 737, 677] },
-    "Follow it live.": { rising: [158, 404, 701, 711], standing: [158, 406, 699, 677], leaving: [160, 382, 695, 677] },
-    "Ship it.": { rising: [154, 482, 595, 629], standing: [154, 484, 591, 625], leaving: [156, 460, 587, 625] },
+    "Organize projects.": { rising: [154, 404, 755, 711], standing: [154, 406, 753, 707], leaving: [156, 382, 751, 707] },
+    "Say what you want.": { rising: [150, 406, 779, 711], standing: [150, 406, 781, 707], leaving: [152, 382, 779, 707] },
+    "Watch it code.": { rising: [152, 404, 719, 711], standing: [154, 406, 717, 677], leaving: [154, 382, 717, 677] },
+    "Queue it. Steer it.": { rising: [152, 404, 741, 711], standing: [154, 406, 739, 677], leaving: [156, 382, 737, 677] },
+    "Follow it live.": { rising: [158, 404, 699, 711], standing: [160, 406, 695, 677], leaving: [160, 382, 695, 677] },
+    "Ship it.": { rising: [152, 482, 589, 629], standing: [154, 484, 589, 625], leaving: [156, 460, 587, 625] },
   },
   tall: {
-    "Organize projects.": { rising: [292, 96, 791, 349], standing: [294, 96, 789, 343], leaving: [296, 76, 789, 343] },
-    "Say what you want.": { rising: [276, 98, 801, 349], standing: [276, 98, 801, 343], leaving: [280, 76, 797, 343] },
-    "Watch it code.": { rising: [308, 96, 777, 349], standing: [310, 96, 775, 319], leaving: [312, 76, 773, 319] },
-    "Queue it. Steer it.": { rising: [296, 96, 783, 349], standing: [298, 96, 781, 319], leaving: [300, 76, 779, 319] },
-    "Follow it live.": { rising: [320, 96, 769, 349], standing: [322, 96, 767, 319], leaving: [324, 76, 765, 319] },
-    "Ship it.": { rising: [358, 160, 721, 281], standing: [360, 160, 719, 277], leaving: [360, 142, 717, 277] },
+    "Organize projects.": { rising: [288, 96, 789, 349], standing: [292, 96, 789, 343], leaving: [294, 76, 787, 343] },
+    "Say what you want.": { rising: [274, 98, 795, 349], standing: [276, 98, 797, 343], leaving: [278, 76, 795, 343] },
+    "Watch it code.": { rising: [306, 96, 773, 349], standing: [308, 96, 773, 319], leaving: [310, 76, 773, 319] },
+    "Queue it. Steer it.": { rising: [292, 96, 781, 349], standing: [296, 96, 779, 319], leaving: [298, 76, 777, 319] },
+    "Follow it live.": { rising: [316, 96, 765, 349], standing: [320, 96, 765, 319], leaving: [322, 76, 763, 319] },
+    "Ship it.": { rising: [356, 160, 719, 281], standing: [358, 160, 717, 277], leaving: [360, 142, 715, 277] },
   },
 };
 

@@ -8,7 +8,7 @@ it.", the lineup's devices each landing on a bell over the lifted IV, a sus chor
 and everything but the piano, a bell and the strings' resolve dropping away on the end card, where a three-note fall
 lands on the tonic and rings out. The harmony moves only on the cuts: I, IV, I, V, vi, IV, I/3, V, IV, Vsus, I.
 
-Sound is cut to the picture too: a swell of air under each light sweep, a sub hit under the flash through white, a
+Sound is cut to the picture too: a swell of air under each light sweep, a sub hit as the green closes into the phone, a
 glass tick as the prompt is sent, faint taps where a finger comes down, and risers into the big cuts. Mastered to -14
 LUFS, true peak under -1.2 dBTP.
 
@@ -423,7 +423,7 @@ def score(cues: dict) -> np.ndarray:
     mix.add(sec(at["wordmark"]), piano(74, 3.0, 0.55), lv["piano"] * 0.9, verb=0.6)
     mix.add(sec(at["android"]) - beat * 1.25, swell(beat * 1.25), lv["swell"] * 0.8)
     mix.add(sec(at["android"]), impact(2.0), lv["impact"] * 0.5, verb=0.3)
-    # The flash through white into the hero: a sub hit under a riser, and the first crash.
+    # The green closing into the hero's phone: a sub hit under a riser, and the first crash.
     mix.add(sec(at["android"]) + beat * 0.5, riser(sec(at["organize"]) - sec(at["android"]) - beat * 0.5), lv["riser"] * 0.9, verb=0.3)
     mix.add(sec(at["organize"]), impact(3.5), lv["impact"], verb=0.45)
 

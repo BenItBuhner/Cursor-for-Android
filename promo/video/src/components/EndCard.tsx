@@ -11,12 +11,12 @@ export const DISCLAIMER = "Unofficial client for Cursor Cloud Agents. Not affili
 
 /** How far the camera pushes in on the name by the last frame, slowing to a stop as the video ends. */
 const PUSH = 0.05;
-/** Frames the icon takes to settle out of the push through the lineup, and the bloom behind it to come up and ease back. */
-const SETTLE = 26;
-const BLOOM = { up: 14, down: 70 };
+/** Frames the icon takes to settle to its size out of the dark, and the bloom behind it to come up and ease back. */
+const SETTLE = 28;
+const BLOOM = { up: 16, down: 70 };
 
 /**
- * The close: the lineup pushes through the phone into the icon, which settles from large to its size on the last hit
+ * The close: out of the dark beat the lineup dips to, the icon settles from a little large to its size on the last hit
  * as a warm bloom comes up behind it and eases back; the name rides a weight wave in under it, where to get it rises
  * under that as the camera pushes slowly in, and the small print holds still under them.
  */
@@ -56,10 +56,10 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
               width: bloomSize,
               height: bloomSize,
               borderRadius: "50%",
-              background: `radial-gradient(circle, rgba(245,165,36,${(0.22 * bloom).toFixed(3)}) 0%, rgba(245,165,36,${(0.07 * bloom).toFixed(3)}) 28%, rgba(245,165,36,0) 60%)`,
+              background: `radial-gradient(circle, rgba(255,196,110,${(0.17 * bloom).toFixed(3)}) 0%, rgba(250,176,70,${(0.055 * bloom).toFixed(3)}) 28%, rgba(245,165,36,0) 60%)`,
             }}
           />
-          <div style={{ position: "relative", transform: `scale(${1.42 - 0.42 * settled})`, opacity: clamp01((f - AT.end + 1) / 4) }}>
+          <div style={{ position: "relative", transform: `scale(${1.22 - 0.22 * settled})`, opacity: clamp01((f - AT.end + 1) / 6) }}>
             <AppIcon size={icon} glow={0.6} />
           </div>
         </div>
