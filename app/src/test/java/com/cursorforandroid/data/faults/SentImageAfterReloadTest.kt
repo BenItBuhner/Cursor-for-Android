@@ -11,10 +11,10 @@ import com.cursorforandroid.data.api.dto.V0ConversationMessageDto
 import com.cursorforandroid.data.faults.FaultServer.Fault
 import com.cursorforandroid.data.faults.FaultServer.Route
 import com.cursorforandroid.data.repo.ConversationState
-import com.cursorforandroid.data.repo.TranscriptEngine
 import com.cursorforandroid.domain.AssistantMessage
 import com.cursorforandroid.domain.MessageAttachment
 import com.cursorforandroid.domain.PromptImage
+import com.cursorforandroid.domain.TranscriptEngine
 import com.cursorforandroid.domain.UserMessage
 import com.cursorforandroid.fixtures.LongProject
 import com.google.common.truth.Truth.assertWithMessage
@@ -104,15 +104,28 @@ class SentImageAfterReloadTest {
         println("== $label: run=${s.runStatus} active=${s.activeRunId} streaming=${s.isStreaming} loading=${s.isLoading}")
         s.items.takeLast(12).forEach { item ->
             when (item) {
-                is UserMessage -> println("   user(${item.text.take(32)}) attachments=${item.attachments.map { "${File(it.path).name}:${File(it.path).isFile}" }}")
+                is UserMessage -> println("   user(${item.text.take(32)}) id=${item.id} attachments=${item.attachments.map { "${File(it.path).name}:${File(it.path).isFile}" }}")
                 is AssistantMessage -> println("   assistant(${item.markdown.take(32)})")
                 else -> println("   ${item::class.simpleName}(${item.id.take(40)})")
             }
         }
     }
 
+    /** The sets on this device's disk, with what names each (see `AttachmentStore.forAgent`): what a bubble without its picture could not find. */
+    private fun dumpAttachments() {
+        val root = rig?.context?.filesDir?.let { File(it, "attachments") } ?: return
+        root.walkTopDown().filter { it.isFile }.forEach { file ->
+            println("   disk: ${file.relativeTo(root)}" + if (file.name == "meta.json") " " + file.readText().take(300) else " (${file.length()} bytes)")
+        }
+    }
+
     private suspend fun FaultRig.awaitUntilOr(timeoutMs: Long, label: String, condition: suspend () -> Boolean) {
         try { awaitUntil(timeoutMs, condition) } catch (t: Throwable) { dump("TIMEOUT waiting for $label"); throw t }
+    }
+
+    /** Gives the picture time to be read from the record or the disk; what the bubble then shows is for [assertShowsPicture] to say. */
+    private suspend fun FaultRig.awaitPicture(text: String) {
+        runCatching { awaitUntil(15_000) { pictureOn(text) != null } }
     }
 
     private suspend fun FaultRig.open() {
@@ -154,7 +167,7 @@ class SentImageAfterReloadTest {
         val message = bubble(text)
         assertWithMessage("$label: the message is not shown once: ${state.items.filterIsInstance<UserMessage>().map { it.text.take(32) }}").that(message).isNotNull()
         val attachments = message!!.attachments
-        if (attachments.size != 1 || !File(attachments.single().path).isFile) dump("$label (picture missing)")
+        if (attachments.size != 1 || !File(attachments.single().path).isFile) { dump("$label (picture missing)"); dumpAttachments() }
         assertWithMessage("$label: the bubble shows ${attachments.size} attachments, not the one picture sent with it").that(attachments).hasSize(1)
         val picture = attachments.single()
         assertWithMessage("$label: the picture is a file card").that(picture.isFile).isFalse()
@@ -264,13 +277,13 @@ class SentImageAfterReloadTest {
         val rig = rig(root)
         rig.open()
         rig.awaitUntilOr(60_000, "the chat open on its turn") { state.let { !it.isLoading && it.isStreaming && it.activeRunId == live.runId } && bubble(ELSEWHERE) != null }
-        rig.awaitUntilOr(30_000, "the picture drawn from the record") { pictureOn(ELSEWHERE) != null }
+        rig.awaitPicture(ELSEWHERE)
         dump("open (blobs=$imageBlobs)")
         assertShowsPicture("open, the record's copy (blobs=$imageBlobs)", ELSEWHERE)
 
         val after = rig.reopen(root)
         after.awaitUntilOr(60_000, "the reopened chat loaded") { !state.isLoading && bubble(ELSEWHERE) != null }
-        after.awaitUntilOr(30_000, "the picture after a reopen") { pictureOn(ELSEWHERE) != null }
+        after.awaitPicture(ELSEWHERE)
         dump("reopened (blobs=$imageBlobs)")
         assertShowsPicture("after a reopen (blobs=$imageBlobs)", ELSEWHERE)
         assertEveryFrameShowsPicture("reopened (blobs=$imageBlobs)", ELSEWHERE)
