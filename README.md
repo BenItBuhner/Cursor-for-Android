@@ -30,11 +30,14 @@ Requirements: JDK 17+, Android SDK with platform 36 (compileSdk; targetSdk stays
 ```bash
 ./gradlew :app:assembleDebug          # APK at app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:testDebugUnitTest      # JVM unit tests
+./gradlew :app:agentCheck             # just the unit tests your change against origin/main is likely to break
 ./gradlew :app:recordRoborazziDebug   # re-render screenshots/ from the demo backend
 ./gradlew :app:verifyRoborazziDebug   # compare the demo walkthrough against screenshots/
 ./gradlew :app:assembleRelease        # R8-minified APK; needs release signing, or -Papp.allowUnsignedRelease=true
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+The whole unit suite takes over half an hour on a four-core machine; `agentCheck` is the check to run before a push. It compiles everything, then runs the test classes of the changed test files, the ones named after a changed source file and, lightest first up to about five minutes of CI's test time (`-Papp.agentCheck.seconds`), the ones that mention what the change declares. Before the tests start it prints what it picked and why, with the commands for what it leaves to CI: the screenshot tests, the benchmarks and the classes past its budget. CI still runs everything. The details are under "agentCheck" in `app/build.gradle.kts`.
 
 ## CI and releases
 
