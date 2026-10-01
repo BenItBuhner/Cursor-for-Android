@@ -419,7 +419,8 @@ tasks.withType<Test>().configureEach {
 //   -Papp.testShard=benchmarks
 //                            run only the benchmark classes (`*BenchmarkTest`, `TranscriptPerf*`): the frame-time and
 //                            throughput claims. Always one JVM, whatever -Papp.testForks says, and nothing else beside
-//                            them, so what they measure is the code and not the neighbour.
+//                            them, so what they measure is the code and not the neighbour. CI runs them in
+//                            benchmarks.yml, which reports on every commit but holds no merge or release.
 // ---------------------------------------------------------------------------------------------------------------------
 val testForks: Int = providers.gradleProperty("app.testForks").map(String::toInt)
     .getOrElse((Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4))
