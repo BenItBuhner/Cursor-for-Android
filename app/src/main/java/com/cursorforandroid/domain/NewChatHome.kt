@@ -23,9 +23,6 @@ enum class NewChatHome {
     /** How the preference spells it (`recent`, `projects`, `projects_recent`, `composer`). */
     val key: String get() = name.lowercase()
 
-    /** Whether the pane lists the Project shortcuts (or, without Projects, the note that stands in for them). */
-    val showsProjects: Boolean get() = this == PROJECTS || this == PROJECTS_RECENT
-
     companion object {
         val DEFAULT = RECENT
 
