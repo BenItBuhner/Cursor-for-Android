@@ -39,6 +39,7 @@ import com.cursorforandroid.domain.AgentListOrganizer
 import com.cursorforandroid.domain.AgentRow
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.NewChatHomeChoice
+import com.cursorforandroid.domain.ProjectArrangement
 import com.cursorforandroid.domain.TranscriptHit
 import com.cursorforandroid.domain.UpdateState
 import com.cursorforandroid.notifications.NotificationPermissionPrompt
@@ -590,7 +591,7 @@ private fun AppShell(
                         projectsAvailable = pane.projectsAvailable,
                         onNewProject = pane.onNewProject,
                         onOpenSettings = ::openSettings,
-                        onReorderProjects = pane.onReorderProjects,
+                        onArrangeProjects = pane.onArrangeProjects,
                         focusComposer = pane.composerFocus == screen,
                         onComposerFocused = pane.onComposerFocused,
                     )
@@ -638,7 +639,7 @@ private fun AppShell(
         projectsAvailable = isDemo || extendedMode,
         projectsKnown = if (isDemo) true else extendedModeRead,
         onNewProject = if (isDemo || extendedMode) ({ projectEditor = ProjectEditorTarget.Create }) else null,
-        onReorderProjects = { ids -> agentsViewModel.setProjectOrder(ids) },
+        onArrangeProjects = { arrangement -> agentsViewModel.arrangeProjects(arrangement) },
         composerFocus = shortcuts.composerFocus,
         onComposerFocused = { shortcuts.composerFocus = null },
     )
@@ -878,8 +879,8 @@ private data class DetailPane(
     /** [projectsAvailable], null until Extended mode's switch has been read. */
     val projectsKnown: Boolean?,
     val onNewProject: (() -> Unit)?,
-    /** The Projects as arranged on the New Chat page, first to last. */
-    val onReorderProjects: (List<String>) -> Unit,
+    /** The Projects as arranged on the New Chat page: their order, and the ones hidden there. */
+    val onArrangeProjects: (ProjectArrangement) -> Unit,
     /** The screen whose composer a key asked for (see [ShellShortcuts.composerFocus]); [onComposerFocused] once it has the caret. */
     val composerFocus: Screen?,
     val onComposerFocused: () -> Unit,
