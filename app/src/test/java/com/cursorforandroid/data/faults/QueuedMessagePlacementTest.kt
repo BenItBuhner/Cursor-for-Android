@@ -8,7 +8,11 @@ import com.cursorforandroid.data.api.dto.V0AgentDto
 import com.cursorforandroid.data.faults.FaultServer.Fault
 import com.cursorforandroid.data.faults.FaultServer.Route
 import com.cursorforandroid.data.repo.ConversationState
+import com.cursorforandroid.data.repo.SteerRefusedException
+import com.cursorforandroid.data.repo.SteeringRepository
 import com.cursorforandroid.domain.ConversationControls
+import com.cursorforandroid.domain.SteerOutcome
+import com.cursorforandroid.domain.SteerPhase
 import com.cursorforandroid.domain.PromptFile
 import com.cursorforandroid.domain.PromptImage
 import com.cursorforandroid.domain.QueuePlacement
@@ -278,6 +282,86 @@ class QueuedMessagePlacementTest {
         val at = s.items.indexOfFirst { it is UserMessage && it.text == MESSAGE }
         assertThat(s.items.take(at).any { it.id.startsWith("activity-${live.runId}-") }).isTrue()
         assertThat(s.activeRunId).isEqualTo(live.runId)
+    }
+
+    /**
+     * Bennett's frame of v0.4.26: an account row's up arrow tapped mid-turn, and the row sat there with its glyphs live
+     * and "Being delivered to the agent." under it, the words of a message waiting its turn, not of a steer. The row
+     * reads as a steer from the tap — "Steering…" while the promote is out, then "Steered" — in its place, until the
+     * frame the transcript files it among the running turn's rows; never "being delivered", never a sent bubble ahead
+     * of the run (#512's fake send), never in both places or in neither.
+     */
+    @Test
+    fun `an account row steered mid-turn reads as a steer until the frame the transcript files it, never as a delivery`() = runBlocking<Unit> {
+        // The account lets the message go the moment it promotes it: the card carries it on this device's own word
+        // until the transcript shows it — the stretch Bennett's frame was drawn in.
+        server.queueLagMs = 0L
+        val rig = rig(pollMs = 1_500L)
+        rig.open()
+        val sentAt = System.nanoTime()
+        val followupId = rig.queueOnAccount(MESSAGE)
+        rig.awaitUntilOr(20_000, "the list to name it") { rig.steering.state(agentId).value.queue.any { it.id == followupId } }
+        rig.awaitNextQueueRead()
+        fun row() = state.let { s -> rig.steering.state(agentId).value.placed(s.queuePlacement) }.queue.singleOrNull { it.id == followupId }
+        assertThat(row()?.steer).isNull()
+        // The promote held at the account: the row reads "Steering…" in its place meanwhile.
+        val promote = Fault.Held(processedOnRelease = true)
+        server.script(Route.Steer, promote)
+        val steer = async { rig.steering.promotePending(agentId, followupId) }
+        rig.awaitUntilOr(10_000, "the promote at the account") { promote.reached }
+        assertThat(row()?.steer).isEqualTo(SteerPhase.STEERING)
+        assertThat(row()?.note).isNull()
+        promote.release()
+        assertThat(steer.await().getOrThrow()).isEqualTo(SteerOutcome.QUEUED)
+        rig.awaitUntilOr(45_000, "the steer filed") { state.items.any { it is UserMessage && it.text == MESSAGE } }
+        rig.awaitUntilOr(20_000, "the list to let it go") { rig.steering.state(agentId).value.queue.none { it.id == followupId } }
+        rig.awaitUntilOr(10_000, "the steer let go of") { rig.steering.state(agentId).value.steers.isEmpty() }
+        delay(1_500)
+        assertOnePlace(followupId, MESSAGE, fromNanos = sentAt)
+        // From the first frame the steer was out: every frame that has the row on the card has it as a steer, never
+        // with a delivery's words under it.
+        val sinceSteer = frames.dropWhile { !it.controls.steers.containsKey(followupId) }
+        assertWithMessage("the recorder never saw the steer").that(sinceSteer).isNotEmpty()
+        sinceSteer.forEachIndexed { i, frame ->
+            val onCard = frame.controls.placed(frame.state.queuePlacement).queue.singleOrNull { it.id == followupId } ?: return@forEachIndexed
+            assertWithMessage("frame $i: the steered row reads ${onCard.note} (steer ${onCard.steer})").that(onCard.steer).isNotNull()
+            assertWithMessage("frame $i: the steered row reads ${onCard.note}").that(onCard.note).isNull()
+        }
+        // The case of Bennett's frame came up: the list had let go of it and the card carried it, as "steered".
+        assertWithMessage("the card never carried the steered message on its own word").that(
+            sinceSteer.any { f -> f.controls.queue.none { it.id == followupId } && f.controls.placed(f.state.queuePlacement).queue.any { it.id == followupId && it.steer == SteerPhase.STEERED } },
+        ).isTrue()
+        // A steer, not a send: never a pending bubble, nothing started or cancelled, one promote.
+        assertThat(frames.none { f -> f.state.items.any { it is UserMessage && it.text == MESSAGE && it.isPending } }).isTrue()
+        assertThat(server.requests(Route.CreateRun)).isEmpty()
+        assertThat(server.requests(Route.CancelRun)).isEmpty()
+        assertThat(server.requests(Route.Steer)).hasSize(1)
+        val s = state
+        assertThat(s.items.count { it is UserMessage && it.text == MESSAGE }).isEqualTo(1)
+        val at = s.items.indexOfFirst { it is UserMessage && it.text == MESSAGE }
+        assertWithMessage("among the running turn's rows").that(s.items.take(at).any { it.id.startsWith("activity-${live.runId}-") }).isTrue()
+        assertThat(s.activeRunId).isEqualTo(live.runId)
+    }
+
+    /** A steer the account refuses leaves the row waiting in its place, saying so under it; the promote is a failure, never taken for a steer. */
+    @Test
+    fun `a steer the account refuses leaves the row waiting where it was, saying so`() = runBlocking<Unit> {
+        server.queueLagMs = 0L
+        server.steerOutcome = "OUTCOME_REJECTED"
+        val rig = rig(pollMs = 1_500L)
+        rig.open()
+        val followupId = rig.queueOnAccount(MESSAGE)
+        rig.awaitUntilOr(20_000, "the list to name it") { rig.steering.state(agentId).value.queue.any { it.id == followupId } }
+        val refused = rig.steering.promotePending(agentId, followupId)
+        assertThat(refused.exceptionOrNull()).isInstanceOf(SteerRefusedException::class.java)
+        rig.watch(2_000) {
+            val s = state
+            val row = rig.steering.state(agentId).value.placed(s.queuePlacement).queue.single { it.id == followupId }
+            assertThat(row.steer).isNull()
+            assertThat(row.note).isEqualTo(SteeringRepository.STEER_REFUSED_NOTE)
+            assertThat(s.items.none { it is UserMessage && it.text == MESSAGE }).isTrue()
+        }
+        assertThat(server.pending.getValue(agentId).single { it.followupId == followupId }.consumedAtMs).isNull()
     }
 
     @Test

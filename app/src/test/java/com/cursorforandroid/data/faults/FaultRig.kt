@@ -266,6 +266,7 @@ class FaultRig(
         onQueueRead = { agentId, pending, readAt -> conversations.noteAccountQueue(agentId, pending, readAt) },
         onQueuedDeleted = { agentId, followupId -> conversations.queuedDeleted(agentId, followupId) },
         onQueuedEdited = { agentId, followupId, text -> conversations.queuedEdited(agentId, followupId, text) },
+        onQueuedNote = { agentId, followupId, note -> conversations.noteQueuedNote(agentId, followupId, note) },
         placement = { agentId -> conversations.queuePlacement(agentId) },
         scope = scope,
         pollIntervalMs = queuePollMs,
