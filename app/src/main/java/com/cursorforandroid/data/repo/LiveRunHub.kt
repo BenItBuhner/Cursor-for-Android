@@ -96,6 +96,17 @@ class LiveRunHub(
      * only — before the pass is let go and the run finished on the stream's word (see [finishOnStreamWord]).
      */
     private val terminalGraceMs: Long = TERMINAL_GRACE_MS,
+    /**
+     * How long a watched live pass may go without an event — keep-alives are not events — before its connection is
+     * taken to have stalled: let go, the record asked whether the run is still under way, and the stream taken up again
+     * from the last event applied, with no "reconnecting" said. A held connection's keep-alives say nothing about
+     * whether the run's events still reach it, and one the server's side had let go of (a message steered into the
+     * turn, a queued one taken) kept an open chat on the turn's last word while the agent ran on. Doubles per
+     * consecutive pass that heard nothing, up to [stallMaxMs], so a long tool call costs a resume now and then. Zero
+     * or less turns the watch off (a test on a virtual clock that runs it until idle).
+     */
+    private val stallTimeoutMs: Long = STALL_TIMEOUT_MS,
+    private val stallMaxMs: Long = STALL_MAX_MS,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     /** Everything known about a run right now. Items are the same timeline entries the conversation renders. */
@@ -239,6 +250,8 @@ class LiveRunHub(
         var error: RunStreamEvent.Error? = null
         /** Let go on purpose: nobody watches the run and the connection had said what there was (see [lookBaseMs]). */
         var rested = false
+        /** Let go because nothing came on it for the pass's stall window while the run was under way (see [stallTimeoutMs]). */
+        var stalled = false
     }
 
     private val entries = LinkedHashMap<String, Entry>()
@@ -491,10 +504,24 @@ class LiveRunHub(
                 }
             }
             var looks = 0
+            var stalls = 0
             while (currentCoroutineContext().isActive && owns(entry, self) && !entry.live.finished) {
-                val pass = follow(entry, self, backend, resumeFrom, historical)
+                // How far the story had got: a pass that replays the run from its first event re-hears this much.
+                val reached = maxOf(entry.live.applied, entry.catchUp, entry.fallback?.applied ?: 0)
+                val pass = follow(entry, self, backend, resumeFrom, historical, stallDelay(stalls))
                 if (!owns(entry, self)) break
                 if (entry.live.finished || historical) break
+                stalls = if (pass.stalled && entry.live.applied <= reached) stalls + 1 else 0
+                if (pass.stalled) {
+                    // Nothing came for a while on a connection still open. The record says whether the run is over;
+                    // if not, the stream is taken up again at once from the last event applied — the reader sees no
+                    // "reconnecting", only the turn going on.
+                    if (settleFromRecord(entry, self, backend) == Record.Over) break
+                    if (finishOnStreamWord(entry, self)) break
+                    resumeFrom = entry.position
+                    if (resumeFrom == null) restartAccumulator(entry, timed = true)
+                    continue
+                }
                 if (pass.rested) {
                     // Said over a grace ago and resting on it: the record, or else the stream's word, ends it now
                     // rather than at a look that may be minutes off.
@@ -548,7 +575,7 @@ class LiveRunHub(
      * abandoned connection into the accumulator that replaced its own. [owns] keeps it out of the entry as well.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    private suspend fun follow(entry: Entry, self: Job?, backend: CursorBackend, resumeFrom: String?, historical: Boolean): Pass {
+    private suspend fun follow(entry: Entry, self: Job?, backend: CursorBackend, resumeFrom: String?, historical: Boolean, stallMs: Long = stallTimeoutMs): Pass {
         val pass = Pass()
         val live = entry.live
         val wire = agents.documentedRunId(entry.agentId, entry.runId)
@@ -557,6 +584,7 @@ class LiveRunHub(
             return pass
         }
         val events = backend.streamer.stream(entry.agentId, wire, resumeFrom)
+        val heardAt = AtomicLong(System.nanoTime())
         // A live pass also hears whether anyone watches the run, and — while nobody does — a tick to decide on, in the
         // same collector as the events: the connection is let go only between an event and the next, at a position
         // the accumulator has applied everything up to, so the next look neither skips nor repeats an event.
@@ -587,6 +615,19 @@ class LiveRunHub(
                     emit(Flush)
                 }
             },
+            // The stall window runs on the clock too: a connection the run's events no longer reach goes on sending its
+            // keep-alives, and those say nothing about the run (see [stallTimeoutMs]).
+            if (stallMs <= 0) emptyFlow() else flow<Any> {
+                while (true) {
+                    val left = stallMs - (System.nanoTime() - heardAt.get()) / NANOS_PER_MS
+                    if (left > 0) {
+                        delay(left)
+                    } else {
+                        emit(StallTick)
+                        delay(stallMs)
+                    }
+                }
+            },
         )
         var unwatched = false
         var windowStartedAt = System.nanoTime()
@@ -602,7 +643,13 @@ class LiveRunHub(
                     Watched -> {
                         // Publishing is owed only to a pass that was holding back; a pass starting out watched has
                         // nothing new yet, and must not clear what the loop said about the connection.
-                        if (unwatched) { unwatched = false; restOwed = false; publish(entry) }
+                        if (unwatched) { unwatched = false; restOwed = false; heardAt.set(System.nanoTime()); publish(entry) }
+                        return@collect
+                    }
+                    StallTick -> {
+                        // Between looks an unwatched pass rests anyway, and a run said over has its own grace.
+                        val quiet = System.nanoTime() - heardAt.get() >= stallMs * NANOS_PER_MS
+                        if (quiet && !unwatched && live === entry.live && !live.finished && entry.endSaidAt.value == 0L) throw StallNow
                         return@collect
                     }
                     Unwatched -> { unwatched = true; windowStartedAt = System.nanoTime(); return@collect }
@@ -628,6 +675,7 @@ class LiveRunHub(
                 }
                 if (event !is RunStreamEvent.Heartbeat && event !is RunStreamEvent.Position) {
                     lastEventAt = System.nanoTime()
+                    heardAt.set(lastEventAt)
                     atPosition = false
                 }
                 if (event is RunStreamEvent.Status && !historical && live === entry.live) {
@@ -668,6 +716,7 @@ class LiveRunHub(
             }
         } catch (end: PassEnd) {
             pass.rested = end.rested
+            pass.stalled = end.stalled
         } catch (t: CancellationException) {
             throw t
         } catch (t: Throwable) {
@@ -804,6 +853,9 @@ class LiveRunHub(
 
     private fun lookDelay(looks: Int): Long = (lookBaseMs shl looks.coerceIn(0, 10)).coerceAtMost(lookMaxMs)
 
+    private fun stallDelay(stalls: Int): Long =
+        if (stallTimeoutMs <= 0) 0L else (stallTimeoutMs shl stalls.coerceIn(0, 10)).coerceAtMost(maxOf(stallTimeoutMs, stallMaxMs))
+
     /**
      * Ends the pause of every run of [agentId] followed between looks, so each looks in now rather than after up to
      * [lookMaxMs]: the agent list's word that the agent stopped running reaches a chat nobody watches at once, where
@@ -928,10 +980,11 @@ class LiveRunHub(
         }
     }
 
-    /** How a pass ends on purpose (see [follow]): let go between looks, or its stream ended. */
-    private class PassEnd(val rested: Boolean) : Throwable(null, null, false, false)
+    /** How a pass ends on purpose (see [follow]): let go between looks, its stream ended, or its connection stalled. */
+    private class PassEnd(val rested: Boolean, val stalled: Boolean = false) : Throwable(null, null, false, false)
     private val RestNow = PassEnd(rested = true)
     private val EndOfPass = PassEnd(rested = false)
+    private val StallNow = PassEnd(rested = false, stalled = true)
     /** What a live pass hears besides its events (see [follow]). */
     private object StreamEnded
     private object Watched
@@ -939,6 +992,7 @@ class LiveRunHub(
     private object LookTick
     private object GraceUp
     private object Flush
+    private object StallTick
 
     /** A turn under way, parked off the table (see [park]). */
     @Serializable
@@ -949,6 +1003,9 @@ class LiveRunHub(
         const val NANOS_PER_MS = 1_000_000L
         /** See [terminalGraceMs]: a `result` follows its terminal `status` within a moment on a healthy stream. */
         const val TERMINAL_GRACE_MS = 15_000L
+        /** See [stallTimeoutMs]: a turn under way says something within this on a stream that still carries it, but for a long tool call. */
+        const val STALL_TIMEOUT_MS = 30_000L
+        const val STALL_MAX_MS = 120_000L
         const val PARKED_VERSION = 1
         /** Parked turns kept on disk, the last parked first; past these a reopen replays, as it did before there was parking. */
         const val MAX_PARKED = 64

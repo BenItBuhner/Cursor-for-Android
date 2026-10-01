@@ -382,7 +382,18 @@ class FakeRunStreamer(private val replay: Int = 256) : RunStreamer {
         channels.remove(runId)
     }
 
+    private val strandings = ConcurrentHashMap<String, Int>()
+
+    /**
+     * The connections to [runId] open now stay open and say nothing more: what is emitted afterwards reaches only
+     * connections opened later, the way a held stream the server's side has let go of goes on with keep-alives alone.
+     */
+    fun strand(runId: String) {
+        strandings.merge(runId, 1, Int::plus)
+    }
+
     override fun stream(agentId: String, runId: String, lastEventId: String?): Flow<RunStreamEvent> = flow {
+        val strandedAt = strandings[runId] ?: 0
         connections += runId
         resumes += lastEventId
         // As the API answers any id it did not mint.
@@ -403,6 +414,7 @@ class FakeRunStreamer(private val replay: Int = 256) : RunStreamer {
             .transformWhile { event ->
                 position++
                 if (position <= skip) return@transformWhile true
+                if ((strandings[runId] ?: 0) > strandedAt) return@transformWhile true
                 emit(event)
                 delivered++
                 if (drop != null && delivered >= drop.afterEvents) {
