@@ -5,7 +5,7 @@ import { AndroidCard, CLOSE, OPEN } from "./components/AndroidCard";
 import { EndCard } from "./components/EndCard";
 import { Hero, HeroHeadlines } from "./components/Hero";
 import { Lineup } from "./components/Lineup";
-import { Stage, wipeAt } from "./components/Stage";
+import { Stage, Wiped, wipeAt } from "./components/Stage";
 import { TitleCard } from "./components/TitleCard";
 import { AT } from "./edit";
 import type { Theme } from "./takes";
@@ -21,7 +21,7 @@ export type LaunchProps = {
 /**
  * The cut, part by part on the beat sheet in edit.ts, over the stage and under the score, the app in [theme]: the
  * title card, which the green card opens out of; the green card, which closes into the hero's phone; the hero, which
- * the lineup comes up over behind a sweep of light; and the end card, which the lineup dips to the stage into.
+ * a light crossing the stage carries into the lineup; and the end card, which the lineup dips to the stage into.
  */
 export const Launch: React.FC<LaunchProps> = ({ framing, music, theme, probe = false }) => {
   const f = useCurrentFrame();
@@ -34,24 +34,22 @@ export const Launch: React.FC<LaunchProps> = ({ framing, music, theme, probe = f
       </AbsoluteFill>
     );
   }
-  // The beam of the sweep on the lineup's first frame carries the hero's last frame, held, down into the stage and the
-  // lineup up out of it behind it.
-  const wipe = f >= AT.lineup ? wipeAt(f, width) : null;
-  const masked = (mask: string | undefined) => ({ position: "absolute" as const, inset: 0, WebkitMaskImage: mask, maskImage: mask });
+  // A light crossing the stage carries the hero, its last frame held, out under its beam, and the lineup up in its wake.
+  const wipe = wipeAt(f, width);
   return (
     <AbsoluteFill style={{ overflow: "hidden" }}>
       <Stage {...scene} />
       {f < AT.android + OPEN ? <TitleCard {...scene} /> : null}
       {f >= CLOSE.from && (f < AT.lineup || wipe !== null) ? (
-        <div style={masked(wipe?.out)}>
+        <Wiped mask={wipe?.out}>
           <Hero {...scene} theme={theme} />
-        </div>
+        </Wiped>
       ) : null}
       {f >= AT.android && f < CLOSE.until ? <AndroidCard {...scene} theme={theme} /> : null}
-      {f >= AT.lineup && f < AT.end ? (
-        <div style={masked(wipe?.in)}>
+      {(f >= AT.lineup || wipe !== null) && f < AT.end ? (
+        <Wiped mask={wipe?.in}>
           <Lineup {...scene} theme={theme} />
-        </div>
+        </Wiped>
       ) : null}
       {f >= AT.end ? <EndCard {...scene} /> : null}
       {music ? <Audio src={staticFile("audio/score.wav")} /> : null}

@@ -224,10 +224,11 @@ export const HEROES: Record<Theme, Reel> = { dark: hero(heroTake("dark")), light
 export const LINEUP_DIFF = 83;
 
 /**
- * The frames a light sweeps across the stage on, left to right behind whatever stands on it: each act's first frame,
- * and the frame the lineup's diff lands on all three devices.
+ * The frames a light sweeps across the stage on, left to right behind whatever stands on it: each act's first frame
+ * but the lineup's, whose light is the slower one that carries the hero into it (see [WIPE]), and the frame the
+ * lineup's diff lands on all three devices.
  */
-export const SWEEPS = [AT.organize, AT.dictate, AT.code, AT.steer, AT.live, AT.ship, AT.lineup, AT.lineup + LINEUP_DIFF] as const;
+export const SWEEPS = [AT.organize, AT.dictate, AT.code, AT.steer, AT.live, AT.ship, AT.lineup + LINEUP_DIFF] as const;
 
 /**
  * Each device's take in the lineup: the same stretch, the first edit open as it is written and its diff landing at

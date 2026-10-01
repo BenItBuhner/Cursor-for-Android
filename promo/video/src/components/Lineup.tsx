@@ -183,7 +183,7 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
                   }}
                 >
                   <Device take={slot.take} x={x} y={y} width={w} sheen={sheen}>
-                    <Screen take={slot.take} frame={takeFrame(lineupReel(slot.take), f)} width={w} />
+                    <Screen take={slot.take} frame={takeFrame(lineupReel(slot.take), Math.max(f, AT.lineup))} width={w} />
                   </Device>
                 </div>
               );
