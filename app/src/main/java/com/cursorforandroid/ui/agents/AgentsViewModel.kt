@@ -22,6 +22,7 @@ import com.cursorforandroid.domain.ListPreferences
 import com.cursorforandroid.domain.PendingWork
 import com.cursorforandroid.domain.KnownRoot
 import com.cursorforandroid.domain.LocalAgentState
+import com.cursorforandroid.domain.ProjectArrangement
 import com.cursorforandroid.domain.SortOrder
 import com.cursorforandroid.domain.SourceFilter
 import com.cursorforandroid.domain.StatusFilter
@@ -335,7 +336,8 @@ class AgentsViewModel(
      * they are never shown again.
      */
     private val seedAccount: String? = signedInAccount()
-    private val seedRows = AtomicReference(graph.caches.newChatPage.seed(signedInUser())?.projectRows().orEmpty())
+    private val seed = graph.caches.newChatPage.seed(signedInUser())
+    private val seedRows = AtomicReference(seed?.projectRows().orEmpty())
 
     private fun signedInUser() = (graph.session.state.value as? SessionState.SignedIn)?.user
 
@@ -386,7 +388,12 @@ class AgentsViewModel(
         // Grouping, filtering and sorting a few hundred rows is cheap, but not free on every keystroke of the search
         // field or every streamed patch; it runs off the main thread and only the result reaches the UI.
         .flowOn(graph.agentListDispatcher)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentListUiState(projectRows = seedRows.get()))
+        // Until the settings are read, the snapshot's hidden set is the one the page leaves its seeded Projects off by.
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            AgentListUiState(projectRows = seedRows.get(), local = LocalAgentState(hiddenProjectIds = seed?.hiddenProjectIds.orEmpty())),
+        )
 
     init {
         // A Project the list names but lacks is fetched by id so its workers can sit under it rather than under a
@@ -547,6 +554,9 @@ class AgentsViewModel(
 
     /** The Projects arranged on the New Chat page, first to last; the sidebar's Projects group follows (see [LocalAgentState.projectOrder]). */
     fun setProjectOrder(ids: List<String>) = viewModelScope.launch { graph.prefs.setProjectOrder(ids) }
+
+    /** The Projects as left on the New Chat page: their order, and the ones hidden there (see [LocalAgentState.hiddenProjectIds]). */
+    fun arrangeProjects(arrangement: ProjectArrangement) = viewModelScope.launch { graph.prefs.setProjectArrangement(arrangement) }
 
     /** Marks every loaded conversation read at its current `updatedAt`, the same stamp opening a chat would write. */
     fun markAllRead() = viewModelScope.launch {

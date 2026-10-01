@@ -14,8 +14,11 @@ import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.domain.AgentIndicator
 import com.cursorforandroid.domain.AgentRow
 import com.cursorforandroid.domain.CursorUser
+import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.domain.NewChatHomeChoice
+import com.cursorforandroid.ui.home.HomeBlock
 import com.cursorforandroid.ui.home.NewChatHomeFixtures
+import com.cursorforandroid.ui.home.homeBlocks
 import com.cursorforandroid.util.MainDispatcherRule
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
@@ -105,15 +108,16 @@ class AgentsViewModelPageSeedTest {
     }
 
     @Test
-    fun `a Project hidden from the page is not among the seeded rows`() = runBlocking<Unit> {
+    fun `a Project hidden from the page is seeded with the page's hidden set, which leaves it off`() = runBlocking<Unit> {
         val graph = graph()
         val rows = NewChatHomeFixtures.list().projectRows
-        graph.caches.newChatPage.save(
-            NewChatPageSnapshot.of(graph.user, NewChatHomeChoice(null), extendedMode = false, projects = rows, hidden = setOf(rows.first().agent.id)),
-        )
+        val hidden = setOf(rows.first().agent.id)
+        graph.caches.newChatPage.save(NewChatPageSnapshot.of(graph.user, NewChatHomeChoice(null), extendedMode = false, projects = rows, hidden = hidden))
 
-        val vm = AgentsViewModel(graph)
-        assertThat(vm.uiState.value.projectRows.map { it.agent.id }).isEqualTo(rows.drop(1).map { it.agent.id })
+        val seeded = AgentsViewModel(graph).uiState.value
+        assertThat(seeded.projectRows.map { it.agent.id }).isEqualTo(rows.map { it.agent.id })
+        assertThat(seeded.local.hiddenProjectIds).isEqualTo(hidden)
+        assertThat(homeBlocks(NewChatHome.PROJECTS, seeded, projectsAvailable = true)).containsExactly(HomeBlock.Projects(seeded.projectRows, hidden))
         listGate.complete(Unit)
     }
 

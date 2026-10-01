@@ -25,6 +25,7 @@ import com.cursorforandroid.data.local.NewChatPageSnapshot
 import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.NewChatHomeChoice
+import com.cursorforandroid.domain.ProjectArrangement
 import com.cursorforandroid.ui.home.NewChatHomeFixtures
 import com.cursorforandroid.ui.home.NewChatHomeTags
 import com.cursorforandroid.ui.theme.CursorTheme
@@ -164,10 +165,42 @@ class NewChatPageFirstFrameTest {
         next.graph.caches.newChatPage.warm()
         swapTo(next)
 
-        fun drawn(name: String) = compose.onAllNodes(hasTestTag(NewChatHomeTags.PROJECT_SHORTCUT) and hasText(name, substring = true)).fetchSemanticsNodes().isNotEmpty()
         assertThat(tiles()).hasSize(rows.size - hidden.size)
         rows.forEach { row -> assertWithMessage(row.agent.name).that(drawn(row.agent.name)).isEqualTo(row.agent.id !in hidden) }
     }
+
+    /** The demo's one Project hidden in the settings: the page writes it down hidden, and the next process opens on the page's "hidden" row and never draws it. */
+    @Test
+    fun `a Project hidden in the settings is written down hidden, and the next process never draws it`() {
+        val first = demoLaunch()
+        firstLaunch(first)
+        val project = first.graph.agents.state.value.agents.single { it.isProject }
+        runBlocking { first.graph.prefs.setProjectArrangement(ProjectArrangement(order = listOf(project.id), hidden = setOf(project.id))) }
+        val written = Regex("\"hiddenProjectIds\":\\[[^\\]]*\"${Regex.escape(project.id)}\"")
+        compose.waitUntil(30_000) { tiles().isEmpty() && allHidden() }
+        compose.waitUntil(30_000) { written.containsMatchIn(pageFile.readText()) }
+
+        val next = demoLaunch()
+        next.graph.caches.newChatPage.warm()
+        swapTo(next)
+        val composer = composerTop()
+        repeat(60) {
+            assertWithMessage("${project.name}, frame ${it + 1}").that(drawn(project.name)).isFalse()
+            assertWithMessage("the hidden row, frame ${it + 1}").that(allHidden()).isTrue()
+            assertWithMessage("the composer, frame ${it + 1}").that(composerTop()).isWithin(1f).of(composer)
+            compose.mainClock.advanceTimeBy(FRAME_MILLIS)
+            compose.waitForIdle()
+        }
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        assertThat(drawn(project.name)).isFalse()
+        assertThat(allHidden()).isTrue()
+        assertThat(composerTop()).isWithin(1f).of(composer)
+    }
+
+    private fun allHidden() = compose.onAllNodes(hasTestTag(NewChatHomeTags.ALL_HIDDEN)).fetchSemanticsNodes().isNotEmpty()
+
+    private fun drawn(name: String) = compose.onAllNodes(hasTestTag(NewChatHomeTags.PROJECT_SHORTCUT) and hasText(name, substring = true)).fetchSemanticsNodes().isNotEmpty()
 
     private companion object {
         const val FRAME_MILLIS = 16L

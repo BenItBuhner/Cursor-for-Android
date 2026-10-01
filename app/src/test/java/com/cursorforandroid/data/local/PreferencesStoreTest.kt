@@ -16,6 +16,7 @@ import com.cursorforandroid.domain.CredentialInfo
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.domain.NewChatHomeChoice
+import com.cursorforandroid.domain.ProjectArrangement
 import com.cursorforandroid.domain.SignInMethod
 import com.cursorforandroid.ui.panel.PaneWidthClass
 import com.cursorforandroid.ui.theme.ThemeMode
@@ -146,6 +147,32 @@ class PreferencesStoreTest {
 
         prefs.clearSession()
         assertThat(prefs.localAgentState.first().projectOrder).isEmpty()
+    }
+
+    @Test
+    fun `Projects hidden from the New Chat page stay hidden across a restart, keep the order, and go at sign-out`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = PreferencesStore(context)
+        assertThat(prefs.localAgentState.first().hiddenProjectIds).isEmpty()
+
+        prefs.setProjectArrangement(ProjectArrangement(listOf("bc-a", "bc-b", "bc-c", "bc-d"), hidden = setOf("bc-b", "bc-d")))
+        // A store opened afresh, as the next start of the app opens it.
+        val restarted = PreferencesStore(context).localAgentState.first()
+        assertThat(restarted.hiddenProjectIds).containsExactly("bc-b", "bc-d")
+        assertThat(restarted.projectOrder).containsExactly("bc-a", "bc-b", "bc-c", "bc-d").inOrder()
+
+        // Shown again while one hidden Project was not on the page (archived, filtered out): it stays hidden.
+        prefs.setProjectArrangement(ProjectArrangement(listOf("bc-b", "bc-a", "bc-c"), hidden = emptySet()))
+        val after = prefs.localAgentState.first()
+        assertThat(after.hiddenProjectIds).containsExactly("bc-d")
+        assertThat(after.projectOrder).containsExactly("bc-b", "bc-a", "bc-c", "bc-d").inOrder()
+
+        // Ordering alone leaves what is hidden as it is.
+        prefs.setProjectOrder(listOf("bc-c", "bc-b"))
+        assertThat(prefs.localAgentState.first().hiddenProjectIds).containsExactly("bc-d")
+
+        prefs.clearSession()
+        assertThat(PreferencesStore(context).localAgentState.first().hiddenProjectIds).isEmpty()
     }
 
     @Test
