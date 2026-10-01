@@ -732,7 +732,12 @@ fun ConversationScreen(
                         before.forEach(::edge)
                         // Without a content type the lazy layout offers a scrolled-off user bubble's slot to an activity
                         // group, whose subtree shares nothing with it: the reuse always fails and costs more than it saves.
-                        items(if (following) listedRows.asReversed() else listedRows, key = { it.key }, contentType = ::transcriptContentType) { row -> TranscriptRowView(row, paneWidth.then(rowMotion(row, openStretches)).then(captionHandoff.hold(row.key))) }
+                        // Each row absorbs a change of its own height while it crosses the top edge — a figure in it
+                        // decoding to its size — so the rows below it never move (see TranscriptScroll.absorbingHeight).
+                        items(if (following) listedRows.asReversed() else listedRows, key = { it.key }, contentType = ::transcriptContentType) { row ->
+                            val growth = remember { RowGrowth() }
+                            TranscriptRowView(row, paneWidth.then(rowMotion(row, openStretches)).then(captionHandoff.hold(row.key)).absorbingGrowth(transcriptScroll, row.key, growth))
+                        }
                         after.forEach(::edge)
                     }
                     SideEffect { transcriptScroll.orient(following, order) }

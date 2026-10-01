@@ -31,6 +31,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.ScrollAxisRange
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -246,6 +247,59 @@ internal class TranscriptScroll(val list: LazyListState, private val followingSt
         list.requestScrollToItem(index, topPadding(info) - top(held, info))
     }
 
+    /**
+     * Pinned, the list keeps the top of its first visible row where it is — the right anchor for everything but a
+     * change inside that row itself. A row crossing the top edge that changes height, as a figure in it decodes from
+     * its placeholder to its own size while the row comes down into view, would push every row below it by the
+     * difference: a fling up through a chat of screenshots leapt by whole figures (Bennett's recording, 2026-10-01).
+     * Each row absorbs its own change instead (see [absorbingGrowth]). Called as the row is measured with [height],
+     * against [held], its heights as the list last had them; answers the height the row is laid out at this frame.
+     *
+     * A row that is that first row by the list's last layout, and is some other height than the list has for it,
+     * keeps the height the list has for this one frame and notes the difference ([RowGrowth.shift]); its content is
+     * placed that much higher, so its lower edge — the part on screen — stays where it was, and the list is asked
+     * to anchor it that much higher as it is placed ([anchorHigher]). From the next measure the row is its real
+     * height and the anchor matches: nothing the reader is looking at moves, by a pixel, and the change happens
+     * above the edge where nothing is seen. Following, the list is bottom-anchored and a change above the viewport
+     * moves nothing, so a row is always its own height.
+     */
+    fun absorbingHeight(key: Any, held: RowGrowth, height: Int): Int {
+        if (held.height < 0 || held.anchored) {
+            // First measure, or the list has been told: from here the row is what it is.
+            held.height = height
+            held.shift = 0
+            held.anchored = false
+            return height
+        }
+        if (height == held.height) {
+            held.shift = 0
+            return height
+        }
+        if (!isFirstAcrossTop(key)) {
+            held.height = height
+            held.shift = 0
+            return height
+        }
+        held.shift = height - held.height
+        return held.height
+    }
+
+    /** As the row with [held] is placed: the anchor moved up by its noted shift, once per shift. */
+    fun anchorHigher(held: RowGrowth) {
+        if (held.shift == 0 || held.anchored) return
+        held.anchored = true
+        // A shrink past the row's hidden part asks for a negative offset, which the list fills from the rows above.
+        list.requestScrollToItem(list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset + held.shift)
+    }
+
+    /** Pinned, whether [key]'s row is the first on screen and crosses the top edge, by the list's last layout. */
+    private fun isFirstAcrossTop(key: Any): Boolean {
+        val info = list.layoutInfo
+        if (info.reverseLayout) return false
+        val first = info.visibleItemsInfo.firstOrNull() ?: return false
+        return first.key == key && first.offset < 0
+    }
+
     /** The item's index counted from the top, whichever order the list is in: what accessibility services are given. */
     fun topDownIndex(key: Any): Int = composedOrder?.index(key, following = false) ?: -1
 
@@ -390,6 +444,36 @@ internal class TranscriptOrder(val above: List<String>, val rows: List<Transcrip
             topDown < above.size + rows.size -> rows[topDown - above.size].key
             else -> below[topDown - above.size - rows.size]
         }
+    }
+}
+
+/**
+ * One row's height as the transcript's list last had it, and the change it is absorbing (see
+ * [TranscriptScroll.absorbingHeight]). Remembered with the row's composition: a row the list builds anew starts with
+ * no height and absorbs nothing on its first measure.
+ */
+internal class RowGrowth {
+    /** The height the list has for the row; negative before its first measure. */
+    var height = -1
+
+    /** How much taller (negative: shorter) the row is than [height], for the frame it is laid out at [height]. */
+    var shift = 0
+
+    /** The list has been asked to anchor the row [shift] higher; the next measure is at its real height. */
+    var anchored = false
+}
+
+/**
+ * A row of [scroll]'s list that absorbs its own change of height while it crosses the top edge (see
+ * [TranscriptScroll.absorbingHeight]): laid out at the height the list last had for it on the frame it changes, its
+ * content placed so that its lower edge stays, the list re-anchored as it is placed.
+ */
+internal fun Modifier.absorbingGrowth(scroll: TranscriptScroll, key: Any, held: RowGrowth): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    val height = scroll.absorbingHeight(key, held, placeable.height)
+    layout(placeable.width, height) {
+        placeable.place(0, -held.shift)
+        scroll.anchorHigher(held)
     }
 }
 
