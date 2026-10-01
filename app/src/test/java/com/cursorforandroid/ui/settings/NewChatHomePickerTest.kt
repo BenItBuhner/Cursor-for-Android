@@ -24,7 +24,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
@@ -47,10 +46,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Settings › New chat page: the four layouts as radio buttons, two over two on a phone and in one row on a tablet;
- * until one is tapped the one ringed is the page's own pick — Projects for an account with any, else Recent agents —
- * the tap written at once; the miniatures say nothing of their own; and, with no Projects to pin, the note of what the
- * Projects layout shows meanwhile.
+ * Settings › New chat page: the four layouts as radio buttons in one row on a phone and a tablet alike, each named in
+ * full; until one is tapped the one ringed is the page's own pick — Projects for an account with any, else Recent
+ * agents — the tap written at once; the miniatures say nothing of their own; and, with no Projects to pin, the note
+ * of what the Projects layout shows meanwhile.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -81,50 +80,45 @@ class NewChatHomePickerTest {
     private fun saved(): NewChatHome = runBlocking { graph.prefs.newChatHome.first() }
 
     @Test
-    fun `on a phone the four layouts sit two over two as radio buttons, each read as its name in full`() {
+    fun `on a phone the four layouts stand abreast as radio buttons, each read as its name in full`() {
         composeSettings(isDemo = true, list = NewChatHomeFixtures.list())
-        laidOut(perRow = 2)
+        laidOut()
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w360dp-h780dp-night-420dpi")
+    fun `on a narrow phone the four still stand abreast, their names whole`() {
+        composeSettings(isDemo = true, list = NewChatHomeFixtures.list())
+        laidOut()
     }
 
     @Test
     @Config(sdk = [35], qualifiers = "w1000dp-h720dp-night-320dpi")
-    fun `on a tablet the four share one row`() {
+    fun `on a tablet the four share one row, each name on one line`() {
         composeSettings(isDemo = true, list = NewChatHomeFixtures.list())
-        laidOut(perRow = 4)
+        laidOut(linesAtMost = 1)
     }
 
     @Test
     @Config(sdk = [35], qualifiers = "w840dp-h900dp-night-420dpi")
     fun `on a foldable's inner screen the four share one row`() {
         composeSettings(isDemo = true, list = NewChatHomeFixtures.list())
-        laidOut(perRow = 4)
-    }
-
-    @Test
-    fun `the four go four abreast only where each has room for its name`() {
-        assertThat(optionsPerRow(OptionMinWidth * 4 + 12.dp * 3)).isEqualTo(4)
-        assertThat(optionsPerRow(OptionMinWidth * 4 + 12.dp * 3 - 1.dp)).isEqualTo(2)
-        assertThat(optionsPerRow(351.dp)).isEqualTo(2)
+        laidOut()
     }
 
     /**
-     * [perRow] to a row, in the order they are offered, the rows under one another and flush at the start, none cut
-     * short: each option's name fits its share of the row.
+     * The four in one row, in the order they are offered, as wide and as tall as one another and their checks in a
+     * line at the foot; every name laid out whole on [linesAtMost] lines at most, none cut short or run over.
      */
-    private fun laidOut(perRow: Int) {
+    private fun laidOut(linesAtMost: Int = 2) {
         option(NewChatHome.entries.first()).performScrollTo()
-        option(NewChatHome.entries.last()).performScrollTo()
-        val rows = NewChatHome.entries.map { option(it).fetchSemanticsNode() }.chunked(perRow)
-        assertThat(rows).hasSize((NewChatHome.entries.size + perRow - 1) / perRow)
-        rows.forEach { row ->
-            row.zipWithNext { left, right ->
-                assertThat(right.positionInRoot.y).isEqualTo(left.positionInRoot.y)
-                assertThat(right.positionInRoot.x).isGreaterThan(left.positionInRoot.x + left.size.width - 1)
-            }
-        }
-        rows.zipWithNext { above, below ->
-            assertThat(below.first().positionInRoot.x).isEqualTo(above.first().positionInRoot.x)
-            assertThat(below.first().positionInRoot.y).isGreaterThan(above.first().positionInRoot.y + above.first().size.height - 1)
+        val row = NewChatHome.entries.map { option(it).fetchSemanticsNode() }
+        row.zipWithNext { left, right ->
+            assertThat(right.positionInRoot.y).isEqualTo(left.positionInRoot.y)
+            assertThat(right.size.height).isEqualTo(left.size.height)
+            // Equal shares of the row, to the pixel the row has to split.
+            assertThat(right.size.width).isWithin(1).of(left.size.width)
+            assertThat(right.positionInRoot.x).isGreaterThan(left.positionInRoot.x + left.size.width - 1)
         }
         for (home in NewChatHome.entries) {
             val label = NewChatHomePickerCopy.label(home)
@@ -133,8 +127,12 @@ class NewChatHomePickerTest {
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.Text, listOf(AnnotatedString(label))))
             val text = compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag(NewChatHomePickerTags.of(home))), useUnmergedTree = true).fetchSemanticsNode()
             val layout = mutableListOf<TextLayoutResult>().also { text.config[SemanticsActions.GetTextLayoutResult].action?.invoke(it) }.single()
-            assertWithMessage(label).that(layout.getLineEnd(0)).isEqualTo(label.length)
-            assertWithMessage(label).that(layout.isLineEllipsized(0)).isFalse()
+            assertWithMessage(label).that(layout.lineCount).isAtMost(linesAtMost)
+            assertWithMessage(label).that(layout.getLineEnd(layout.lineCount - 1)).isEqualTo(label.length)
+            assertWithMessage(label).that(layout.didOverflowHeight).isFalse()
+            for (line in 0 until layout.lineCount) assertWithMessage(label).that(layout.isLineEllipsized(line)).isFalse()
+            // A name broken over two lines breaks at its space, never inside a word.
+            if (layout.lineCount == 2) assertWithMessage(label).that(label[layout.getLineEnd(0, visibleEnd = true)]).isEqualTo(' ')
         }
     }
 

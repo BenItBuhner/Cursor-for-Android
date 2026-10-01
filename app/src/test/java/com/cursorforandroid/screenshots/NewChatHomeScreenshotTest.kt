@@ -371,19 +371,19 @@ class NewChatHomeScreenshotTest {
     fun composerTabletLight() = composerPage(ThemeMode.Light, tablet = true, "453_new_chat_composer_tablet_light")
 
     @Test
-    fun projectsRecentPhoneDark() = projectsRecentPage(ThemeMode.Dark, tablet = false, "940_new_chat_projects_recent_phone_dark")
+    fun projectsRecentPhoneDark() = projectsRecentPage(ThemeMode.Dark, tablet = false, "960_new_chat_projects_recent_phone_dark")
 
     @Test
     @Config(sdk = [35], qualifiers = PHONE_LIGHT)
-    fun projectsRecentPhoneLight() = projectsRecentPage(ThemeMode.Light, tablet = false, "941_new_chat_projects_recent_phone_light")
+    fun projectsRecentPhoneLight() = projectsRecentPage(ThemeMode.Light, tablet = false, "961_new_chat_projects_recent_phone_light")
 
     @Test
     @Config(sdk = [35], qualifiers = TABLET_DARK)
-    fun projectsRecentTabletDark() = projectsRecentPage(ThemeMode.Dark, tablet = true, "942_new_chat_projects_recent_tablet_dark")
+    fun projectsRecentTabletDark() = projectsRecentPage(ThemeMode.Dark, tablet = true, "962_new_chat_projects_recent_tablet_dark")
 
     @Test
     @Config(sdk = [35], qualifiers = TABLET_LIGHT)
-    fun projectsRecentTabletLight() = projectsRecentPage(ThemeMode.Light, tablet = true, "943_new_chat_projects_recent_tablet_light")
+    fun projectsRecentTabletLight() = projectsRecentPage(ThemeMode.Light, tablet = true, "963_new_chat_projects_recent_tablet_light")
 
     /** The recent chats' cards and the Project shortcuts start the same way inside the composer's sides. */
     @Test
@@ -535,19 +535,24 @@ class NewChatHomeScreenshotTest {
     fun settingsComposerTabletLight() = layoutChosen(NewChatHome.COMPOSER, ThemeMode.Light, tablet = true, "457_settings_new_chat_composer_tablet_light")
 
     @Test
-    fun settingsProjectsRecentPhoneDark() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Dark, tablet = false, "944_settings_new_chat_projects_recent_phone_dark")
+    fun settingsProjectsRecentPhoneDark() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Dark, tablet = false, "964_settings_new_chat_projects_recent_phone_dark")
 
     @Test
     @Config(sdk = [35], qualifiers = PHONE_LIGHT)
-    fun settingsProjectsRecentPhoneLight() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Light, tablet = false, "945_settings_new_chat_projects_recent_phone_light")
+    fun settingsProjectsRecentPhoneLight() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Light, tablet = false, "965_settings_new_chat_projects_recent_phone_light")
 
     @Test
     @Config(sdk = [35], qualifiers = TABLET_DARK)
-    fun settingsProjectsRecentTabletDark() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Dark, tablet = true, "946_settings_new_chat_projects_recent_tablet_dark")
+    fun settingsProjectsRecentTabletDark() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Dark, tablet = true, "966_settings_new_chat_projects_recent_tablet_dark")
 
     @Test
     @Config(sdk = [35], qualifiers = TABLET_LIGHT)
-    fun settingsProjectsRecentTabletLight() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Light, tablet = true, "947_settings_new_chat_projects_recent_tablet_light")
+    fun settingsProjectsRecentTabletLight() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Light, tablet = true, "967_settings_new_chat_projects_recent_tablet_light")
+
+    /** The narrowest phone the card is laid out for: the four still abreast, the longer names on two lines. */
+    @Test
+    @Config(sdk = [35], qualifiers = NARROW_PHONE_DARK)
+    fun settingsProjectsRecentNarrowPhoneDark() = layoutChosen(NewChatHome.PROJECTS_RECENT, ThemeMode.Dark, tablet = false, "968_settings_new_chat_projects_recent_narrow_phone_dark")
 
     /** Outside the demo with Extended mode off: Projects chosen, its miniature the note over the recent chats, and the row saying why. */
     @Test
@@ -615,5 +620,6 @@ class NewChatHomeScreenshotTest {
 
 private const val PHONE_DARK = "w411dp-h914dp-night-420dpi"
 private const val PHONE_LIGHT = "w411dp-h914dp-notnight-420dpi"
+private const val NARROW_PHONE_DARK = "w360dp-h780dp-night-420dpi"
 private const val TABLET_DARK = "w1000dp-h720dp-night-320dpi"
 private const val TABLET_LIGHT = "w1000dp-h720dp-notnight-320dpi"
