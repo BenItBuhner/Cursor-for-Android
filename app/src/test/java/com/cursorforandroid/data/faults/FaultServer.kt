@@ -4,6 +4,7 @@ import com.cursorforandroid.data.api.ConnectRpc
 import com.cursorforandroid.data.api.ConnectStreamFixtures
 import com.cursorforandroid.data.api.CursorJson
 import com.cursorforandroid.data.api.dto.AgentDto
+import com.cursorforandroid.data.api.dto.AgentEnvDto
 import com.cursorforandroid.data.api.dto.AgentSummaryDto
 import com.cursorforandroid.data.api.dto.ApiKeyInfoDto
 import com.cursorforandroid.data.api.dto.CreateRunRequestDto
@@ -365,8 +366,8 @@ class FaultServer(
 
     // -- the account ---------------------------------------------------------------------------------------------
 
-    fun addIdleAgent(id: String, name: String, runId: String, createdAt: String = "2026-04-13T18:30:00.000Z", prompt: String = "Do the thing", reply: String = "Done.") {
-        agents[id] = AgentDto(id = id, name = name, status = "IDLE", createdAt = createdAt, updatedAt = createdAt, latestRunId = runId, url = "https://cursor.com/agents/$id")
+    fun addIdleAgent(id: String, name: String, runId: String, createdAt: String = "2026-04-13T18:30:00.000Z", prompt: String = "Do the thing", reply: String = "Done.", env: AgentEnvDto = AgentEnvDto()) {
+        agents[id] = AgentDto(id = id, name = name, status = "IDLE", env = env, createdAt = createdAt, updatedAt = createdAt, latestRunId = runId, url = "https://cursor.com/agents/$id")
         v0[id] = V0AgentDto(id = id, name = name, status = "FINISHED")
         runs[runId] = RunDto(id = runId, agentId = id, status = "FINISHED", createdAt = createdAt, updatedAt = createdAt, durationMs = 65_000, result = reply)
         transcripts[id] = listOf(V0ConversationMessageDto("$runId-u", "user_message", prompt), V0ConversationMessageDto("$runId-a", "assistant_message", reply))
