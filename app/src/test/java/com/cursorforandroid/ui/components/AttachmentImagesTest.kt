@@ -160,11 +160,26 @@ class AttachmentImagesTest {
         assertThat(prepared.bytes).isEqualTo(webp)
     }
 
+    /** A picked file always reached the agent with its alpha; an inline image was always flattened. Neither changes. */
+    @Test
+    fun `a large transparent image keeps its transparency as PNG when asked, and is flattened onto white otherwise`() {
+        val original = bitmap(2400, 2400, alpha = true, noisyFraction = 0.5f).encode(Bitmap.CompressFormat.PNG)
+        val kept = AttachmentImages.prepare(original, "image/png", keepTransparency = true)
+        assertThat(kept.mimeType).isEqualTo("image/png")
+        val decoded = BitmapFactory.decodeByteArray(kept.bytes, 0, kept.sizeBytes)
+        assertThat(Color.alpha(decoded.getPixel(decoded.width - 1, decoded.height - 1))).isEqualTo(0)
+        assertReceivable(kept)
+
+        val flattened = AttachmentImages.prepare(original, "image/png")
+        assertThat(flattened.mimeType).isEqualTo("image/jpeg")
+        assertReceivable(flattened)
+    }
+
     @Test
     fun `transparency too heavy for PNG is flattened onto white rather than black`() {
         val original = bitmap(2400, 2400, alpha = true, noisyFraction = 0.5f).encode(Bitmap.CompressFormat.PNG)
         val ceiling = 400 * 1024
-        val prepared = AttachmentImages.prepare(original, "image/png", maxBytes = ceiling)
+        val prepared = AttachmentImages.prepare(original, "image/png", maxBytes = ceiling, keepTransparency = true)
         assertThat(prepared.mimeType).isEqualTo("image/jpeg")
         val decoded = BitmapFactory.decodeByteArray(prepared.bytes, 0, prepared.sizeBytes)
         val corner = decoded.getPixel(decoded.width - 1, decoded.height - 1)

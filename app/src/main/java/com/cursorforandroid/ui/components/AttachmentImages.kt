@@ -57,9 +57,11 @@ object AttachmentImages {
 
     /**
      * [bytes] as the prompt carries them. [declaredMime] is only what the picker or clipboard said, used to name a
-     * refusal: the bytes decide the format. [maxBytes] is the byte ceiling, [MAX_SEND_BYTES] outside tests.
+     * refusal: the bytes decide the format. [maxBytes] is the byte ceiling, [MAX_SEND_BYTES] outside tests. With
+     * [keepTransparency] a re-encoded image with transparent pixels stays a PNG when that fits, as a picked file
+     * always reached the agent; otherwise it is flattened onto white, as an inline image always was.
      */
-    fun prepare(bytes: ByteArray, declaredMime: String?, maxBytes: Int = MAX_SEND_BYTES): PromptImage {
+    fun prepare(bytes: ByteArray, declaredMime: String?, maxBytes: Int = MAX_SEND_BYTES, keepTransparency: Boolean = false): PromptImage {
         val format = FileFormat.sniff(bytes)?.takeIf { it in SENDABLE }
             ?: throw UnreadableImageException("Unsupported image type (${declaredMime?.takeIf { it.isNotBlank() } ?: "unknown"}). Use PNG, JPEG, GIF or WebP.")
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -78,7 +80,7 @@ object AttachmentImages {
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
             ?: throw unreadable(format)
         val fitted = decoded.oriented(orientation).fitWithin(MAX_EDGE_PX)
-        val encoded = encode(fitted, maxBytes)
+        val encoded = encode(fitted, maxBytes, keepTransparency)
         // Never make it worse: an intact original that only exceeded the passthrough weight stays as it was.
         return if (sendable && bytes.size <= maxBytes && bytes.size <= encoded.sizeBytes) PromptImage(bytes, format.mimeType) else encoded
     }
@@ -103,9 +105,17 @@ object AttachmentImages {
     private fun riffLength(bytes: ByteArray): Long =
         (0..3).fold(0L) { acc, i -> acc or ((bytes[4 + i].toLong() and 0xFF) shl (8 * i)) } + 8
 
-    /** [bitmap] flattened onto white and written as JPEG within [maxBytes], stepping the quality down and then the size until it fits. */
-    private fun encode(bitmap: Bitmap, maxBytes: Int): PromptImage {
-        var current = if (bitmap.hasAlpha()) bitmap.flattenOnWhite() else bitmap
+    /**
+     * [bitmap] encoded within [maxBytes]: as PNG when [keepTransparency] and it has transparent pixels and the PNG fits;
+     * otherwise flattened onto white and written as JPEG, stepping the quality down and then the size until it fits.
+     */
+    private fun encode(bitmap: Bitmap, maxBytes: Int, keepTransparency: Boolean): PromptImage {
+        var current = bitmap
+        if (keepTransparency && current.hasAlpha() && current.hasTransparentPixels()) {
+            val png = current.compressed(Bitmap.CompressFormat.PNG, 100)
+            if (png.isNotEmpty() && png.size <= maxBytes) return PromptImage(png, FileFormat.PNG.mimeType)
+        }
+        if (current.hasAlpha()) current = current.flattenOnWhite()
         while (true) {
             for (quality in intArrayOf(JPEG_QUALITY) + FALLBACK_QUALITIES) {
                 val jpeg = current.compressed(Bitmap.CompressFormat.JPEG, quality)
@@ -149,6 +159,20 @@ object AttachmentImages {
         return scale((width * factor).roundToInt().coerceAtLeast(1), (height * factor).roundToInt().coerceAtLeast(1))
     }
 
+    /** A band of rows at a time: one JNI round trip per row would be over a thousand of them for a full-size image. */
+    private fun Bitmap.hasTransparentPixels(): Boolean {
+        val rows = (PIXEL_BAND_PX / width).coerceIn(1, height)
+        val band = IntArray(width * rows)
+        var y = 0
+        while (y < height) {
+            val take = minOf(rows, height - y)
+            getPixels(band, 0, width, 0, y, width, take)
+            for (i in 0 until width * take) if (band[i] ushr 24 != 0xFF) return true
+            y += take
+        }
+        return false
+    }
+
     /** JPEG has no alpha; transparent regions would otherwise come out black. */
     private fun Bitmap.flattenOnWhite(): Bitmap {
         val flat = createBitmap(width, height)
@@ -160,6 +184,7 @@ object AttachmentImages {
 
     /** A PNG's last chunk: `IEND`, empty, with its fixed CRC. */
     private val PNG_IEND = byteArrayOf(0, 0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE.toByte(), 0x42, 0x60, 0x82.toByte())
+    private const val PIXEL_BAND_PX = 64 * 1024
     /** The smallest long edge the size steps go down to before an image is refused as too heavy to send. */
     private const val MIN_EDGE_PX = 256
 }

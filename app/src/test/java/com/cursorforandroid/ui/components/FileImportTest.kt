@@ -124,6 +124,21 @@ class FileImportTest {
     }
 
     @Test
+    fun `a transparent picture picked in Extended mode keeps its transparency when it is scaled down`() {
+        val logo = Bitmap.createBitmap(2000, 2000, Bitmap.Config.ARGB_8888)
+        logo.setPixels(IntArray(2000 * 2000) { i -> if ((i % 2000) < 1000) Color.argb(255, i % 251, 90, 200) else Color.TRANSPARENT }, 0, 2000, 0, 0, 2000, 2000)
+        val png = ByteArrayOutputStream().also { logo.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+
+        val picked = importMedia(context, listOf(temp("logo.png", png)), extended = true, counts = none).files.single()
+
+        assertThat(picked.file.mimeType).isEqualTo("image/png")
+        assertThat(picked.file.name).isEqualTo("logo.png")
+        val decoded = android.graphics.BitmapFactory.decodeByteArray(picked.file.bytes, 0, picked.file.sizeBytes)
+        assertThat(decoded.width).isEqualTo(AttachmentImages.MAX_EDGE_PX)
+        assertThat(Color.alpha(decoded.getPixel(decoded.width - 1, 0))).isEqualTo(0)
+    }
+
+    @Test
     fun `a broken picture is refused with the reason, and a HEIC stays the document it was`() {
         val broken = importFiles(context, listOf(temp("shot.png", png().copyOf(30)), temp("notes.txt", "hi".toByteArray())), none)
         assertThat(broken.error).isEqualTo("Couldn't read this PNG image. Re-save it as PNG or JPEG and attach it again.")

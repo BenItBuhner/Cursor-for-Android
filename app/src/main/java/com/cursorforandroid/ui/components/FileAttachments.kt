@@ -274,7 +274,7 @@ internal fun loadFile(resolver: ContentResolver, uri: Uri): Result<PendingFile> 
 
 /**
  * A picked picture as the prompt names it, `selected_images[]`: prepared the way an inline image is
- * ([AttachmentImages.prepare]) — oriented, scaled to what the model reads, within the account's per-image limit,
+ * ([AttachmentImages.prepare]), transparency kept — oriented, scaled to what the model reads, within the account's per-image limit,
  * stripped of anything after its end marker — and renamed to the format it now is. The account hands an image to the
  * model as it was uploaded, so a full-resolution original reached the agent over its limits. Null for bytes that are
  * no PNG, JPEG, GIF or WebP, which travel as the document they are; one of those that will not decode is refused,
@@ -282,7 +282,7 @@ internal fun loadFile(resolver: ContentResolver, uri: Uri): Result<PendingFile> 
  */
 internal fun pictureFile(bytes: ByteArray, name: String, declaredMime: String?): PromptFile? {
     if (!AttachmentImages.isPicture(bytes)) return null
-    val image = AttachmentImages.prepare(bytes, declaredMime)
+    val image = AttachmentImages.prepare(bytes, declaredMime, keepTransparency = true)
     return PromptFile(image.bytes, renamedFor(name, image.mimeType), image.mimeType)
 }
 
