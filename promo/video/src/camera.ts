@@ -273,15 +273,16 @@ const PROBES: Point[] = [];
 for (let i = 0; i <= 4; i++) for (let j = 0; j <= 8; j++) PROBES.push([i / 4, j / 8]);
 
 /**
- * The fastest the camera moves what it shows, and the hardest it speeds up or slows down, in pixels of the frame a frame
- * and a frame per frame: brisk, never a whip, and never a lurch.
+ * The fastest the camera moves what it shows, the hardest it speeds up or slows down, and the most that changes from one
+ * frame to the next, in pixels of the frame a frame, a frame per frame and a frame per frame per frame: brisk, never a
+ * whip, never a lurch, and never a jolt.
  */
-const PACE: Record<Framing, { speed: number; accel: number }> = {
-  wide: { speed: 40, accel: 5 },
-  tall: { speed: 40, accel: 5 },
+const PACE: Record<Framing, { speed: number; accel: number; jerk: number }> = {
+  wide: { speed: 40, accel: 5, jerk: 1 },
+  tall: { speed: 40, accel: 5, jerk: 1 },
 };
 
-export type Motion = { f: number; speed: number; accel: number };
+export type Motion = { f: number; speed: number; accel: number; jerk: number };
 
 /** How fast and how hard [path] moves the screen's visible points from frame [from] to [until], frame by frame. */
 export function motionOf(framing: Framing, take: TakeId, path: Path, from: number, until: number): Motion[] {
@@ -292,25 +293,32 @@ export function motionOf(framing: Framing, take: TakeId, path: Path, from: numbe
     const s = screenOf(framing, take, cam);
     return PROBES.map(([u, v]) => project(framing, cam, [s.left + u * s.width, s.top + v * s.height]));
   };
+  const change = (now: Point[], before: Point[]) => now.map((p, i) => [p[0] - before[i]![0], p[1] - before[i]![1]] as Point);
   const out: Motion[] = [];
   let before = at(from);
   let velocity: Point[] | null = null;
+  let acceleration: Point[] | null = null;
   for (let f = from + 1; f < until; f++) {
     const now = at(f);
     const cut = path.some((s) => s.from === f);
-    const v = now.map((p, i) => [p[0] - before[i]![0], p[1] - before[i]![1]] as Point);
+    const v = change(now, before);
+    const a = velocity && change(v, velocity);
+    const j = a && acceleration && change(a, acceleration);
     let speed = 0;
     let accel = 0;
+    let jerk = 0;
     if (!cut) {
       now.forEach((p, i) => {
         if (!inside(p) || !inside(before[i]!)) return;
         speed = Math.max(speed, Math.hypot(...v[i]!));
-        if (velocity) accel = Math.max(accel, Math.hypot(v[i]![0] - velocity[i]![0], v[i]![1] - velocity[i]![1]));
+        if (a) accel = Math.max(accel, Math.hypot(...a[i]!));
+        if (j) jerk = Math.max(jerk, Math.hypot(...j[i]!));
       });
     }
-    out.push({ f, speed, accel });
+    out.push({ f, speed, accel, jerk });
     before = now;
     velocity = cut ? null : v;
+    acceleration = cut ? null : a;
   }
   return out;
 }
@@ -357,8 +365,10 @@ function problemsOf(reel: Reel, framing: Framing, path: Path): string[] {
   const motion = motionOf(framing, reel.take, path, landed, AT.lineup);
   const fast = motion.filter((m) => m.speed > PACE[framing].speed).map((m) => m.f);
   const hard = motion.filter((m) => m.accel > PACE[framing].accel).map((m) => m.f);
+  const jolts = motion.filter((m) => m.jerk > PACE[framing].jerk).map((m) => m.f);
   if (fast.length) problems.push(`the camera moves over ${PACE[framing].speed}px a frame at ${runsOf(fast)}`);
   if (hard.length) problems.push(`the camera's pace changes by over ${PACE[framing].accel}px a frame at ${runsOf(hard)}`);
+  if (jolts.length) problems.push(`the camera jolts by over ${PACE[framing].jerk}px a frame per frame per frame at ${runsOf(jolts)}`);
   return problems.map((p) => `${reel.take} ${framing}: ${p}`);
 }
 
