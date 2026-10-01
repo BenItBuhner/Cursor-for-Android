@@ -343,11 +343,12 @@ fun ConversationScreen(
     val listState = rememberLazyListState(prefetchStrategy = remember { TranscriptPrefetchStrategy() })
     val transcriptScroll = rememberTranscriptScroll(listState, agentId)
     val scope = rememberCoroutineScope()
-    // The pull past the newest message that catches the chat up (see CatchUpOverscroll), drawn as the sidebar's pull
-    // to refresh is, from the transcript's bottom edge (see CatchUpIndicator). Read only where it is drawn, and its
-    // status only by the indicator: a frame of the pull recomposes nothing, an answer the indicator alone.
+    // The pull past the newest message that catches the chat up (see CatchUpOverscroll): it lifts the transcript off
+    // the composer (catchUpLift) and the sidebar's pull-to-refresh indicator stands in the gap (CatchUpIndicator).
+    // Read only where it is drawn, and its status only by the indicator: a frame of the pull recomposes nothing, an
+    // answer the indicator alone.
     val density = LocalDensity.current
-    val catchUpPull = remember(agentId, density) { with(density) { CatchUpPull(CatchUpPullThreshold.toPx()) } }
+    val catchUpPull = remember(agentId, density) { catchUpPullFor(density) }
     val readerScroll = rememberReaderScroll(transcriptScroll, pull = catchUpPull, canCatchUp = viewModel::canCatchUp, onCatchUp = viewModel::catchUp)
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var modelSheet by rememberSaveable { mutableStateOf(false) }
@@ -717,8 +718,9 @@ fun ConversationScreen(
                             .holdingHeight(openStretches, topDown = !following)
                             .scrollEdgeFade(listState, reverseLayout = listReversed, surface = colors.canvas)
                             .readerScrolling(readerScroll)
+                            .catchUpLift(catchUpPull)
                             .testTag("transcript"),
-                        contentPadding = PaddingValues(start = TranscriptGutter, end = TranscriptGutter, top = 6.dp, bottom = 12.dp),
+                        contentPadding = PaddingValues(start = TranscriptGutter, end = TranscriptGutter, top = 6.dp, bottom = TranscriptBottomPadding),
                         verticalArrangement = Arrangement.spacedBy(TranscriptItemSpacing),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -737,12 +739,13 @@ fun ConversationScreen(
                 }
             }
             transcriptList()
-            // Out of the area's bottom edge, the top of the composer's stack; a word up there gives way as it rises.
+            // In the gap the lifted transcript opens over the composer's stack; a word up there gives way as it rises.
             CatchUpIndicator(
                 catchUpPull,
                 viewModel.catchUpStatus,
                 onSettled = viewModel::catchUpSettled,
                 modifier = Modifier.align(Alignment.BottomCenter),
+                edgeGap = TranscriptBottomPadding,
                 onRise = { snackbar.currentSnackbarData?.dismiss() },
             )
 
@@ -1049,6 +1052,9 @@ private const val LOADING_KEY = "loading"
 
 /** The transcript's side margins, inside which its rows take [CursorDimens.composerMaxWidth] at most. */
 private val TranscriptGutter = 16.dp
+
+/** The room under the newest row, above the composer's stack: the gap the pull to catch up widens. */
+private val TranscriptBottomPadding = 12.dp
 
 /** The jump button's lift off the transcript's bottom edge. */
 private val JumpButtonGap = 10.dp

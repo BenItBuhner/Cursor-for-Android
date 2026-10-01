@@ -365,8 +365,8 @@ class PullToCatchUpFrameBenchmarkTest {
     }
 
     private companion object {
-        /** Frames each way in a stroke, and the finger's travel per frame: 40 × 12 px carries both pulls past their thresholds. */
-        const val STEPS = 40
+        /** Frames each way in a stroke, and the finger's travel per frame: 56 × 12 px carries both pulls past their thresholds. */
+        const val STEPS = 56
         const val STEP = 12f
         const val PASSES = 5
         /** The pull's median frame may be this many times the scroll's, on a machine that repeats its own measurement. */
