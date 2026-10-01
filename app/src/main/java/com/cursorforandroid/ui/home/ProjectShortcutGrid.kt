@@ -333,11 +333,7 @@ internal fun ProjectShortcutGrid(
                     val lifted = grid.lifted == id
                     val scale by animateFloatAsState(if (lifted) LIFTED_SCALE else 1f, label = "shortcut-lift")
                     val dim by animateFloatAsState(
-                        when {
-                            !inHidden -> 1f
-                            lifted -> LIFTED_HIDDEN_ALPHA
-                            else -> HIDDEN_ALPHA
-                        },
+                        if (inHidden && !lifted) HIDDEN_ALPHA else 1f,
                         DimSpring,
                         label = "shortcut-dim",
                     )
@@ -922,9 +918,8 @@ private const val HiddenEmpty = "project-shortcut-hidden-empty"
 private val FollowedRooms = listOf(ShownEmpty, Line, HiddenEmpty)
 private const val LIFTED_SCALE = 1.04f
 
-/** A hidden shortcut while arranged: dimmed, a touch brighter while it is the one under the finger. */
+/** A hidden shortcut while arranged, dimmed; under the finger it is whole, so nothing it passes over shows through it. */
 private const val HIDDEN_ALPHA = 0.5f
-private const val LIFTED_HIDDEN_ALPHA = 0.8f
 
 /** How far down a hidden shortcut is scaled as its section folds away. */
 private const val HIDDEN_REST_SCALE = 0.94f
