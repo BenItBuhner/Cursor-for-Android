@@ -2,11 +2,15 @@ package com.cursorforandroid.ui.navigation
 
 import android.app.Application
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -56,6 +60,7 @@ class NewChatPageFirstFrameTest {
         val owner = object : ViewModelStoreOwner {
             override val viewModelStore = ViewModelStore()
         }
+        val tag = "launch-${System.identityHashCode(this)}"
     }
 
     private fun demoLaunch(graph: AppGraph = AppGraph(app)): Launch {
@@ -79,7 +84,9 @@ class NewChatPageFirstFrameTest {
                 val current = shown ?: return@CursorTheme
                 key(current) {
                     CompositionLocalProvider(LocalViewModelStoreOwner provides current.owner) {
-                        AppShell(graph = current.graph, user = current.user, isDemo = true, wide = false, deepLinkAgentId = null, onDeepLinkConsumed = {})
+                        Box(Modifier.fillMaxSize().testTag(current.tag)) {
+                            AppShell(graph = current.graph, user = current.user, isDemo = true, wide = false, deepLinkAgentId = null, onDeepLinkConsumed = {})
+                        }
                     }
                 }
             }
@@ -93,9 +100,13 @@ class NewChatPageFirstFrameTest {
     /** Swaps in [next]'s shell with the clock held, and checks the frames from its first. */
     private fun secondLaunch(next: Launch, projects: Int) {
         compose.mainClock.autoAdvance = false
-        shown = next
-        compose.mainClock.advanceTimeByFrame()
-        compose.waitForIdle()
+        compose.runOnIdle { shown = next }
+        var frames = 0
+        while (compose.onAllNodes(hasTestTag(next.tag)).fetchSemanticsNodes().isEmpty()) {
+            check(++frames <= 5) { "the second launch's shell was never composed" }
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+        }
 
         assertWithMessage("Project shortcuts on the first frame").that(tiles()).hasSize(projects)
         File("build/outputs/roborazzi").mkdirs()
