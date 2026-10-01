@@ -9,3 +9,5 @@ export const progress = (t: number, from: number, to: number) => (to <= from ? (
 export const easeOut = Easing.bezier(0.16, 1, 0.3, 1);
 export const easeIn = Easing.bezier(0.5, 0, 0.9, 0.4);
 export const easeInOut = Easing.bezier(0.65, 0, 0.35, 1);
+/** Rest to rest with the least jerk: no jolt as it starts or stops. */
+export const easeSmooth = (t: number) => t * t * t * (10 + t * (6 * t - 15));

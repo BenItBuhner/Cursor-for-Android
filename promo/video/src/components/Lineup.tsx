@@ -1,7 +1,7 @@
 import type React from "react";
 import { LENS, type Framing } from "../camera";
 import { AT, beat, LINEUP, lineupReel, takeFrame } from "../edit";
-import { clamp01, easeInOut, easeOut, lerp, progress } from "../math";
+import { clamp01, easeOut, easeSmooth, lerp, progress } from "../math";
 import { DP_WIDTH, takeOf, type DeviceId, type TakeId, type Theme } from "../takes";
 import { Device, deviceMargin, screenHeight } from "./Device";
 import { Headline } from "./Headline";
@@ -66,8 +66,8 @@ function boxOf(slots: Slot[]): Box {
 }
 
 /**
- * Where the camera frames what has landed before the last device does: fractions of the frame to fit it inside, under
- * the headline, and the closest it comes.
+ * Where the camera frames the first device to land: fractions of the frame to fit it inside, under the headline, and
+ * the closest it comes.
  */
 const ROOM: Record<Framing, { top: number; bottom: number; side: number; zoom: number }> = {
   wide: { top: 0.25, bottom: 0.96, side: 0.08, zoom: 1.4 },
@@ -92,10 +92,8 @@ function shot(all: Slot[], n: number, room: Box, maxZoom: number): View {
 
 const landAt = (i: number) => AT.lineup + beat(i);
 
-/** Frames a device takes to land, and the camera to reframe as it does, starting a little before. */
+/** Frames a device takes to land. */
 const LAND = 20;
-const REFRAME = 30;
-const LEAD = 12;
 
 /**
  * The camera's turn round the lineup, at an even pace from cut to cut: from the first [turn] to the second about the
@@ -108,28 +106,29 @@ const ORBIT: Record<Framing, { turn: [number, number]; tilt: [number, number]; s
   tall: { turn: [9, -11], tilt: [5, 0], scale: [1.02, 0.95] },
 };
 
-/** The view at frame [f]: reframed around each device as it lands, from the shot before. */
+/**
+ * The view at frame [f]: in on the first device as it lands, pulling back in one move, from rest to rest, to all of
+ * them by the time the last lands; even in scale, so the pull reads at one pace.
+ */
 function viewAt(framing: Framing, all: Slot[], width: number, height: number, f: number): View {
   const r = ROOM[framing];
   const room = { left: width * r.side, right: width * (1 - r.side), top: height * r.top, bottom: height * r.bottom };
-  let view = shot(all, 1, room, r.zoom);
-  for (let n = 2; n <= LINEUP.length; n++) {
-    const to = shot(all, n, room, r.zoom);
-    const p = easeInOut(progress(f, landAt(n - 1) - LEAD, landAt(n - 1) - LEAD + REFRAME));
-    view = {
-      zoom: lerp(view.zoom, to.zoom, p),
-      cx: lerp(view.cx, to.cx, p),
-      cy: lerp(view.cy, to.cy, p),
-      x: lerp(view.x, to.x, p),
-      y: lerp(view.y, to.y, p),
-    };
-  }
-  return view;
+  const from = shot(all, 1, room, r.zoom);
+  const to = shot(all, LINEUP.length, room, r.zoom);
+  const p = easeSmooth(progress(f, landAt(0), landAt(LINEUP.length - 1)));
+  return {
+    zoom: from.zoom * (to.zoom / from.zoom) ** p,
+    cx: lerp(from.cx, to.cx, p),
+    cy: lerp(from.cy, to.cy, p),
+    x: lerp(from.x, to.x, p),
+    y: lerp(from.y, to.y, p),
+  };
 }
 
 /**
  * The three devices landing one a beat, each named as it lands, all playing the same moment of the run in step: the
- * camera in on the phone, pulling back as the foldable and the tablet land beside it, and turning round all three.
+ * camera in on the phone, pulling back in one long move as the foldable and the tablet land beside it, and turning
+ * round all three.
  */
 export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width: number; height: number }> = ({
   framing,
