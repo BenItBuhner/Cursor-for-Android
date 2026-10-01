@@ -155,18 +155,18 @@ class AttachmentHeightsScreenshotTest {
     }
 
     @Test
-    fun phoneDark() = capture(ThemeMode.Dark, "930_attachment_heights_phone_dark")
+    fun phoneDark() = capture(ThemeMode.Dark, "934_attachment_heights_phone_dark")
 
     @Test
-    fun phoneLight() = capture(ThemeMode.Light, "931_attachment_heights_phone_light")
-
-    @Test
-    @Config(sdk = [35], qualifiers = TABLET)
-    fun tabletDark() = capture(ThemeMode.Dark, "932_attachment_heights_tablet_dark")
+    fun phoneLight() = capture(ThemeMode.Light, "935_attachment_heights_phone_light")
 
     @Test
     @Config(sdk = [35], qualifiers = TABLET)
-    fun tabletLight() = capture(ThemeMode.Light, "933_attachment_heights_tablet_light")
+    fun tabletDark() = capture(ThemeMode.Dark, "936_attachment_heights_tablet_dark")
+
+    @Test
+    @Config(sdk = [35], qualifiers = TABLET)
+    fun tabletLight() = capture(ThemeMode.Light, "937_attachment_heights_tablet_light")
 }
 
 private const val PHONE = "w411dp-h914dp-night-420dpi"
