@@ -274,15 +274,21 @@ internal fun loadFile(resolver: ContentResolver, uri: Uri): Result<PendingFile> 
 
 /**
  * A picked picture as the prompt names it, `selected_images[]`: prepared the way an inline image is
- * ([AttachmentImages.prepare]), transparency kept — oriented, scaled to what the model reads, within the account's per-image limit,
- * stripped of anything after its end marker — and renamed to the format it now is. The account hands an image to the
- * model as it was uploaded, so a full-resolution original reached the agent over its limits. Null for bytes that are
- * no PNG, JPEG, GIF or WebP, which travel as the document they are; one of those that will not decode is refused,
- * with the reason.
+ * ([AttachmentImages.prepare]) — oriented, scaled to what the model reads, within the account's per-image limit,
+ * stripped of anything after its end marker, a HEIC or BMP converted — and renamed to the format it now is. The
+ * account hands an image to the model as it was uploaded, so a full-resolution original or a HEIC kept as a document
+ * reached the agent as something it had to decode itself. Null for bytes that are no picture. A converted format the
+ * device cannot decode (a HEIC before Android 9) stays the document it was; a PNG, JPEG, GIF or WebP that will not
+ * decode is refused, with the reason.
  */
 internal fun pictureFile(bytes: ByteArray, name: String, declaredMime: String?): PromptFile? {
     if (!AttachmentImages.isPicture(bytes)) return null
-    val image = AttachmentImages.prepare(bytes, declaredMime, keepTransparency = true)
+    val image = try {
+        AttachmentImages.prepare(bytes, declaredMime)
+    } catch (e: UnreadableImageException) {
+        if (AttachmentImages.isSendableFormat(bytes)) throw e
+        return null
+    }
     return PromptFile(image.bytes, renamedFor(name, image.mimeType), image.mimeType)
 }
 

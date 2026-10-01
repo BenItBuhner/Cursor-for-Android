@@ -31,8 +31,8 @@ class UnreadableImageException(message: String) : IllegalArgumentException(messa
  * roughly [MAX_EDGE_PX] anyway — so a 12 MP photo or a full-resolution phone screenshot is decoded, oriented, scaled
  * to fit and re-encoded. Only an image that already meets every condition above, is no heavier than
  * [PASSTHROUGH_MAX_BYTES] (or a GIF within [MAX_SEND_BYTES], for its animation) and is intact — nothing after its
- * end marker, as a Samsung screenshot's `SEFT` trailer is — goes out byte for byte. Anything that will not decode,
- * or is no format the API takes, is refused with an [UnreadableImageException] rather than sent as it is.
+ * end marker, as a Samsung screenshot's `SEFT` trailer is — goes out byte for byte. HEIC, AVIF, BMP and ICO are
+ * converted. Anything that will not decode is refused with an [UnreadableImageException] rather than sent as it is.
  */
 object AttachmentImages {
     /** Long-edge ceiling in pixels; matches what vision models consume, so nothing the model would see is lost. */
@@ -49,27 +49,31 @@ object AttachmentImages {
     /** The formats the API takes as an image (`image/png`, `image/jpeg`, `image/gif`, `image/webp`). */
     private val SENDABLE = setOf(FileFormat.PNG, FileFormat.JPEG, FileFormat.GIF, FileFormat.WEBP)
 
+    /** Image formats the API does not take, decoded here (HEIC from API 28, AVIF where the platform decodes it) and sent as JPEG or PNG. */
+    private val CONVERTED = setOf(FileFormat.HEIC, FileFormat.AVIF, FileFormat.BMP, FileFormat.ICO)
+
     /** Lower JPEG qualities tried, in turn, when an encode at [JPEG_QUALITY] is still over the byte ceiling. */
     private val FALLBACK_QUALITIES = intArrayOf(80, 70, 60)
 
     /** Whether [bytes] are a picture [prepare] turns into a prompt image, by what they are rather than what they are called. */
-    fun isPicture(bytes: ByteArray): Boolean = FileFormat.sniff(bytes) in SENDABLE
+    fun isPicture(bytes: ByteArray): Boolean = FileFormat.sniff(bytes).let { it in SENDABLE || it in CONVERTED }
+
+    /** Whether [bytes] are a format the API takes as it is (as opposed to one [prepare] converts). */
+    fun isSendableFormat(bytes: ByteArray): Boolean = FileFormat.sniff(bytes) in SENDABLE
 
     /**
      * [bytes] as the prompt carries them. [declaredMime] is only what the picker or clipboard said, used to name a
-     * refusal: the bytes decide the format. [maxBytes] is the byte ceiling, [MAX_SEND_BYTES] outside tests. With
-     * [keepTransparency] a re-encoded image with transparent pixels stays a PNG when that fits, as a picked file
-     * always reached the agent; otherwise it is flattened onto white, as an inline image always was.
+     * refusal: the bytes decide the format. [maxBytes] is the byte ceiling, [MAX_SEND_BYTES] outside tests.
      */
-    fun prepare(bytes: ByteArray, declaredMime: String?, maxBytes: Int = MAX_SEND_BYTES, keepTransparency: Boolean = false): PromptImage {
-        val format = FileFormat.sniff(bytes)?.takeIf { it in SENDABLE }
+    fun prepare(bytes: ByteArray, declaredMime: String?, maxBytes: Int = MAX_SEND_BYTES): PromptImage {
+        val format = FileFormat.sniff(bytes)?.takeIf { it in SENDABLE || it in CONVERTED }
             ?: throw UnreadableImageException("Unsupported image type (${declaredMime?.takeIf { it.isNotBlank() } ?: "unknown"}). Use PNG, JPEG, GIF or WebP.")
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         val longEdge = max(bounds.outWidth, bounds.outHeight)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw unreadable(format)
         val orientation = exifOrientation(bytes, format)
-        val sendable = isIntact(bytes, format) && orientation == ExifInterface.ORIENTATION_NORMAL && longEdge <= MAX_EDGE_PX
+        val sendable = format in SENDABLE && isIntact(bytes, format) && orientation == ExifInterface.ORIENTATION_NORMAL && longEdge <= MAX_EDGE_PX
         if (sendable && (bytes.size <= PASSTHROUGH_MAX_BYTES || format == FileFormat.GIF) && bytes.size <= maxBytes) {
             return PromptImage(bytes, format.mimeType)
         }
@@ -80,7 +84,7 @@ object AttachmentImages {
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
             ?: throw unreadable(format)
         val fitted = decoded.oriented(orientation).fitWithin(MAX_EDGE_PX)
-        val encoded = encode(fitted, maxBytes, keepTransparency)
+        val encoded = encode(fitted, maxBytes)
         // Never make it worse: an intact original that only exceeded the passthrough weight stays as it was.
         return if (sendable && bytes.size <= maxBytes && bytes.size <= encoded.sizeBytes) PromptImage(bytes, format.mimeType) else encoded
     }
@@ -106,12 +110,13 @@ object AttachmentImages {
         (0..3).fold(0L) { acc, i -> acc or ((bytes[4 + i].toLong() and 0xFF) shl (8 * i)) } + 8
 
     /**
-     * [bitmap] encoded within [maxBytes]: as PNG when [keepTransparency] and it has transparent pixels and the PNG fits;
-     * otherwise flattened onto white and written as JPEG, stepping the quality down and then the size until it fits.
+     * [bitmap] encoded within [maxBytes]: as PNG when it has transparent pixels and the PNG fits, so a logo on a clear
+     * background reaches the model as drawn; otherwise flattened onto white and written as JPEG, stepping the quality
+     * down and then the size until it fits.
      */
-    private fun encode(bitmap: Bitmap, maxBytes: Int, keepTransparency: Boolean): PromptImage {
+    private fun encode(bitmap: Bitmap, maxBytes: Int): PromptImage {
         var current = bitmap
-        if (keepTransparency && current.hasAlpha() && current.hasTransparentPixels()) {
+        if (current.hasAlpha() && current.hasTransparentPixels()) {
             val png = current.compressed(Bitmap.CompressFormat.PNG, 100)
             if (png.isNotEmpty() && png.size <= maxBytes) return PromptImage(png, FileFormat.PNG.mimeType)
         }
