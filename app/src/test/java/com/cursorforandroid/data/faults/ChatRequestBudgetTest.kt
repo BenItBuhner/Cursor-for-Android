@@ -34,7 +34,9 @@ import java.time.Instant
  * host for every other (`HostPause`, `RetryInterceptor`, `SseRunStreamer`, `ApiThrottle`), and nothing asks again
  * inside the wait. For the record: v0.4.30 asked 5.25 a minute for one open chat and 8.25 for eight followed agents;
  * v0.4.31's stall watch, resuming every two minutes at its cap, made that 6.75 and 20.25. The watch now runs only for
- * a chat on screen (see `LiveRunHub.stallTimeoutMs`): the followed agents are back to the list's refresh alone.
+ * a chat on screen (see `LiveRunHub.stallTimeoutMs`): the followed agents are back to the list's refresh alone, and a
+ * chat opening on a connection the notification has held pays one record read and one stream, at once, to know it is
+ * a connection to the run.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -174,6 +176,34 @@ class ChatRequestBudgetTest {
         rig.startMonitor()
         val asked = window("open chat and eight followed agents, long tool calls")
         // Only the open chat's stream is ever taken up again; the seven followed beside it hold theirs.
+        budget("stream opens", asked[Route.Stream] ?: 0.0, STREAM_OPENS_PER_MINUTE_QUIET)
+        budget("everything", asked.total(), TOTAL_PER_MINUTE_FLEET_AND_CHAT)
+    }
+
+    @Test
+    fun `a chat opened on a run the notification already follows verifies its held connection once, then rides it`() = runBlocking<Unit> {
+        fleet(RunMonitor.MAX_TRACKED)
+        val rig = openRig()
+        rig.agents.refresh()
+        rig.startMonitor()
+        rig.awaitUntil(15_000) { server.requests(Route.Stream).size >= RunMonitor.MAX_TRACKED }
+        // The notification has held this run's connection a while; the chat opening on it must not trust it.
+        delay(STALL_MS * 2)
+        val streamsBefore = server.requests(Route.Stream).size
+        val recordsBefore = server.requests(Route.GetRun).size
+        rig.openChat()
+        rig.awaitUntil(15_000) { server.requests(Route.Stream).size > streamsBefore }
+        delay(STALL_MS)
+        // Opening cost one stream, taken up from the last event the held connection had, and one record read for the
+        // verify — beside the chat's own reads of its record (the list refresh the open does, which reads every
+        // running agent's, and the chat's load; a list refresh of the monitor's under way may add one).
+        val resumed = server.requests(Route.Stream).drop(streamsBefore)
+        assertWithMessage("streams opened by the chat: $resumed").that(resumed).hasSize(1)
+        assertWithMessage("taken up from the last event: $resumed").that(resumed.single().lastEventId).isNotNull()
+        val records = server.requests(Route.GetRun).drop(recordsBefore).count { it.path.contains("/runs/$run") }
+        assertWithMessage("reads of the chat's record opening it").that(records).isAtMost(4)
+        // Then the chat rides the one connection: the quiet budget, the open's cost spent.
+        val asked = window("chat opened on a followed run, then quiet")
         budget("stream opens", asked[Route.Stream] ?: 0.0, STREAM_OPENS_PER_MINUTE_QUIET)
         budget("everything", asked.total(), TOTAL_PER_MINUTE_FLEET_AND_CHAT)
     }
