@@ -349,10 +349,11 @@ class AppScreenshotTest {
         waitForText("Demo User")
         compose.onNodeWithText("Demo User").performClick()
         waitForText("Appearance")
-        compose.onNodeWithText("Cursor Light").performClick()
-        // Light hides the OLED row. Wait on that, not DataStore: runBlocking { prefs.first() } inside waitUntil
+        compose.onNodeWithText("Light").performClick()
+        // Light dims the OLED row. Wait on that, not DataStore: runBlocking { prefs.first() } inside waitUntil
         // hops off the main thread on Robolectric's unconfined effects and tears the slot table.
-        compose.waitUntil(10_000) { compose.onAllNodes(hasText("OLED black", substring = true)).fetchSemanticsNodes().isEmpty() }
+        waitForTheme("Light")
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("OLED black", substring = true) and isNotEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.waitForIdle()
         capture("07_settings_light")
         compose.onNodeWithContentDescription("Back").performClick()
@@ -368,8 +369,8 @@ class AppScreenshotTest {
         waitForText("Demo User")
         compose.onNodeWithText("Demo User").performClick()
         waitForText("Appearance")
-        compose.onNodeWithText("Cursor Dark").performClick()
-        waitForTheme("Cursor Dark")
+        compose.onNodeWithText("Dark").performClick()
+        waitForTheme("Dark")
         compose.waitForIdle()
         compose.onNodeWithContentDescription("Back").performClick()
 
@@ -548,10 +549,10 @@ class AppScreenshotTest {
         waitForText("Demo User")
         compose.onNodeWithText("Demo User").performClick()
         waitForText("Appearance")
-        compose.onNodeWithText("Cursor Dark").performClick()
-        // The preference is one thing, the screen having recomposed from it another: wait for the row to read chosen,
-        // or a slow runner captures "Match system" still checked.
-        waitForTheme("Cursor Dark")
+        compose.onNodeWithText("Dark").performClick()
+        // The preference is one thing, the screen having recomposed from it another: wait for the segment to read
+        // chosen, or a slow runner captures "Auto" still selected.
+        waitForTheme("Dark")
         capture("20_settings_dark")
         compose.onNodeWithText("OLED black").performClick()
         // The switch in the OLED row (its row merges the label into its semantics) reads on once the screen has caught up.

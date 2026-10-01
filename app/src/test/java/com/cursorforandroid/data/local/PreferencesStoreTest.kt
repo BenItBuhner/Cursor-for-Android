@@ -83,20 +83,6 @@ class PreferencesStoreTest {
     }
 
     @Test
-    fun `keep chats live is on for whoever never touched it, and a switch turned off stays off`() = runBlocking {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        assertThat(PreferencesStore(context).liveSync.first()).isTrue()
-        // What an older build wrote for someone who turned the experiment off, read by this one — sign-outs included.
-        PreferencesStore(context).setLiveSync(false)
-        val prefs = PreferencesStore(context)
-        assertThat(prefs.liveSync.first()).isFalse()
-        prefs.clearSession()
-        assertThat(prefs.liveSync.first()).isFalse()
-        prefs.setLiveSync(true)
-        assertThat(prefs.liveSync.first()).isTrue()
-    }
-
-    @Test
     fun `a long queue stacks for whoever never opened it, and an opened one stays open through a sign-out`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertThat(PreferencesStore(context).queueStacked.first()).isTrue()
@@ -280,38 +266,29 @@ class PreferencesStoreTest {
     }
 
     @Test
-    fun `confirm before stopping is on for a fresh install`() = runBlocking<Unit> {
-        assertThat(PreferencesStore(ApplicationProvider.getApplicationContext()).confirmStop.first()).isTrue()
-    }
-
-    @Test
-    fun `an install upgraded from a build without Confirm before stopping reads it as on, and keeps what the user sets through a sign-out`() = runBlocking<Unit> {
+    fun `an install that turned off Confirm before stopping, Keep chats live or Full transcript history, or allowed crash reports, forgets it on upgrade`() = runBlocking<Unit> {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        // The file an earlier build left: its own settings written, this one never. Written through a DataStore of its
-        // own, closed before the app's opens the file, as a process that has since been replaced would have.
-        val earlierBuild = Job()
-        val earlier = PreferenceDataStoreFactory.create(
-            scope = CoroutineScope(Dispatchers.IO + earlierBuild),
-            produceFile = { context.preferencesDataStoreFile("cursor_settings") },
+        val store = PreferenceDataStoreFactory.create(
+            scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+            produceFile = { context.preferencesDataStoreFile("always_on_settings") },
         )
-        earlier.edit { p ->
+        // What an earlier build left for someone who turned each switch away from what is now always so.
+        store.edit { p ->
+            p[booleanPreferencesKey("confirm_stop")] = false
+            p[booleanPreferencesKey("live_sync")] = false
+            p[stringPreferencesKey("transcript_engine")] = "stable"
+            p[booleanPreferencesKey("crash_reports")] = true
             p[stringPreferencesKey("theme_mode")] = ThemeMode.Light.name
             p[booleanPreferencesKey("live_notifications")] = false
         }
-        earlierBuild.cancelAndJoin()
+        val prefs = PreferencesStore(context, store)
 
-        val prefs = PreferencesStore(context)
+        assertThat(prefs.forgetRetiredSettings()).isTrue()
+        val left = store.data.first().asMap().keys.map { it.name }
+        assertThat(left).containsExactly("theme_mode", "live_notifications")
+        // What this build still offers is kept as it was set.
         assertThat(prefs.themeMode.first()).isEqualTo(ThemeMode.Light)
         assertThat(prefs.liveNotifications.first()).isFalse()
-        assertThat(prefs.confirmStop.first()).isTrue()
-
-        prefs.setConfirmStop(false)
-        assertThat(prefs.confirmStop.first()).isFalse()
-        // The device's preference, not the account's.
-        prefs.clearSession()
-        assertThat(prefs.confirmStop.first()).isFalse()
-        prefs.setConfirmStop(true)
-        assertThat(prefs.confirmStop.first()).isTrue()
     }
 
     @Test
@@ -343,19 +320,6 @@ class PreferencesStoreTest {
         assertThat(prefs.railWidthDp.first()).isEqualTo(240)
         // Once they are gone there is nothing to write.
         assertThat(prefs.forgetRetiredSettings()).isTrue()
-    }
-
-    @Test
-    fun `crash reports are off until asked for, and the answer belongs to the device, not the account`() = runBlocking<Unit> {
-        val prefs = PreferencesStore(ApplicationProvider.getApplicationContext())
-        assertThat(prefs.crashReports.first()).isFalse()
-        prefs.setCrashReports(true)
-        assertThat(prefs.crashReports.first()).isTrue()
-        // A consent given on this phone is not withdrawn by signing out of an account.
-        prefs.clearSession()
-        assertThat(prefs.crashReports.first()).isTrue()
-        prefs.setCrashReports(false)
-        assertThat(prefs.crashReports.first()).isFalse()
     }
 
     @Test
