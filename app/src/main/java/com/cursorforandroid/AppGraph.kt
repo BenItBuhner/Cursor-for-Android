@@ -894,6 +894,8 @@ class AppGraph(
                 override suspend fun withdraw(agentId: String, followupId: String): Boolean =
                     steering.deletePending(agentId, followupId).isSuccess
             },
+            // A Remote Control chat's machine must be reporting to Cursor for a message to go (`GET /v0/private-workers`).
+            machineStatus = { agent, fresh -> remote.machineStatus(agent, force = fresh)?.getOrNull() },
             store = followUpStore,
             persist = { !session.isDemo },
         )
