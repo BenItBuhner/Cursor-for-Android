@@ -124,6 +124,12 @@ data class AgentListUiState(
      */
     val collapsedSections: Set<String> = emptySet(),
     /**
+     * The long groups the reader listed in full with "Show N more", by [AgentSection.key], as the device remembers
+     * them (see [AgentsViewModel.setSectionListedInFull]): they stay listed when the sidebar is shut and opened again,
+     * a chat is opened, the activity is recreated or the app started again, until "Show less" cuts them back.
+     */
+    val listedInFullSections: Set<String> = emptySet(),
+    /**
      * Settings › Appearance › "Shorten long Projects list": a long Projects or Pinned group lists its first five rows
      * until "Show N more" is tapped (see [SidebarShortList]). On unless turned off.
      */
@@ -152,8 +158,18 @@ private class DeviceState(
     val memberCounts: Map<String, Int> = emptyMap(),
     /** The sidebar groups the reader folded closed (see [AgentListUiState.collapsedSections]). */
     val collapsedSections: Set<String> = emptySet(),
+    /** The long groups the reader listed in full (see [AgentListUiState.listedInFullSections]). */
+    val listedInFullSections: Set<String> = emptySet(),
     /** Whether long Projects and Pinned groups are cut to five rows (see [AgentListUiState.shortenLongGroups]). */
     val shortenLongGroups: Boolean = true,
+)
+
+/** The device's word on the sidebar's groups, bundled so the device combine stays within its arity. */
+private class SidebarGroupPrefs(
+    val memberCounts: Map<String, Int>,
+    val collapsedSections: Set<String>,
+    val listedInFullSections: Set<String>,
+    val shortenLongGroups: Boolean,
 )
 
 private data class OrganizedUi(
@@ -286,12 +302,25 @@ class AgentsViewModel(
     }.distinctUntilChanged()
     private val listPreferences: Flow<ListPreferences> = graph.prefs.listPreferences.distinctUntilChanged()
 
-    /** The three smallest device facts, bundled so the device combine stays within its arity. */
-    private val countsAndFolds: Flow<Triple<Map<String, Int>, Set<String>, Boolean>> =
-        combine(graph.projects.memberCounts, graph.prefs.collapsedSidebarSections, graph.prefs.shortenSidebarLists) { counts, folds, shorten -> Triple(counts, folds, shorten) }
+    /** The smallest device facts about the sidebar's groups, bundled so the device combine stays within its arity. */
+    private val groupPrefs: Flow<SidebarGroupPrefs> = combine(
+        graph.projects.memberCounts,
+        graph.prefs.collapsedSidebarSections,
+        graph.prefs.listedInFullSidebarSections,
+        graph.prefs.shortenSidebarLists,
+    ) { counts, folds, listedInFull, shorten -> SidebarGroupPrefs(counts, folds, listedInFull, shorten) }
 
-    private val device: Flow<DeviceState> = combine(localState, actionError, graph.projects.unavailableParents, graph.agents.knownRoots, countsAndFolds) { local, failed, unavailable, roots, (counts, folds, shorten) ->
-        DeviceState(local = local, actionError = failed, unavailableProjects = unavailable.keys, knownRoots = roots, memberCounts = counts, collapsedSections = folds, shortenLongGroups = shorten)
+    private val device: Flow<DeviceState> = combine(localState, actionError, graph.projects.unavailableParents, graph.agents.knownRoots, groupPrefs) { local, failed, unavailable, roots, groups ->
+        DeviceState(
+            local = local,
+            actionError = failed,
+            unavailableProjects = unavailable.keys,
+            knownRoots = roots,
+            memberCounts = groups.memberCounts,
+            collapsedSections = groups.collapsedSections,
+            listedInFullSections = groups.listedInFullSections,
+            shortenLongGroups = groups.shortenLongGroups,
+        )
     }
 
     /**
@@ -381,6 +410,7 @@ class AgentsViewModel(
             unreadCount = organized.unreadCount,
             runningCount = organized.runningCount,
             collapsedSections = device.collapsedSections,
+            listedInFullSections = device.listedInFullSections,
             shortenLongGroups = device.shortenLongGroups,
             nowMillis = now,
         )
@@ -551,6 +581,9 @@ class AgentsViewModel(
 
     /** Folds a sidebar group closed or open, remembered on the device across restarts (see [AgentListUiState.collapsedSections]). */
     fun setSectionCollapsed(sectionKey: String, collapsed: Boolean) = viewModelScope.launch { graph.prefs.setSidebarSectionCollapsed(sectionKey, collapsed) }
+
+    /** Lists a long sidebar group in full, or cuts it back, remembered on the device across restarts (see [AgentListUiState.listedInFullSections]). */
+    fun setSectionListedInFull(sectionKey: String, listedInFull: Boolean) = viewModelScope.launch { graph.prefs.setSidebarSectionListedInFull(sectionKey, listedInFull) }
 
     /** The Projects arranged on the New Chat page, first to last; the sidebar's Projects group follows (see [LocalAgentState.projectOrder]). */
     fun setProjectOrder(ids: List<String>) = viewModelScope.launch { graph.prefs.setProjectOrder(ids) }

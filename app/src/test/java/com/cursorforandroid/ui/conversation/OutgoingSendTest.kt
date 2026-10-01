@@ -570,6 +570,8 @@ class OutgoingSendTest {
             graph.conversations.state(AGENT).value.items.any { it is UserMessage && it.text == "Then ship it" && !it.isPending }
         }
         withTimeout(15_000) { vm.isSending.first { !it } }
+        // Filed in one publish, followed in the next (see [accountStartsRunMidSend]): the follow is waited for.
+        awaitUntil("the chat on the account's run") { graph.conversations.state(AGENT).value.activeRunId == "run-account-1" }
         assertThat(card().queue.none { it.text == "Then ship it" }).isTrue()
         assertThat(graph.conversations.state(AGENT).value.activeRunId).isEqualTo("run-account-1")
     }
@@ -595,7 +597,14 @@ class OutgoingSendTest {
             graph.conversations.state(AGENT).value.items.any { it is UserMessage && it.text == text && !it.isPending }
         }
         withTimeout(15_000) { vm.isSending.first { !it } }
-        awaitUntil("the chat on the account's run") { graph.conversations.state(AGENT).value.runStatus?.isActive == true }
+        // The account named the agent's latest run when it answered. The chat files the message in one publish and
+        // follows that run in the next; between the two it still names the turn that ended, and with the row running
+        // on the new run already it can read running there. So the wait is for the follow the callers assert on, the
+        // documented run as the chat's active run, not for a running status alone.
+        val documented = api.agents.getValue(AGENT).latestRunId!!
+        awaitUntil("the chat on the account's run") {
+            graph.conversations.state(AGENT).value.let { it.runStatus?.isActive == true && it.activeRunId == documented }
+        }
         return vm
     }
 

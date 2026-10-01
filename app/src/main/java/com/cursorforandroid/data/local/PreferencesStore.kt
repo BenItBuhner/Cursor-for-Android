@@ -163,6 +163,8 @@ class PreferencesStore(
         val modeChoicePending = booleanPreferencesKey("mode_choice_pending")
         /** The sidebar groups the reader has folded closed, by section key ("projects", "pinned", "date:Today", …). */
         val collapsedSidebarSections = stringSetPreferencesKey("sidebar_collapsed_sections")
+        /** The long sidebar groups the reader has listed in full with "Show N more", by section key (see [listedInFullSidebarSections]). */
+        val listedInFullSidebarSections = stringSetPreferencesKey("sidebar_listed_in_full_sections")
         /** Settings › Chats › Shorten long Projects list; absent reads as on (see [shortenSidebarLists]). */
         val shortenSidebarLists = booleanPreferencesKey("sidebar_shorten_long_lists")
         /** Settings › New chat page: what the New Chat pane lists under its composer ([NewChatHome.key]); absent is the page's own pick. */
@@ -418,8 +420,24 @@ class PreferencesStore(
     }
 
     /**
+     * The long sidebar groups the reader has listed in full — "Show N more" tapped, "Show less" not yet — by section
+     * key. Kept like the folds: a device preference, read back when the sidebar comes back, the app is started again
+     * or the account is changed, since how far down the Projects list this reader keeps it open is theirs, not the
+     * account's.
+     */
+    val listedInFullSidebarSections: Flow<Set<String>> = data.map { it[Keys.listedInFullSidebarSections] ?: emptySet() }.distinctUntilChanged()
+
+    /** Lists the long sidebar group [sectionKey] in full, or cuts it back to its first rows; idempotent, like the folds. */
+    suspend fun setSidebarSectionListedInFull(sectionKey: String, listedInFull: Boolean) = edit { p ->
+        val current = p[Keys.listedInFullSidebarSections] ?: emptySet()
+        val next = if (listedInFull) current + sectionKey else current - sectionKey
+        if (next.isEmpty()) p.remove(Keys.listedInFullSidebarSections) else p[Keys.listedInFullSidebarSections] = next
+    }
+
+    /**
      * Whether a long Projects or Pinned group lists only its first five rows until "Show N more" is tapped. On by
-     * default; a device preference like the folds, kept across sign-outs. Which rows are listed in full is never kept.
+     * default; a device preference like the folds, kept across sign-outs. Which groups are listed in full is kept
+     * beside it ([listedInFullSidebarSections]), and stands whichever way this is switched.
      */
     val shortenSidebarLists: Flow<Boolean> = data.map { it[Keys.shortenSidebarLists] ?: true }.distinctUntilChanged()
 
