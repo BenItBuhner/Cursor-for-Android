@@ -96,12 +96,11 @@ class FileImportTest {
     }
 
     /**
-     * Extended mode used to upload a gallery picture as the gallery holds it: a full-resolution screenshot or photo,
-     * often over the account's 4 MB per image, with whatever the phone appended to it. It is prepared as an inline
-     * image is, and named after the format it now is.
+     * Extended mode used to upload a gallery picture with whatever the phone appended after its end marker, which the
+     * agent's image reader refuses. It is cut at the marker and otherwise goes up as the PNG it is, at full size.
      */
     @Test
-    fun `a full-size picture from the gallery in Extended mode is prepared for the model before it is uploaded`() {
+    fun `a full-size Samsung screenshot in Extended mode is cut at its end marker and uploaded as the PNG it is`() {
         val photo = Bitmap.createBitmap(2400, 1800, Bitmap.Config.ARGB_8888)
         val pixels = IntArray(2400 * 1800) { i -> Color.rgb(i % 251, (i / 2400) % 241, (i * 7) % 239) }
         photo.setPixels(pixels, 0, 2400, 0, 0, 2400, 1800)
@@ -113,18 +112,14 @@ class FileImportTest {
         assertThat(imported.error).isNull()
         val picked = imported.files.single()
         assertThat(picked.isImage).isTrue()
-        assertThat(picked.file.mimeType).isEqualTo("image/jpeg")
-        assertThat(picked.file.name).isEqualTo("Screenshot_20260930.jpg")
-        assertThat(picked.file.sizeBytes).isAtMost(AttachmentImages.MAX_SEND_BYTES)
-        assertThat(String(picked.file.bytes, Charsets.ISO_8859_1)).doesNotContain("SEFT")
-        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        android.graphics.BitmapFactory.decodeByteArray(picked.file.bytes, 0, picked.file.sizeBytes, bounds)
-        assertThat(bounds.outWidth to bounds.outHeight).isEqualTo(AttachmentImages.MAX_EDGE_PX to 1176)
+        assertThat(picked.file.mimeType).isEqualTo("image/png")
+        assertThat(picked.file.name).isEqualTo("Screenshot_20260930.png")
+        assertThat(picked.file.bytes).isEqualTo(png)
         assertThat(picked.thumbnail).isNotNull()
     }
 
     @Test
-    fun `a transparent picture picked in Extended mode keeps its transparency when it is scaled down`() {
+    fun `a transparent picture picked in Extended mode goes up as it is, transparency and all`() {
         val logo = Bitmap.createBitmap(2000, 2000, Bitmap.Config.ARGB_8888)
         logo.setPixels(IntArray(2000 * 2000) { i -> if ((i % 2000) < 1000) Color.argb(255, i % 251, 90, 200) else Color.TRANSPARENT }, 0, 2000, 0, 0, 2000, 2000)
         val png = ByteArrayOutputStream().also { logo.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
@@ -133,9 +128,7 @@ class FileImportTest {
 
         assertThat(picked.file.mimeType).isEqualTo("image/png")
         assertThat(picked.file.name).isEqualTo("logo.png")
-        val decoded = android.graphics.BitmapFactory.decodeByteArray(picked.file.bytes, 0, picked.file.sizeBytes)
-        assertThat(decoded.width).isEqualTo(AttachmentImages.MAX_EDGE_PX)
-        assertThat(Color.alpha(decoded.getPixel(decoded.width - 1, 0))).isEqualTo(0)
+        assertThat(picked.file.bytes).isEqualTo(png)
     }
 
     @Test

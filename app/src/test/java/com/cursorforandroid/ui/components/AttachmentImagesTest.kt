@@ -60,7 +60,7 @@ class AttachmentImagesTest {
         return bounds.outWidth to bounds.outHeight
     }
 
-    /** What every prepared image has to be for the agent to receive a picture: a format the API takes, named as what it is, intact, within the edge and the weight. */
+    /** What every prepared image has to be for the agent to view it as sent: a format the API takes, named as what it is, ending on its end marker, within the edge and the weight. */
     private fun assertReceivable(image: PromptImage, maxBytes: Int = AttachmentImages.MAX_SEND_BYTES) {
         val format = FileFormat.sniff(image.bytes)
         assertThat(format).isIn(listOf(FileFormat.PNG, FileFormat.JPEG, FileFormat.GIF, FileFormat.WEBP))
@@ -68,7 +68,7 @@ class AttachmentImagesTest {
         assertThat(AttachmentImages.isIntact(image.bytes, format)).isTrue()
         val (w, h) = dimensions(image.bytes)
         assertThat(w).isGreaterThan(0)
-        assertThat(max(w, h)).isAtMost(AttachmentImages.MAX_EDGE_PX)
+        assertThat(max(w, h)).isAtMost(AttachmentImages.MAX_PASSTHROUGH_EDGE_PX)
         assertThat(image.sizeBytes).isAtMost(maxBytes)
         assertThat(BitmapFactory.decodeByteArray(image.bytes, 0, image.sizeBytes)).isNotNull()
     }
@@ -78,39 +78,44 @@ class AttachmentImagesTest {
         "\u0000\u0000Q\u000C\u0014\u0000\u0000\u0000Samsung_Capture_InfoScreenshot\u0000\u0000SEFHk\u0000\u0000\u0000\u0002\u0000\u0000\u0000SEFT"
             .toByteArray(Charsets.ISO_8859_1)
 
+    /** An APP1 segment right after the SOI, as a camera writes its EXIF: a whole JPEG thumbnail, EOI and all, inside it. */
+    private fun withThumbnailSegment(jpeg: ByteArray, thumbnail: ByteArray): ByteArray {
+        val payload = "Exif\u0000\u0000".toByteArray(Charsets.ISO_8859_1) + thumbnail
+        val length = payload.size + 2
+        val app1 = byteArrayOf(0xFF.toByte(), 0xE1.toByte(), (length shr 8).toByte(), length.toByte()) + payload
+        return jpeg.copyOfRange(0, 2) + app1 + jpeg.copyOfRange(2, jpeg.size)
+    }
+
+    /** The user's complaint: a full-resolution phone screenshot is a PNG the agent can view as it is, so it goes out as it is. */
     @Test
-    fun `a phone screenshot is scaled to the model's ceiling and re-encoded as a much smaller JPEG`() {
+    fun `a full-resolution phone screenshot goes out byte for byte as the PNG it is`() {
         val original = bitmap(1440, 3200).encode(Bitmap.CompressFormat.PNG)
-        assertThat(original.size).isGreaterThan(AttachmentImages.PASSTHROUGH_MAX_BYTES)
+        assertThat(original.size).isGreaterThan(1024 * 1024)
 
         val prepared = AttachmentImages.prepare(original, "image/png")
 
-        assertThat(prepared.mimeType).isEqualTo("image/jpeg")
-        val (w, h) = dimensions(prepared.bytes)
-        assertThat(h).isEqualTo(AttachmentImages.MAX_EDGE_PX)
-        assertThat(w).isEqualTo(706) // 1440 * 1568 / 3200, aspect ratio kept
-        assertThat(prepared.sizeBytes).isLessThan(original.size / 4)
+        assertThat(prepared.bytes).isSameInstanceAs(original)
+        assertThat(prepared.mimeType).isEqualTo("image/png")
         assertReceivable(prepared)
     }
 
     @Test
-    fun `a photo wider than the ceiling is downscaled and keeps its aspect ratio`() {
-        val original = bitmap(3200, 2400).encode(Bitmap.CompressFormat.JPEG, 92)
-        val prepared = AttachmentImages.prepare(original, "image/jpeg")
+    fun `a photo goes out as taken, and only one past the models' 8000 px is scaled down`() {
+        val photo = bitmap(3200, 2400).encode(Bitmap.CompressFormat.JPEG, 92)
+        assertThat(AttachmentImages.prepare(photo, "image/jpeg").bytes).isSameInstanceAs(photo)
+
+        val panorama = bitmap(8200, 400, noisyFraction = 0.05f).encode(Bitmap.CompressFormat.JPEG, 80)
+        val prepared = AttachmentImages.prepare(panorama, "image/jpeg")
         assertThat(prepared.mimeType).isEqualTo("image/jpeg")
-        val (w, h) = dimensions(prepared.bytes)
-        assertThat(w).isEqualTo(AttachmentImages.MAX_EDGE_PX)
-        assertThat(h).isEqualTo(1176)
-        assertThat(prepared.sizeBytes).isLessThan(original.size)
+        assertThat(dimensions(prepared.bytes)).isEqualTo(AttachmentImages.MAX_EDGE_PX to 76) // 400 * 1568 / 8200, aspect ratio kept
         assertReceivable(prepared)
     }
 
     @Test
-    fun `small intact images and GIFs pass through untouched`() {
+    fun `intact images and GIFs pass through untouched`() {
         val small = bitmap(640, 360, noisyFraction = 0.25f).encode(Bitmap.CompressFormat.PNG)
-        assertThat(small.size).isAtMost(AttachmentImages.PASSTHROUGH_MAX_BYTES)
         val prepared = AttachmentImages.prepare(small, "image/png")
-        assertThat(prepared.bytes).isEqualTo(small)
+        assertThat(prepared.bytes).isSameInstanceAs(small)
         assertThat(prepared.mimeType).isEqualTo("image/png")
 
         val animated = AttachmentImages.prepare(TINY_GIF, "image/GIF")
@@ -119,30 +124,55 @@ class AttachmentImagesTest {
     }
 
     /**
-     * The report: a Samsung screenshot is a valid PNG with records after its `IEND`, which a strict decoder refuses.
-     * Sent byte for byte it reached the agent as an image it could not open; it is re-encoded instead.
+     * The report: a Samsung screenshot is a valid PNG with records after its `IEND`, and the agent's image reader
+     * refuses anything after `IEND` ("unrecognised content at end of stream"), so the agent had to convert it before
+     * it could look. It is cut at `IEND` — the PNG it was, every pixel chunk untouched.
      */
     @Test
-    fun `a PNG with data after its end marker is re-encoded rather than sent as it is`() {
-        val clean = bitmap(720, 1400, noisyFraction = 0.1f).encode(Bitmap.CompressFormat.PNG)
-        assertThat(clean.size).isAtMost(AttachmentImages.PASSTHROUGH_MAX_BYTES)
-        val samsung = clean + samsungTrailer
-        assertThat(AttachmentImages.isIntact(samsung, FileFormat.PNG)).isFalse()
+    fun `a PNG with data after its end marker is cut at the marker and stays the same PNG`() {
+        for ((width, height) in listOf(720 to 1400, 1440 to 3120)) {
+            val clean = bitmap(width, height, noisyFraction = 0.1f).encode(Bitmap.CompressFormat.PNG)
+            val samsung = clean + samsungTrailer
+            assertThat(AttachmentImages.isIntact(samsung, FileFormat.PNG)).isFalse()
 
-        val prepared = AttachmentImages.prepare(samsung, "image/png")
+            val prepared = AttachmentImages.prepare(samsung, "image/png")
 
-        assertThat(prepared.bytes).isNotEqualTo(samsung)
-        assertThat(String(prepared.bytes, Charsets.ISO_8859_1)).doesNotContain("SEFT")
-        assertThat(dimensions(prepared.bytes)).isEqualTo(720 to 1400)
+            assertThat(prepared.mimeType).isEqualTo("image/png")
+            assertThat(prepared.bytes).isEqualTo(clean)
+            assertReceivable(prepared)
+        }
+    }
+
+    @Test
+    fun `a camera JPEG with a trailer after its EOI is cut at the EOI, past the one its EXIF thumbnail carries`() {
+        val photo = bitmap(800, 600, noisyFraction = 0.05f).encode(Bitmap.CompressFormat.JPEG, 80)
+        assertThat(AttachmentImages.isIntact(photo, FileFormat.JPEG)).isTrue()
+        assertThat(AttachmentImages.prepare(photo + samsungTrailer, "image/jpeg").bytes).isEqualTo(photo)
+
+        val thumbnail = bitmap(160, 120).encode(Bitmap.CompressFormat.JPEG, 70)
+        val camera = withThumbnailSegment(photo, thumbnail)
+        assertThat(dimensions(camera)).isEqualTo(800 to 600)
+        val prepared = AttachmentImages.prepare(camera + samsungTrailer, "image/jpeg")
+        assertThat(prepared.bytes).isEqualTo(camera)
         assertReceivable(prepared)
     }
 
     @Test
-    fun `a camera JPEG with a trailer after its EOI is re-encoded`() {
+    fun `a WebP with bytes past its RIFF length is cut at it`() {
+        val webp = bitmap(320, 240, noisyFraction = 0.1f).encode(Bitmap.CompressFormat.WEBP_LOSSY, 80)
+        val prepared = AttachmentImages.prepare(webp + samsungTrailer, "image/webp")
+        assertThat(prepared.mimeType).isEqualTo("image/webp")
+        assertThat(prepared.bytes).isEqualTo(webp)
+    }
+
+    @Test
+    fun `an image whose structure ends early is re-encoded rather than sent as it is`() {
         val photo = bitmap(800, 600, noisyFraction = 0.05f).encode(Bitmap.CompressFormat.JPEG, 80)
-        assertThat(AttachmentImages.isIntact(photo, FileFormat.JPEG)).isTrue()
-        val prepared = AttachmentImages.prepare(photo + samsungTrailer, "image/jpeg")
-        assertThat(String(prepared.bytes, Charsets.ISO_8859_1)).doesNotContain("SEFT")
+        val noEoi = photo.copyOf(photo.size - 2)
+        assertThat(AttachmentImages.trimmed(noEoi, FileFormat.JPEG)).isNull()
+        val prepared = AttachmentImages.prepare(noEoi, "image/jpeg")
+        assertThat(prepared.bytes).isNotEqualTo(noEoi)
+        assertThat(dimensions(prepared.bytes)).isEqualTo(800 to 600)
         assertReceivable(prepared)
     }
 
@@ -160,19 +190,26 @@ class AttachmentImagesTest {
         assertThat(prepared.bytes).isEqualTo(webp)
     }
 
-    /** A picked file always reached the agent with its alpha; an inline image was always flattened. Neither changes. */
+    /**
+     * A transparent PNG goes out as it is either way. One that has to be re-encoded keeps its transparency as PNG for a
+     * picked file, as it always reached the agent, and is flattened for an inline image, as that always was.
+     */
     @Test
-    fun `a large transparent image keeps its transparency as PNG when asked, and is flattened onto white otherwise`() {
+    fun `a transparent image re-encoded to fit keeps its transparency as PNG when asked, and is flattened onto white otherwise`() {
         val original = bitmap(2400, 2400, alpha = true, noisyFraction = 0.5f).encode(Bitmap.CompressFormat.PNG)
-        val kept = AttachmentImages.prepare(original, "image/png", keepTransparency = true)
+        assertThat(AttachmentImages.prepare(original, "image/png").bytes).isSameInstanceAs(original)
+
+        val ceiling = original.size - 1
+        val kept = AttachmentImages.prepare(original, "image/png", maxBytes = ceiling, keepTransparency = true)
         assertThat(kept.mimeType).isEqualTo("image/png")
         val decoded = BitmapFactory.decodeByteArray(kept.bytes, 0, kept.sizeBytes)
+        assertThat(decoded.width).isEqualTo(AttachmentImages.MAX_EDGE_PX)
         assertThat(Color.alpha(decoded.getPixel(decoded.width - 1, decoded.height - 1))).isEqualTo(0)
-        assertReceivable(kept)
+        assertReceivable(kept, ceiling)
 
-        val flattened = AttachmentImages.prepare(original, "image/png")
+        val flattened = AttachmentImages.prepare(original, "image/png", maxBytes = ceiling)
         assertThat(flattened.mimeType).isEqualTo("image/jpeg")
-        assertReceivable(flattened)
+        assertReceivable(flattened, ceiling)
     }
 
     @Test
@@ -189,7 +226,7 @@ class AttachmentImagesTest {
         assertReceivable(prepared, ceiling)
     }
 
-    /** The account path takes at most 4 MB an image and the model 5 MB of base64: nothing heavier ever goes out. */
+    /** Nothing heavier than the ceiling ever goes out. */
     @Test
     fun `an image still over the byte ceiling at the edge cap steps its quality and then its size down to fit`() {
         val original = bitmap(1500, 1500).encode(Bitmap.CompressFormat.PNG)
