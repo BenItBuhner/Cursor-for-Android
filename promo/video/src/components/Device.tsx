@@ -81,6 +81,15 @@ export const Device: React.FC<{
         {children}
         {device === "foldable" ? <Crease width={width} height={height} /> : null}
         {device !== "tablet" ? <PunchHole take={take} width={width} height={height} /> : null}
+        {/* The stage's light on the glass: a faint, fixed sheen from the top left, so the screen reads as a surface. */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "linear-gradient(118deg, rgba(255,246,232,0.045) 0%, rgba(255,246,232,0.014) 30%, rgba(255,246,232,0) 50%)",
+            pointerEvents: "none",
+          }}
+        />
         {glint(0.1, 30)}
       </div>
       {device === "tablet" ? (
