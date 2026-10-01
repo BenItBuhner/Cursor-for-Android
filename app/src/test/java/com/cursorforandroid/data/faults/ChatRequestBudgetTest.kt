@@ -33,7 +33,8 @@ import java.time.Instant
  * The refused scenarios are the shared backoff's lock: a `429` or a `Retry-After` heard by one client holds the
  * host for every other (`HostPause`, `RetryInterceptor`, `SseRunStreamer`, `ApiThrottle`), and nothing asks again
  * inside the wait. For the record: v0.4.30 asked 5.25 a minute for one open chat and 8.25 for eight followed agents;
- * v0.4.31's stall watch, resuming every two minutes at its cap, made that 6.75 and 20.25.
+ * v0.4.31's stall watch, resuming every two minutes at its cap, made that 6.75 and 20.25. The watch now runs only for
+ * a chat on screen (see `LiveRunHub.stallTimeoutMs`): the followed agents are back to the list's refresh alone.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -150,9 +151,18 @@ class ChatRequestBudgetTest {
         val rig = openRig()
         rig.agents.refresh()
         rig.startMonitor()
+        // Every followed run has its one stream open before the count starts: what follows must be none.
+        rig.awaitUntil(15_000) { server.requests(Route.Stream).size >= RunMonitor.MAX_TRACKED }
+        // v0.4.30's window first, for the like-for-like figure; then the long one the stall watch's cap would show in.
+        val asked4 = window("eight followed agents, long tool calls, no chat open", REFUSED_WINDOW_MS)
+        budget("everything, over v0.4.30's window", asked4.total(), TOTAL_PER_MINUTE_FLEET_STEADY)
         val asked = window("eight followed agents, long tool calls, no chat open")
-        budget("the run records", asked[Route.GetRun] ?: 0.0, RECORDS_PER_MINUTE_FLEET)
-        budget("stream opens", asked[Route.Stream] ?: 0.0, STREAM_OPENS_PER_MINUTE_FLEET)
+        // The notification resumes nothing and rebuilds nothing: a run with no chat on it holds its connection.
+        budget("stream opens", asked[Route.Stream] ?: 0.0, 0.0)
+        // The run records are read by the agent list's refresh, one per followed agent per list, and by nothing else
+        // (one refresh's worth of room: a list read just before the window has its records read just inside it).
+        val lists = asked[Route.ListAgents] ?: 0.0
+        budget("the run records, per list refresh", asked[Route.GetRun] ?: 0.0, RunMonitor.MAX_TRACKED * (lists + 1 / WINDOW_MINUTES))
         budget("everything", asked.total(), TOTAL_PER_MINUTE_FLEET)
     }
 
@@ -163,6 +173,8 @@ class ChatRequestBudgetTest {
         rig.openChat()
         rig.startMonitor()
         val asked = window("open chat and eight followed agents, long tool calls")
+        // Only the open chat's stream is ever taken up again; the seven followed beside it hold theirs.
+        budget("stream opens", asked[Route.Stream] ?: 0.0, STREAM_OPENS_PER_MINUTE_QUIET)
         budget("everything", asked.total(), TOTAL_PER_MINUTE_FLEET_AND_CHAT)
     }
 
@@ -214,7 +226,8 @@ class ChatRequestBudgetTest {
          * its cap (30 s, 60, 120, 240, then the cap), so the cap's cost shows in the count.
          */
         const val WINDOW_MS = 10 * 60_000L / SCALE
-        /** A refused window: four minutes of the agents' time, several times the wait the refusal names. */
+        const val WINDOW_MINUTES = WINDOW_MS * SCALE / 60_000.0
+        /** A refused window: four minutes of the agents' time, several times the wait the refusal names. Also v0.4.30's. */
         const val REFUSED_WINDOW_MS = 4 * 60_000L / SCALE
         /** The wait a refusal names, in the server's seconds: half a minute of the agents' time, scaled. */
         const val RETRY_AFTER_S = 1
@@ -225,17 +238,20 @@ class ChatRequestBudgetTest {
         /** One open chat inside a long tool call: the stall watch's resume, 30 s doubling to 5 min (measured 0.5 and 0.5; 0.6 at the 2 min cap of v0.4.31). */
         const val RECORD_PER_MINUTE_QUIET = 1.0
         const val STREAM_OPENS_PER_MINUTE_QUIET = 1.0
-        /** Eight followed agents: the notification's record reads (0.9 each; v0.4.30 alike) and the stall watch's (measured 11.2 and 4.0). */
-        const val RECORDS_PER_MINUTE_FLEET = 14.0
-        const val STREAM_OPENS_PER_MINUTE_FLEET = 6.0
         /** The record or the stream refused with a Retry-After of half a minute (measured 2.0 and 1.5): the wait is waited, not talked over. */
         const val RECORD_PER_MINUTE_REFUSED = 2.5
         const val STREAM_OPENS_PER_MINUTE_REFUSED = 2.5
         /** One open chat, all told: the account's queue read every ten seconds is most of it (measured 6.4 quiet, 8.0 refused). */
         const val TOTAL_PER_MINUTE_OPEN_CHAT = 10.0
-        /** Eight followed agents with no chat open (measured 17.9), and with one open (measured 23.3). */
-        const val TOTAL_PER_MINUTE_FLEET = 22.0
-        const val TOTAL_PER_MINUTE_FLEET_AND_CHAT = 28.0
+        /**
+         * Eight followed agents with no chat open: the agent list's refresh a minute — three list routes and a record
+         * per followed agent — and nothing else (measured 9.9 over ten minutes; v0.4.30 alike, 8.25 over its four, which
+         * held three refreshes rather than four). A fourth refresh falling inside the four-minute window makes 11.0.
+         */
+        const val TOTAL_PER_MINUTE_FLEET_STEADY = 11.0
+        const val TOTAL_PER_MINUTE_FLEET = 12.0
+        /** Eight followed agents and one open chat (measured 16.3): the fleet's refresh and the chat's queue read. */
+        const val TOTAL_PER_MINUTE_FLEET_AND_CHAT = 20.0
         /** A chat opened while every documented call is refused (measured 7.75): nothing asks again inside the wait. */
         const val TOTAL_PER_MINUTE_REFUSED = 12.0
     }
