@@ -170,6 +170,8 @@ class FaultServer(
     val accountTurns: MutableSet<String> = ConcurrentHashMap.newKeySet()
     /** Whether the account may start the next run on a queued message on its own the moment the turn ends (see [endTurn]); tests deliver by hand otherwise. */
     @Volatile var autoDeliver = false
+    /** An outcome every steer is answered with instead (`OUTCOME_REJECTED`, say), the queued message left where it was; null steers as the account does. */
+    @Volatile var steerOutcome: String? = null
     /** The followups delivered, in order, and the run each started (a steer's run is the one it was delivered into). */
     val delivered = CopyOnWriteArrayList<Pair<String, String>>()
     /** The largest page the list endpoints serve whatever `limit` asks, so a small account still pages. */
@@ -722,6 +724,7 @@ class FaultServer(
         val body = CursorJson.parseToJsonElement(request.body.readUtf8()).jsonObject
         val agentId = body["bcId"]?.jsonPrimitive?.contentOrNull ?: return json(400, connectError("invalid_argument", "bcId is required"))
         val agent = agents[agentId] ?: return json(404, connectError("not_found", "no such composer"))
+        steerOutcome?.let { return json(200, """{"outcome":"$it"}""") }
         val runId = agent.latestRunId?.takeIf { runs[it]?.status?.let { st -> com.cursorforandroid.domain.RunStatus.parse(st).isActive } == true }
             ?: return json(200, """{"outcome":"OUTCOME_REJECTED"}""")
         val promote = body["promoteFollowupId"]?.jsonPrimitive?.contentOrNull

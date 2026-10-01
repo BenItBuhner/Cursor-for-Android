@@ -357,7 +357,7 @@ fun ConversationScreen(
     var snoozeOpen by rememberSaveable { mutableStateOf(false) }
     // Every tap here that would stop, pause or interrupt the run asks first while the setting is on (see
     // RunStopConfirmation): the composer's Stop, the menu's, the queues' Send now, the panel's controls.
-    val stopConfirmation = rememberRunStopConfirmation(graph.prefs)
+    val stopConfirmation = rememberRunStopConfirmation()
     val haptics = rememberHaptics()
     val uriHandler = LocalUriHandler.current
     val clipboard = LocalClipboardManager.current
@@ -901,6 +901,9 @@ fun ConversationScreen(
                             onMove = { item, up -> viewModel.queueMove(item.id, up) },
                             flights = queueFlights,
                             face = face,
+                            // A row being steered refuses its glyphs, as a steering device card does: it says why, in place.
+                            refused = refusedQueuedId == accountRows[at].id,
+                            onRefused = { item -> haptics.perform(Haptic.Reject); viewModel.refuseSteering(item.id) },
                         )
                     }
                 }

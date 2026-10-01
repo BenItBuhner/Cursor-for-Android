@@ -166,8 +166,8 @@ internal fun imageUrisFromClip(resolver: ContentResolver, clip: ClipData): List<
 
 internal fun loadAttachment(bytes: ByteArray, declaredMime: String?, id: String): Result<PendingAttachment> = runCatching {
     if (bytes.size > PromptImage.MAX_BYTES) error(TooLargeMessage)
-    // Normalized and base64-encoded here, once, so the request — and the one the composer retries — carries only
-    // what the model uses and has nothing left to compute when it goes out. The bytes decide the type: a declared
+    // Normalized and base64-encoded here, once, so the request — and the one the composer retries — carries an image
+    // the agent can view as sent and has nothing left to compute when it goes out. The bytes decide the type: a declared
     // `image/png` over JPEG bytes would be refused by the model as a mismatch.
     val image = AttachmentImages.prepare(unwrapImageBytes(bytes), declaredMime?.substringBefore(';')?.trim()?.lowercase()).encoded()
     PendingAttachment(id = id, image = image, thumbnail = thumbnailOf(image))

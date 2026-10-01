@@ -13,6 +13,7 @@ import com.cursorforandroid.data.repo.ConversationState
 import com.cursorforandroid.data.repo.FollowUpRepository
 import com.cursorforandroid.data.repo.SlashCommandRepository
 import com.cursorforandroid.data.repo.SlashScope
+import com.cursorforandroid.data.repo.SteerRefusedException
 import com.cursorforandroid.data.repo.TraceStatus
 import com.cursorforandroid.domain.AccountModel
 import com.cursorforandroid.domain.Agent
@@ -858,6 +859,13 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      */
     private fun refusedOnItsWay(id: String) {
         if (!graph.followUps.isOnItsWay(agentId, id)) return
+        showRefusal(id)
+    }
+
+    /** A glyph of an account row being steered was tapped: the steer cannot be called back, and the row says so (see [refusedQueuedId]). */
+    fun refuseSteering(id: String) = showRefusal(id)
+
+    private fun showRefusal(id: String) {
         refused.value = id
         refusalShown?.cancel()
         refusalShown = viewModelScope.launch {
@@ -920,8 +928,10 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
      * under way (`InjectBackgroundComposerContext` with it promoted), never stopping it; with nothing running it is
      * sent now (`SubmitPendingFollowupNow`), there being no turn for it to take the place of.
      */
-    fun queueSteer(id: String, turnUnderWay: Boolean) = control {
-        if (turnUnderWay) graph.steering.promotePending(agentId, id) else graph.steering.submitPendingNow(agentId, id)
+    fun queueSteer(id: String, turnUnderWay: Boolean) = viewModelScope.launch {
+        val done = if (turnUnderWay) graph.steering.promotePending(agentId, id) else graph.steering.submitPendingNow(agentId, id)
+        // A steer the account refused says so under the row, which keeps its place in the queue: no snackbar besides.
+        done.onFailure { if (it !is SteerRefusedException) toast.value = it.userMessage() }
     }
 
     fun queueDelete(id: String) = control { graph.steering.deletePending(agentId, id) }
