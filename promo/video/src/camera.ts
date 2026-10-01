@@ -300,10 +300,10 @@ const key = (at: number, zoom: number, fx: number, fy: number, x: number, y: num
  * swoops in turned and tilted, pushes in on the held Project and its menu and follows it across the grid. Cut close on
  * the composer: in on the microphone, along the listening, onto the words and the send, then up with the message as it
  * flies into the chat, settling as it lands, and back as the run starts to answer; in on the edit as it is tapped open
- * and closer as its diff lands, down it and back out to all of it, up after it as it folds and in on the stretch, which
- * the wide cut leaves for the follow-up field as it is tapped. Cut low on the composer as the follow-up is typed, onto
- * the queue, the steer, and up with the steer to its answer. Cut wide as the shade comes down and in on the run's
- * notification. Cut to the answer, the details and the pull request.
+ * and closer as its diff lands, down it and back out to all of it, in on it again as it folds and closer on the stretch
+ * as it forms, then back out to the run and the follow-up field together as the field is tapped, and in on it. Cut low
+ * on the composer as the follow-up is typed, onto the queue, the steer, and up with the steer to its answer. Cut wide as
+ * the shade comes down and in on the run's notification. Cut to the answer, the details and the pull request.
  */
 function keysOf(reel: Reel): Record<Framing, Shot[]> {
   const v = (name: string, by = 0) => whenShown(reel, mark(reel.take, name)) + by;
@@ -344,12 +344,11 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
         key(v("edit", 12), 2.95, 0.34, 0.27, 0.66, 0.44, -5, 1.5, 0),
         key(v("the diff", -1), 3.15, 0.3, 0.32, 0.66, 0.42, -2, 1, 0.4),
         key(v("the diff", 26), 2.7, 0.3, 0.45, 0.66, 0.48, -8, 2.5, 0.6),
-        key(v("the diff", 62), 1.85, 0.42, 0.45, 0.68, 0.5, -18, 6, 1),
-        key(v("fold", -16), 2.0, 0.4, 0.4, 0.68, 0.48, -15, 5, 0.6),
-        key(v("fold", -2), 2.3, 0.36, 0.3, 0.66, 0.46, -12, 4, 0.2),
-        key(v("fold", 22), 2.45, 0.38, 0.235, 0.67, 0.45, -10, 3, 0),
-        key(v("the stretch", 4), 2.6, 0.42, 0.235, 0.69, 0.45, -6, 1.5, -0.4),
-        key(v("follow-up", -4), 1.85, 0.56, 0.66, 0.7, 0.45, -15.5, -2.3, 0.6),
+        key(v("the diff", 56), 1.85, 0.42, 0.41, 0.68, 0.5, -14, 5, 1),
+        key(v("fold", -2), 2.55, 0.35, 0.29, 0.66, 0.46, -18, 4, 0.2),
+        key(v("fold", 22), 2.75, 0.355, 0.235, 0.68, 0.45, -12, 3, 0),
+        key(v("the stretch", 4), 3.0, 0.36, 0.225, 0.7, 0.45, -6, 1.5, -0.4),
+        key(v("follow-up", -4), 1.45, 0.5, 0.57, 0.7, 0.5, -15.5, -2.3, 0.6),
         key(AT.steer, 1.95, 0.55, 0.77, 0.7, 0.47, -18, -4, 0.8),
       ]),
       moving([
@@ -410,13 +409,13 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
         key(v("edit", -2), 2.2, 0.32, 0.225, 0.47, 0.6, -6, 7, -0.5),
         key(v("edit", 12), 2.35, 0.36, 0.255, 0.48, 0.65, -4, 8, 0),
         key(v("the diff", -1), 2.45, 0.33, 0.29, 0.47, 0.72, -2, 9, 0.4),
-        key(v("the diff", 26), 2.0, 0.36, 0.4, 0.48, 0.76, -7, 12, 0.6),
-        key(v("the diff", 62), 1.3, 0.45, 0.45, 0.5, 0.64, -14, 8, 1),
-        key(v("fold", -22), 1.4, 0.42, 0.42, 0.5, 0.63, -11, 8, 0.6),
-        key(v("fold", -2), 1.7, 0.38, 0.32, 0.48, 0.6, -9, 7, 0.2),
-        key(v("fold", 22), 1.9, 0.4, 0.235, 0.49, 0.55, -8, 6, 0),
-        key(v("the stretch", 4), 2.1, 0.42, 0.235, 0.5, 0.58, -5, 5, -0.4),
-        key(AT.steer, 2.3, 0.45, 0.24, 0.5, 0.63, -2, 6, 0.3),
+        key(v("the diff", 26), 2.0, 0.36, 0.4, 0.48, 0.765, -7, 12, 0.6),
+        key(v("the diff", 56), 1.3, 0.45, 0.38, 0.5, 0.66, -11, 9, 1),
+        key(v("fold", -2), 1.85, 0.38, 0.3, 0.48, 0.62, -14, 7, 0.2),
+        key(v("fold", 22), 2.0, 0.4, 0.235, 0.49, 0.56, -9, 6, 0),
+        key(v("the stretch"), 2.2, 0.42, 0.235, 0.5, 0.585, -5, 5, -0.4),
+        key(v("follow-up", -4), 1.1, 0.5, 0.55, 0.5, 0.67, -12, 8, 0.6),
+        key(AT.steer, 1.15, 0.52, 0.6, 0.5, 0.72, -14, 9, 0.8),
       ]),
       moving([
         key(AT.steer, 1.33, 0.4, 0.88, 0.5, 0.915, 12, 18, 1),
