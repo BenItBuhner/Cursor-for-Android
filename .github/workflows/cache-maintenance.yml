@@ -61,9 +61,11 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
+          # Deleting by ref alone is not an API call (it needs a key too), so the ref's entries are listed and deleted by id.
           for ref in "refs/pull/$PR/merge" "refs/heads/$BRANCH"; do
-            n="$(gh api -X DELETE "repos/$GH_REPO/actions/caches?ref=$ref" --jq '.total_count' 2>/dev/null || echo 0)"
-            echo "$ref: $n cache(s) deleted"
+            ids="$(gh api --paginate "repos/$GH_REPO/actions/caches?per_page=100&ref=$ref" --jq '.actions_caches[].id')"
+            for id in $ids; do gh api -X DELETE "repos/$GH_REPO/actions/caches/$id" >/dev/null; done
+            echo "$ref: $(wc -w <<<"$ids") cache(s) deleted"
           done
 
       - name: Prune by job, age and budget
@@ -71,7 +73,8 @@ jobs:
           gh api --paginate "repos/$GH_REPO/actions/caches?per_page=100" --jq '.actions_caches[]' | jq -s '.' > caches.json
           total="$(jq '[.[].size_in_bytes] | add // 0' caches.json)"
           count="$(jq 'length' caches.json)"
-          printf 'Before: %d entries, %.2f GB\n' "$count" "$(bc -l <<<"$total / 1e9")"
+          gb() { awk -v b="$1" 'BEGIN { printf "%.2f", b / 1e9 }'; }
+          printf 'Before: %d entries, %s GB\n' "$count" "$(gb "$total")"
 
           stale_before="$(date -u -d "-${STALE_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)"
           jq -r --argjson keep "$KEEP_HOMES" --arg stale "$stale_before" --argjson budget "$((BUDGET_GB * 1000000000))" '
@@ -105,12 +108,12 @@ jobs:
           done < delete.tsv
 
           after=$((total - deleted_bytes))
-          printf 'After: %d entries, %.2f GB (%d deleted, %.2f GB)\n' "$((count - deleted))" "$(bc -l <<<"$after / 1e9")" "$deleted" "$(bc -l <<<"$deleted_bytes / 1e9")"
+          printf 'After: %d entries, %s GB (%d deleted, %s GB)\n' "$((count - deleted))" "$(gb "$after")" "$deleted" "$(gb "$deleted_bytes")"
           {
             echo "## Actions cache"
-            printf -- '- Before: %d entries, %.2f GB\n' "$count" "$(bc -l <<<"$total / 1e9")"
-            printf -- '- Deleted: %d entries, %.2f GB\n' "$deleted" "$(bc -l <<<"$deleted_bytes / 1e9")"
-            printf -- '- After: %d entries, %.2f GB (budget %s GB)\n' "$((count - deleted))" "$(bc -l <<<"$after / 1e9")" "$BUDGET_GB"
+            printf -- '- Before: %d entries, %s GB\n' "$count" "$(gb "$total")"
+            printf -- '- Deleted: %d entries, %s GB\n' "$deleted" "$(gb "$deleted_bytes")"
+            printf -- '- After: %d entries, %s GB (budget %s GB)\n' "$((count - deleted))" "$(gb "$after")" "$BUDGET_GB"
             if [[ -s delete.tsv ]]; then
               echo; echo "| MB | Key | Why |"; echo "|---:|---|---|"
               awk -F'\t' '{printf "| %d | `%s` | %s |\n", $2 / 1000000, $4, $3}' delete.tsv
