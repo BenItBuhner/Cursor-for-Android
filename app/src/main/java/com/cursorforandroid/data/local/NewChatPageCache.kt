@@ -58,6 +58,7 @@ data class CachedShortcutRow(
     val isSnoozed: Boolean = false,
     val snoozedAtMillis: Long? = null,
     val memberCount: Int? = null,
+    val isPlaceholder: Boolean = false,
     val isStandIn: Boolean = false,
     val children: List<CachedShortcutRow> = emptyList(),
 ) {
@@ -70,6 +71,7 @@ data class CachedShortcutRow(
         isSnoozed = isSnoozed,
         snoozedAtMillis = snoozedAtMillis,
         children = children.map(CachedShortcutRow::toRow),
+        isPlaceholder = isPlaceholder,
         memberCount = memberCount,
         isStandIn = isStandIn,
     )
@@ -88,6 +90,7 @@ data class CachedShortcutRow(
             isSnoozed = row.isSnoozed,
             snoozedAtMillis = row.snoozedAtMillis,
             memberCount = row.memberCount,
+            isPlaceholder = row.isPlaceholder,
             isStandIn = row.isStandIn,
             children = row.children.map { of(it, nested = true) },
         )
