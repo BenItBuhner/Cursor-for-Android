@@ -4,6 +4,7 @@ import com.cursorforandroid.data.api.ConnectRpc
 import com.cursorforandroid.data.api.ConnectStreamFixtures
 import com.cursorforandroid.data.api.CursorJson
 import com.cursorforandroid.data.api.dto.AgentDto
+import com.cursorforandroid.data.api.dto.AgentEnvDto
 import com.cursorforandroid.data.api.dto.AgentSummaryDto
 import com.cursorforandroid.data.api.dto.ApiKeyInfoDto
 import com.cursorforandroid.data.api.dto.CreateRunRequestDto
@@ -345,8 +346,8 @@ class FaultServer(
 
     // -- the account ---------------------------------------------------------------------------------------------
 
-    fun addIdleAgent(id: String, name: String, runId: String, createdAt: String = "2026-04-13T18:30:00.000Z", prompt: String = "Do the thing", reply: String = "Done.") {
-        agents[id] = AgentDto(id = id, name = name, status = "IDLE", createdAt = createdAt, updatedAt = createdAt, latestRunId = runId, url = "https://cursor.com/agents/$id")
+    fun addIdleAgent(id: String, name: String, runId: String, createdAt: String = "2026-04-13T18:30:00.000Z", prompt: String = "Do the thing", reply: String = "Done.", env: AgentEnvDto = AgentEnvDto()) {
+        agents[id] = AgentDto(id = id, name = name, status = "IDLE", env = env, createdAt = createdAt, updatedAt = createdAt, latestRunId = runId, url = "https://cursor.com/agents/$id")
         v0[id] = V0AgentDto(id = id, name = name, status = "FINISHED")
         runs[runId] = RunDto(id = runId, agentId = id, status = "FINISHED", createdAt = createdAt, updatedAt = createdAt, durationMs = 65_000, result = reply)
         transcripts[id] = listOf(V0ConversationMessageDto("$runId-u", "user_message", prompt), V0ConversationMessageDto("$runId-a", "assistant_message", reply))
@@ -1097,30 +1098,61 @@ class FaultServer(
         synchronized(liveLock) { liveLock.notifyAll() }
     }
 
+    private val strandings = ConcurrentHashMap<String, Int>()
+    private val liveDrops = ConcurrentHashMap<String, Int>()
+
+    /**
+     * The held streams of [runId] open now are stranded: the connection stays up and its keep-alives keep coming, but
+     * nothing more of the log reaches it — the server's side of the stream let go of the run (a message steered into
+     * the turn, a turn handed to the next) while the gateway in front of it keeps the connection warm. A connection
+     * opened afterwards, resumed from the last id it saw, is sent the log as usual.
+     */
+    fun strandLiveStreams(runId: String) {
+        strandings.merge(runId, 1, Int::plus)
+        synchronized(liveLock) { liveLock.notifyAll() }
+    }
+
+    /** The held streams of [runId] open now end mid-turn without `done`: a network blip under a run that goes on. */
+    fun dropLiveStreams(runId: String) {
+        liveDrops.merge(runId, 1, Int::plus)
+        synchronized(liveLock) { liveLock.notifyAll() }
+    }
+
     private fun heldRun(runId: String, skip: Int): MockResponse =
         MockResponse().setResponseCode(200).removeHeader("Content-Length").setHeader("Content-Type", "text/event-stream").setBody(object : DuplexResponseBody {
             override fun onRequest(request: RecordedRequest, http2Stream: Http2Stream) {
                 liveRunOpen.incrementAndGet()
+                val strandedAt = strandings[runId] ?: 0
+                val droppedAt = liveDrops[runId] ?: 0
                 try {
                     val sink = http2Stream.getSink().buffer()
                     var sent = skip
                     var tick = 0
                     while (!closed) {
-                        val log = logs[runId].orEmpty()
+                        if ((liveDrops[runId] ?: 0) > droppedAt) {
+                            sink.flush()
+                            sink.close()
+                            return
+                        }
+                        val stranded = (strandings[runId] ?: 0) > strandedAt
+                        val log = if (stranded) logs[runId].orEmpty().take(sent) else logs[runId].orEmpty()
                         while (sent < log.size) {
                             val (event, data) = log[sent++]
                             sink.writeUtf8("event: ").writeUtf8(event).writeUtf8("\nid: ").writeUtf8(runId).writeUtf8("#").writeUtf8(sent.toString()).writeUtf8("\ndata: ").writeUtf8(data).writeUtf8("\n\n")
                         }
-                        if (runs[runId]?.status != "RUNNING") {
+                        if (!stranded && runs[runId]?.status != "RUNNING") {
                             sink.writeUtf8("event: done\ndata: {}\n\n").flush()
                             sink.close()
                             return
                         }
-                        liveRunGenerator?.invoke(runId, ++tick)?.forEach { (event, data) ->
+                        if (!stranded) liveRunGenerator?.invoke(runId, ++tick)?.forEach { (event, data) ->
                             sink.writeUtf8("event: ").writeUtf8(event).writeUtf8("\nid: ").writeUtf8(runId).writeUtf8("#g").writeUtf8(tick.toString()).writeUtf8("\ndata: ").writeUtf8(data).writeUtf8("\n\n")
                         }
                         sink.writeUtf8(": keep-alive\n\n").flush()
-                        synchronized(liveLock) { if (logs[runId].orEmpty().size == sent && !closed) liveLock.wait(liveRunBeatMs) }
+                        synchronized(liveLock) {
+                            val caughtUp = stranded || logs[runId].orEmpty().size == sent
+                            if (caughtUp && !closed && (liveDrops[runId] ?: 0) == droppedAt) liveLock.wait(liveRunBeatMs)
+                        }
                     }
                 } catch (_: IOException) {
                     // The client reset the stream: it is gone.

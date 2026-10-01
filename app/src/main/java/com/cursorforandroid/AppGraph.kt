@@ -894,6 +894,8 @@ class AppGraph(
                 override suspend fun withdraw(agentId: String, followupId: String): Boolean =
                     steering.deletePending(agentId, followupId).isSuccess
             },
+            // A Remote Control chat's machine must be reporting to Cursor for a message to go (`GET /v0/private-workers`).
+            machineStatus = { agent, fresh -> remote.machineStatus(agent, force = fresh)?.getOrNull() },
             store = followUpStore,
             persist = { !session.isDemo },
         )
@@ -1064,10 +1066,11 @@ class AppGraph(
      * Opens the key store, with the Android Keystore behind it — the slowest read of the session's restore — on a
      * background thread, for `Application.onCreate`: the restore the activity starts a moment later finds it open
      * instead of paying for it while the splash screen waits. The settings are left to the restore, which reads them
-     * in one snapshot beside it.
+     * in one snapshot beside it. The New Chat page's last picture is read beside it, so the first frame has it.
      */
     fun warmUp() {
         startupScope.launch(Dispatchers.IO) { runCatching { keyStore.apiKey() } }
+        caches.newChatPage.warm()
     }
 
     private val sessionStartLock = Any()
@@ -1155,6 +1158,7 @@ class AppGraph(
             // Cancelling a write does not stop it: the caches are closed first so nothing this account still has in
             // flight can land after the wipe below re-creates the directories it deleted.
             caches.invalidate()
+            caches.newChatPage.forget()
             AttachmentImages.clear()
             share.clear()
             // Resetting is only ever about what is in memory, so a part this process never built has nothing to

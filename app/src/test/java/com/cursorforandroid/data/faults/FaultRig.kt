@@ -16,7 +16,9 @@ import com.cursorforandroid.data.api.BackgroundComposerApi
 import com.cursorforandroid.data.api.ConversationRecordApi
 import com.cursorforandroid.data.api.CursorApi
 import com.cursorforandroid.data.api.CursorApiFactory
+import com.cursorforandroid.data.api.DesktopProbe
 import com.cursorforandroid.data.api.HeadlessConversationApi
+import com.cursorforandroid.data.api.MachineLookupApi
 import com.cursorforandroid.data.api.ServerRetry
 import com.cursorforandroid.data.api.SseRunStreamer
 import com.cursorforandroid.data.api.SteeringApi
@@ -38,6 +40,7 @@ import com.cursorforandroid.data.repo.ConversationRepository
 import com.cursorforandroid.data.repo.CursorBackend
 import com.cursorforandroid.data.repo.FollowUpRepository
 import com.cursorforandroid.data.repo.LiveRunHub
+import com.cursorforandroid.data.repo.RemoteRepository
 import com.cursorforandroid.data.repo.SessionManager
 import com.cursorforandroid.data.repo.SteeringRepository
 import com.cursorforandroid.domain.Capabilities
@@ -112,6 +115,8 @@ class FaultRig(
     quietRetryDelaysMs: List<Long> = listOf(2_000L, 5_000L, 15_000L, 30_000L),
     /** How long a run stream that said the run ended may go on without its `result` before the run is finished on its word (production: 15 s). */
     terminalGraceMs: Long = 15_000L,
+    /** How long a watched run stream may say nothing before it is taken up again from its last event (production: 30 s, doubling to ten times that). */
+    stallTimeoutMs: Long = 30_000L,
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var now: Long = 1_800_000_000_000L
@@ -197,7 +202,7 @@ class FaultRig(
     /** The list's work in flight, shared by the list and the account layer (see `PendingWork`): what the sidebar's one loading row stands for. */
     val pending = PendingWork()
     val agents = AgentRepository(session, prefs, attachments, AgentListCache(disk.child("agents")), scope, persistDelayMs = 10, capabilities = { capabilities }, recordOf = { id -> if (this.capabilities.accountSession) accountAgents.record(id) else null }, accountPaused = { accountRpc.throttle.pausedUntil() != null }, pending = pending)
-    val hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 500, releaseGraceMs = 200, reconnectBaseMs = 200, reconnectMaxMs = 800, parking = disk.child("liveruns"), terminalGraceMs = terminalGraceMs, scope = scope)
+    val hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 500, releaseGraceMs = 200, reconnectBaseMs = 200, reconnectMaxMs = 800, parking = disk.child("liveruns"), terminalGraceMs = terminalGraceMs, stallTimeoutMs = stallTimeoutMs, stallMaxMs = stallTimeoutMs * 10, scope = scope)
     val conversationCache = ConversationCache(disk.child("conversations"))
     val traces = TraceCache(JsonDiskCache(File(root, "traces").apply { mkdirs() }, nowProvider = { now }, dispatcher = Dispatchers.Unconfined))
     /**
@@ -273,6 +278,17 @@ class FaultRig(
         capabilities = { capabilities },
     )
     val followUpStore = FollowUpStore(context)
+    /**
+     * The Remote section's machine status, over the documented `GET /v0/private-workers` (see [FaultServer.fleetWorkers]),
+     * wired as the app wires it; the desktop half is never asked here.
+     */
+    val remote = RemoteRepository(
+        workers = { api.listWorkers(scope = "personal") },
+        machines = MachineLookupApi { throw UnsupportedOperationException("no desktop in the rig") },
+        probe = DesktopProbe(client = { accountClient }),
+        capabilities = { capabilities },
+        now = { now },
+    )
     val followUps = FollowUpRepository(
         conversations, agents, hub,
         mcpServers = { emptyList() },
@@ -291,6 +307,7 @@ class FaultRig(
             override suspend fun promote(agentId: String, followupId: String): SteerOutcome =
                 steering.promotePending(agentId, followupId).onFailure { steering.refreshQueue(agentId) }.getOrThrow()
         },
+        machineStatus = { agent, fresh -> remote.machineStatus(agent, force = fresh)?.getOrNull() },
         store = followUpStore,
         persist = { true },
         scope = scope,

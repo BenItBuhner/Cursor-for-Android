@@ -24,6 +24,7 @@ import com.cursorforandroid.domain.EnvType
 import com.cursorforandroid.domain.ListPreferences
 import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.domain.NewChatHomeChoice
+import com.cursorforandroid.domain.ProjectArrangement
 import com.cursorforandroid.domain.ProjectNotificationPrefs
 import com.cursorforandroid.domain.LocalAgentState
 import com.cursorforandroid.domain.SignInMethod
@@ -124,6 +125,8 @@ class PreferencesStore(
         val snoozedAt = stringPreferencesKey("snoozed_at")
         /** The Projects as arranged on the New Chat page, first to last (a JSON list; see [setProjectOrder]). */
         val projectOrder = stringPreferencesKey("project_order")
+        /** The Projects dragged below the New Chat page's "Hidden" line (see [setProjectArrangement]). */
+        val hiddenProjects = stringSetPreferencesKey("hidden_project_ids")
         val demoMode = booleanPreferencesKey("demo_mode")
         val cachedUser = stringPreferencesKey("cached_user")
         val signInMethod = stringPreferencesKey("sign_in_method")
@@ -160,6 +163,8 @@ class PreferencesStore(
         val modeChoicePending = booleanPreferencesKey("mode_choice_pending")
         /** The sidebar groups the reader has folded closed, by section key ("projects", "pinned", "date:Today", …). */
         val collapsedSidebarSections = stringSetPreferencesKey("sidebar_collapsed_sections")
+        /** The long sidebar groups the reader has listed in full with "Show N more", by section key (see [listedInFullSidebarSections]). */
+        val listedInFullSidebarSections = stringSetPreferencesKey("sidebar_listed_in_full_sections")
         /** Settings › Chats › Shorten long Projects list; absent reads as on (see [shortenSidebarLists]). */
         val shortenSidebarLists = booleanPreferencesKey("sidebar_shorten_long_lists")
         /** Settings › New chat page: what the New Chat pane lists under its composer (`recent` / `projects`); absent is Recent. */
@@ -211,6 +216,7 @@ class PreferencesStore(
         Keys.launchedHere,
         Keys.touchedHere,
         Keys.projectOrder,
+        Keys.hiddenProjects,
         Keys.modeChoicePending,
         Keys.dismissedNotices,
     )
@@ -414,8 +420,24 @@ class PreferencesStore(
     }
 
     /**
+     * The long sidebar groups the reader has listed in full — "Show N more" tapped, "Show less" not yet — by section
+     * key. Kept like the folds: a device preference, read back when the sidebar comes back, the app is started again
+     * or the account is changed, since how far down the Projects list this reader keeps it open is theirs, not the
+     * account's.
+     */
+    val listedInFullSidebarSections: Flow<Set<String>> = data.map { it[Keys.listedInFullSidebarSections] ?: emptySet() }.distinctUntilChanged()
+
+    /** Lists the long sidebar group [sectionKey] in full, or cuts it back to its first rows; idempotent, like the folds. */
+    suspend fun setSidebarSectionListedInFull(sectionKey: String, listedInFull: Boolean) = edit { p ->
+        val current = p[Keys.listedInFullSidebarSections] ?: emptySet()
+        val next = if (listedInFull) current + sectionKey else current - sectionKey
+        if (next.isEmpty()) p.remove(Keys.listedInFullSidebarSections) else p[Keys.listedInFullSidebarSections] = next
+    }
+
+    /**
      * Whether a long Projects or Pinned group lists only its first five rows until "Show N more" is tapped. On by
-     * default; a device preference like the folds, kept across sign-outs. Which rows are listed in full is never kept.
+     * default; a device preference like the folds, kept across sign-outs. Which groups are listed in full is kept
+     * beside it ([listedInFullSidebarSections]), and stands whichever way this is switched.
      */
     val shortenSidebarLists: Flow<Boolean> = data.map { it[Keys.shortenSidebarLists] ?: true }.distinctUntilChanged()
 
@@ -546,7 +568,7 @@ class PreferencesStore(
 
     val localAgentState: Flow<LocalAgentState> = accountData.changedIn(
         Keys.pinned, Keys.readMarkers, Keys.launchedHere, Keys.snoozedUntil, Keys.snoozedAt, Keys.touchedHere,
-        Keys.unreadOnlyTouchedHere, Keys.demoMode, Keys.projectOrder,
+        Keys.unreadOnlyTouchedHere, Keys.demoMode, Keys.projectOrder, Keys.hiddenProjects,
     ).map { p ->
         LocalAgentState(
             pinnedIds = p[Keys.pinned] ?: emptySet(),
@@ -558,6 +580,7 @@ class PreferencesStore(
             // The demo's backend runs on this phone: every chat in it is this phone's own.
             unreadOnlyTouchedHere = (p[Keys.unreadOnlyTouchedHere] ?: true) && p[Keys.demoMode] != true,
             projectOrder = p[Keys.projectOrder]?.let(::decodeIdList) ?: emptyList(),
+            hiddenProjectIds = p[Keys.hiddenProjects] ?: emptySet(),
         )
     }
 
@@ -566,12 +589,27 @@ class PreferencesStore(
      * [ids] does not — archived, filtered out, not loaded — follow them as they were; the account's, like the pins, and
      * bounded at [MAX_PROJECT_ORDER], the ids furthest down going first.
      */
-    suspend fun setProjectOrder(ids: List<String>) = edit { p ->
-        val arranged = ids.distinct()
-        val shown = arranged.toHashSet()
-        val stored = p[Keys.projectOrder]?.let(::decodeIdList) ?: emptyList()
-        val next = (arranged + stored.filterNot { it in shown }).take(MAX_PROJECT_ORDER)
-        if (next.isEmpty()) p.remove(Keys.projectOrder) else p[Keys.projectOrder] = encodeIdList(next)
+    suspend fun setProjectOrder(ids: List<String>) = edit { p -> p.arrangeProjects(ids.distinct()) }
+
+    /**
+     * [arrangement] as left on the New Chat page, in one write: the order as [setProjectOrder] keeps it, and which of
+     * the Projects it names are hidden there. A hidden Project it does not name — archived, filtered out, not loaded —
+     * stays hidden; bounded like the order.
+     */
+    suspend fun setProjectArrangement(arrangement: ProjectArrangement) = edit { p ->
+        val arranged = arrangement.order.distinct()
+        p.arrangeProjects(arranged)
+        val named = arranged.toHashSet()
+        val stored = p[Keys.hiddenProjects].orEmpty().filterNot { it in named }
+        val hidden = (arrangement.hidden.filter { it in named } + stored).take(MAX_PROJECT_ORDER).toSet()
+        if (hidden.isEmpty()) p.remove(Keys.hiddenProjects) else p[Keys.hiddenProjects] = hidden
+    }
+
+    private fun MutablePreferences.arrangeProjects(arranged: List<String>) {
+        val named = arranged.toHashSet()
+        val stored = this[Keys.projectOrder]?.let(::decodeIdList) ?: emptyList()
+        val next = (arranged + stored.filterNot { it in named }).take(MAX_PROJECT_ORDER)
+        if (next.isEmpty()) remove(Keys.projectOrder) else this[Keys.projectOrder] = encodeIdList(next)
     }
 
     /**
