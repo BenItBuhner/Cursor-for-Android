@@ -291,7 +291,7 @@ class NewChatHomeScreenshotTest {
         projectList().performTouchInput { down(start) }
         pass(2 * LONG_PRESS + 100)
         val line = compose.onNode(hasTestTag(NewChatHomeTags.HIDDEN_LINE)).fetchSemanticsNode().boundsInRoot
-        val target = Offset(start.x, line.bottom + 24f) - projectList().fetchSemanticsNode().boundsInRoot.topLeft
+        val target = Offset(start.x, line.bottom + 24f - projectList().fetchSemanticsNode().boundsInRoot.top)
         projectList().performTouchInput { for (step in 1..8) moveTo(lerp(start, target, step / 8f)) }
         pass(800)
         capture(frame)
