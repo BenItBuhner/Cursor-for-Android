@@ -9,6 +9,8 @@ import com.cursorforandroid.data.api.ConversationStateReader
 import com.cursorforandroid.data.api.HeadlessConversationApi
 import com.cursorforandroid.data.api.ConversationRecordApi
 import com.cursorforandroid.data.api.RecordState
+import com.cursorforandroid.data.api.AccountFollowup
+import com.cursorforandroid.data.api.RecordImage
 import com.cursorforandroid.data.api.ServerRetry
 import com.cursorforandroid.data.api.TurnPlan
 import com.cursorforandroid.data.api.TurnTiming
@@ -30,12 +32,15 @@ import com.cursorforandroid.data.local.AttachmentStore
 import com.cursorforandroid.data.local.CachedAwaiting
 import com.cursorforandroid.data.local.CachedConversation
 import com.cursorforandroid.data.local.CachedLocalPrompt
+import com.cursorforandroid.data.local.CachedRecordImage
 import com.cursorforandroid.data.local.CachedRecordTurn
 import com.cursorforandroid.data.local.CachedRecordWindow
 import com.cursorforandroid.data.local.CachedTurnTiming
 import com.cursorforandroid.data.local.CachedTrace
 import com.cursorforandroid.data.local.ConversationCache
 import com.cursorforandroid.data.local.PreferencesStore
+import com.cursorforandroid.data.local.PromptAttachments
+import com.cursorforandroid.data.local.PromptKey
 import com.cursorforandroid.data.local.StagedAttachments
 import com.cursorforandroid.data.local.TraceCache
 import com.cursorforandroid.data.repo.TimelineBuilder.withUniqueIds
@@ -102,9 +107,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
 import java.time.Instant
+import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -591,6 +599,35 @@ class ConversationRepository(
          * list still gives each turn its run (status, footer) and names the live one.
          */
         var recordWindow: RecordWindow? = null
+        /** The window whose prompts' pictures were last looked for on this device (see [recordImagesWanted]). */
+        var recordImagesCheckedFor: RecordWindow? = null
+        /** When a picture of the record's that could not be read may be asked for again, by message and picture. */
+        val recordImageRetryAt = HashMap<String, Long>()
+        /** One keeping of the record's pictures at a time (see [keepRecordImages]): the sets are written by key. */
+        val recordImagesLock = Mutex()
+
+        /**
+         * The record's turns whose prompts carry pictures this device has no copy of under the message's id — the
+         * ones [keepRecordImages] reads from the record. Once per window: a turn asked for and still wanting waits
+         * for the next read of the record.
+         */
+        /**
+         * The prompts' pictures once the disk's sets [onDevice] have been read again: the disk knows every filed
+         * prompt; only what is still in flight exists solely in memory — the prompts whose runs are this process's
+         * placeholders, the queued messages' staged sets, and the names a send gave its pictures ahead of their
+         * filing (see [PromptAttachments.keys]), which the disk takes over once it has them.
+         */
+        fun promptImagesOver(onDevice: Map<String, List<MessageAttachment>>): Map<String, List<MessageAttachment>> =
+            onDevice + promptImages.filterKeys { key ->
+                local.any { it.run.id == key } || (key !in onDevice && (PromptAttachments.isNamed(key) || awaiting.any { it.staged.localId == key }))
+            }
+
+        fun recordImagesWanted(): List<RecordTurn> {
+            val window = recordWindow ?: return emptyList()
+            if (window === recordImagesCheckedFor) return emptyList()
+            recordImagesCheckedFor = window
+            return window.turns.filter { turn -> turn.messageId != null && turn.images.isNotEmpty() && PromptAttachments.messageKey(turn.messageId) !in promptImages }
+        }
         /**
          * The runs of prompts sent from here, by the step index of the record's turn that caught each up, with the
          * prompt's words: what names the turn's run once its echo is gone (see [recordPairing], [pruneLocal]).
@@ -1017,7 +1054,9 @@ class ConversationRepository(
             local = local.filterNot { it.run.id == localId } + prompt
             val staged = a.staged.attachments.attachments
             val imagesKey = if (prompt.steeredAfter == null) prompt.run.id else prompt.message.id
-            promptImages = (promptImages - localId).let { if (staged.isEmpty()) it else it + (imagesKey to staged) }
+            // And under the message's id and words (see [PromptKey]), for the record's copy of it (see [recordItems]).
+            val named = PromptAttachments.keys(promptKey(a.followupId, a.staged))
+            promptImages = (promptImages - localId).let { if (staged.isEmpty()) it else it + (imagesKey to staged) + named.associateWith { staged } }
             inputsUpdatedAt = maxOf(inputsUpdatedAt, a.staged.stagedAt)
             delivered = delivered + Delivered(a.staged, a.followupId, prompt.message.id, prompt.run.id, steered = prompt.steeredAfter != null, filedAt = AppClock.now(), images = staged, priorTranscriptCopies = a.priorTranscriptCopies, priorCopies = a.priorCopies)
             a.followupId?.let { returned = returned - it }
@@ -1450,7 +1489,10 @@ class ConversationRepository(
                     run = run,
                     runStatus = run?.let { statusOf(it) },
                     timing = window.timing(i),
-                    attachments = run?.let { promptImages[it.id] },
+                    // The prompt's pictures: under its run, else under the id the record gives the message (the
+                    // account's copy of them, or this device's named by the id it sent), else under its words
+                    // (see PromptAttachments). A turn taken into the one under way has no run of its own.
+                    attachments = PromptAttachments.find(promptImages, run?.id, turn.messageId, turn.prompt, startOf(i)),
                     complete = complete,
                     liveItems = liveItems,
                     partial = kept,
@@ -1557,7 +1599,17 @@ class ConversationRepository(
         }
 
         private fun steerBubble(steered: LocalPrompt): UserMessage =
-            UserMessage(steered.message.id, steered.message.text, parseIsoMillis(steered.run.createdAt).takeIf { it > 0 }, attachments = promptImages[steered.message.id] ?: emptyList())
+            UserMessage(steered.message.id, steered.message.text, parseIsoMillis(steered.run.createdAt).takeIf { it > 0 }, attachments = steerImages(steered, steered.run))
+
+        /**
+         * A steered prompt's pictures: under its message's id while this process has them there (see [file]), else
+         * under the id its send minted or its words (see [PromptAttachments]) — the set the device filed, read back
+         * after a restart, when the record has not caught up with the steer yet.
+         */
+        private fun steerImages(steered: LocalPrompt, run: RunDto): List<MessageAttachment> =
+            promptImages[steered.message.id]
+                ?: PromptAttachments.find(promptImages, null, steered.followupId?.let(AccountFollowup::messageIdOf), steered.message.text, parseIsoMillis(run.createdAt).takeIf { it > 0 })
+                ?: emptyList()
 
         /** The rendered items of the window's turns, by step index; see [recordItems]. Under the entry's monitor. */
         private val renderedTurns = HashMap<Int, RenderedTurn>()
@@ -1888,7 +1940,7 @@ class ConversationRepository(
          * after everything the run has, so the prompt is never missing.
          */
         private fun spliceSteered(items: MutableList<TimelineItem>, run: RunDto, steered: LocalPrompt, shown: Map<String, List<TimelineItem>>) {
-            val bubble = UserMessage(steered.message.id, steered.message.text, parseIsoMillis(run.createdAt).takeIf { it > 0 }, attachments = promptImages[steered.message.id] ?: emptyList())
+            val bubble = UserMessage(steered.message.id, steered.message.text, parseIsoMillis(run.createdAt).takeIf { it > 0 }, attachments = steerImages(steered, run))
             val story = shown[run.id]
             val after = steered.steeredAfter ?: 0
             if (story == null || story.isEmpty()) {
@@ -2023,7 +2075,12 @@ class ConversationRepository(
                 total = w.total,
                 firstStep = kept.firstOrNull()?.stepIndex ?: w.firstStep,
                 turnCount = w.state?.turnCount ?: 0,
-                turns = kept.map { CachedRecordTurn(it.stepIndex, it.stepCount, it.prompt, it.projectMode, it.errorMessage, blobId = it.blobId, complete = it.complete, stepTotal = it.stepTotal, messageSteps = it.messageSteps, steer = it.steer) },
+                turns = kept.map {
+                    CachedRecordTurn(
+                        it.stepIndex, it.stepCount, it.prompt, it.projectMode, it.errorMessage, blobId = it.blobId, complete = it.complete, stepTotal = it.stepTotal, messageSteps = it.messageSteps, steer = it.steer,
+                        messageId = it.messageId, images = it.images.map { image -> CachedRecordImage(image.uuid, image.mimeType, image.blobId, image.width, image.height) },
+                    )
+                },
                 timings = w.state?.timings?.map { CachedTurnTiming(it.durationMs, it.timestampMs) } ?: emptyList(),
                 turnIndexed = w.turnIndexed,
                 liveOffsetKey = w.state?.live?.offsetKey,
@@ -2965,8 +3022,12 @@ class ConversationRepository(
         var adopt = false
         var unfollowed = false
         var refiled = false
+        var wantImages: List<RecordTurn> = emptyList()
         val workers = synchronized(this) {
             mutate()
+            // A prompt the record shows with pictures this device has no copy of: they are read from the record
+            // (or found on the disk, kept since the last read of it) outside the monitor, and the frame redrawn.
+            wantImages = recordImagesWanted()
             // No screen on the chat — held, or left behind — shows only its window: nothing past it is kept either.
             if (screens == 0 && traces.size + partial.size > window) dropUnshownTraces()
             // A queued message whose copy the transcript now carries is filed in this very frame (see [Entry.fileInFrame]).
@@ -3000,7 +3061,8 @@ class ConversationRepository(
             val (created, _) = workers
             if (created.isNotEmpty()) agents.applyLineage(agentId, created.associateWith { AgentParentKind.PROJECT_WORKER }, LineageSignal.COORDINATOR_CREATED)
         }
-        if (retired.isNotEmpty()) { val gone = retired; scope.launch { gone.forEach { attachments.discard(it.staged.attachments) } } }
+        if (retired.isNotEmpty()) { val left = retired; scope.launch { keepRetired(this@publish, left) } }
+        if (wantImages.isNotEmpty()) { val wanted = wantImages; scope.launch { keepRecordImages(this@publish, wanted) } }
         if (filed.isNotEmpty()) { val toCommit = filed; scope.launch { commitFiled(this@publish, toCommit) } }
         else if (refiled || retired.isNotEmpty()) scope.launch { persist(this@publish, session.current) }
         if (adopt) requestAdoption(this)
@@ -3024,19 +3086,112 @@ class ConversationRepository(
     }
 
     /**
+     * What names [staged]'s attachments besides its run (see [PromptKey]): the message id its send minted from
+     * [followupId] (see [AccountFollowup.messageIdOf]; none for a send without one), its words and when it was staged.
+     */
+    private fun promptKey(followupId: String?, staged: StagedFollowUp): PromptKey =
+        PromptKey(messageId = followupId?.let(AccountFollowup::messageIdOf), text = staged.text, sentAtMs = staged.stagedAt)
+
+    /**
+     * Keeps the pictures the record's prompts carry inline (`selected_images[].data`) on this device as the turn is
+     * built, under the message's id (see [AttachmentStore.keepFromRecord]) — the one moment their bytes are in hand:
+     * the window keeps a picture's name and size, not its bytes (see [RecordImage.ref]). Off the main thread with
+     * the build; a failure to keep one costs the turn nothing.
+     */
+    private fun keepInlineRecordImages(agentId: String, turn: HeadlessTranscript.Turn) {
+        val messageId = turn.messageId ?: return
+        val inline = turn.images.filter { it.data != null && it.key != null }
+        if (inline.isEmpty()) return
+        runCatching {
+            val kept = attachments.keptFromRecord(agentId, messageId)
+            val fresh = inline.filter { it.key !in kept }.mapNotNull { image -> runCatching { Base64.getDecoder().decode(image.data) }.getOrNull()?.let { image to it } }
+            if (fresh.isNotEmpty()) attachments.keepFromRecord(agentId, messageId, fresh, turn.prompt)
+        }
+    }
+
+    /**
+     * The pictures of the record's prompts in [turns] this device has no copy of under the message's id (see
+     * [Entry.recordImagesWanted]): the ones the record names by blob are read from it and kept (see
+     * [AttachmentStore.keepFromRecord]); the ones kept as the turns were built are found on the disk. Then the
+     * device's sets are read again and the frame redrawn with them. A blob the record would not give is asked for
+     * again after [RECORD_IMAGE_RETRY_MS] at the soonest.
+     */
+    private suspend fun keepRecordImages(e: Entry, turns: List<RecordTurn>) = e.recordImagesLock.withLock {
+        val agentId = e.agentId
+        var changed = false
+        for (turn in turns) {
+            val messageId = turn.messageId ?: continue
+            val kept = withContext(Dispatchers.IO) { runCatching { attachments.keptFromRecord(agentId, messageId) }.getOrDefault(emptySet()) }
+            val missing = turn.images.filter { it.key != null && it.key !in kept }
+            if (missing.size < turn.images.size) changed = true
+            val api = record ?: continue
+            val now = AppClock.now()
+            val fetched = missing.mapNotNull { image ->
+                val blobId = image.blobId ?: return@mapNotNull null
+                val retryKey = "$messageId/${image.key}"
+                if ((e.recordImageRetryAt[retryKey] ?: 0L) > now) return@mapNotNull null
+                val bytes = try {
+                    api.blob(agentId, blobId)
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (_: Exception) {
+                    null
+                }
+                if (bytes == null) e.recordImageRetryAt[retryKey] = now + RECORD_IMAGE_RETRY_MS
+                bytes?.let { image to it }
+            }
+            if (fetched.isNotEmpty()) {
+                val written = withContext(Dispatchers.IO) { runCatching { attachments.keepFromRecord(agentId, messageId, fetched, turn.prompt) }.getOrDefault(emptyList()) }
+                if (written.isNotEmpty()) changed = true
+            }
+        }
+        if (!changed) return@withLock
+        val onDevice = runCatching { attachments.forAgent(agentId) }.getOrDefault(emptyMap())
+        if (onDevice.isEmpty()) return@withLock
+        // The disk's sets over this process's names for the same keys: the disk is where every set ends up.
+        e.publish(mutate = { promptImages = promptImages + onDevice })
+    }
+
+    /**
+     * The attachments of the messages that left the card for the record's copy of them ([Entry.retireDrawn]), kept
+     * on this device under the message's id and words — the record's turn for such a message has no run, and the
+     * `/v0` transcript never carries a picture: were the staged set let go, the bubble would lose its picture the
+     * moment the record took it over, and for good (the shape of the bug `SentImageAfterReloadTest` holds). The
+     * frame is redrawn naming the kept paths.
+     */
+    private suspend fun keepRetired(e: Entry, retired: List<Awaiting>) {
+        val kept = retired.mapNotNull { a ->
+            if (a.staged.attachments.attachments.isEmpty()) return@mapNotNull null
+            val key = promptKey(a.followupId, a.staged)
+            val moved = runCatching { attachments.commit(e.agentId, null, a.staged.attachments, key) }.getOrDefault(a.staged.attachments.attachments)
+            PromptAttachments.keys(key).associateWith { moved }
+        }
+        if (kept.isEmpty()) return
+        e.publish(mutate = { for (named in kept) promptImages = promptImages + named })
+    }
+
+    /**
      * The attachments of the messages [Entry.fileInFrame] filed, moved under their runs (so the next history load
      * finds them), the echoes following the files to their new paths; then the chat written back.
      */
     private suspend fun commitFiled(e: Entry, filed: List<Pair<Awaiting, LocalPrompt>>) {
         val agentId = e.agentId
-        val kept = filed.map { (a, prompt) -> Triple(a, prompt, runCatching { attachments.commit(agentId, prompt.run.id, a.staged.attachments) }.getOrDefault(a.staged.attachments.attachments)) }
+        // Under the run, and under the id the send minted for the message and its words (see [PromptKey]): the
+        // record's turn for a message taken into the turn under way has no run, and names its prompt by those.
+        val kept = filed.map { (a, prompt) ->
+            val key = promptKey(a.followupId, a.staged)
+            Triple(a to key, prompt, runCatching { attachments.commit(agentId, prompt.run.id, a.staged.attachments, key) }.getOrDefault(a.staged.attachments.attachments))
+        }
         e.publish(
             mutate = {
-                for ((_, filedAs, moved) in kept) {
+                for ((filedWith, filedAs, moved) in kept) {
                     // As it stands now: moved into the turn that took it since it was filed (see [Entry.refileTakenIntoTurn]).
                     val prompt = local.firstOrNull { it.message.id == filedAs.message.id } ?: filedAs
                     val imagesKey = if (prompt.steeredAfter == null) prompt.run.id else prompt.message.id
-                    promptImages = if (moved.isEmpty()) promptImages - imagesKey else promptImages + (imagesKey to moved)
+                    // Under the message's id and words too, as the disk now has them: the record's turn for the
+                    // message, once it carries it without a run, finds them in this very process (see [recordItems]).
+                    val named = PromptAttachments.keys(filedWith.second)
+                    promptImages = if (moved.isEmpty()) promptImages - imagesKey - named else promptImages + (imagesKey to moved) + named.associateWith { moved }
                     delivered.firstOrNull { it.localMessageId == prompt.message.id && it.runId == prompt.run.id }?.images = moved
                 }
             },
@@ -3355,7 +3510,7 @@ class ConversationRepository(
                             inputsUpdatedAt = if (transcriptFailed) 0L else agents.agent(agentId)?.updatedAtMillis ?: 0L
                             pruneLocal()
                             // The disk knows every filed prompt; only prompts still in flight exist solely in memory.
-                            promptImages = onDevice + promptImages.filterKeys { key -> local.any { it.run.id == key } }
+                            promptImages = promptImagesOver(onDevice)
                             this.fetched = true
                             fetchedAt = AppClock.now()
                             latest = latestRun()
@@ -3449,7 +3604,7 @@ class ConversationRepository(
                 inputsUpdatedAt = 0L
                 promptsAwaited = messages.isEmpty()
                 pruneLocal()
-                promptImages = onDevice + promptImages.filterKeys { key -> local.any { it.run.id == key } }
+                promptImages = promptImagesOver(onDevice)
                 latest = latestRun()
                 // The run followed is over by the page just merged: its footer and the stream's end in one frame.
                 over = endFollowIfOver()
@@ -3627,7 +3782,7 @@ class ConversationRepository(
                     if (built.turns.any { it.projectMode } || built.state?.isRootProject == true) projectMode = true
                     project = projectMode
                     pruneLocal()
-                    promptImages = onDevice + promptImages.filterKeys { key -> local.any { it.run.id == key } }
+                    promptImages = promptImagesOver(onDevice)
                     if (blobBacked && built.turnIndexed && reachesBack(built, projectMode, this.window)) {
                         reachingBack = true
                         extending = true
@@ -4908,6 +5063,7 @@ class ConversationRepository(
                 RecordTurn(
                     turn.stepIndex, turn.stepCount, turn.prompt, turn.projectMode, items ?: emptyList(), errorMessage = turn.errorMessage, turnIndexed = saved.turnIndexed,
                     blobId = turn.blobId, complete = turn.complete && items != null, stepTotal = turn.stepTotal, messageSteps = turn.messageSteps, steer = turn.steer,
+                    messageId = turn.messageId, images = turn.images.map { image -> RecordImage(image.uuid, image.mimeType, blobId = image.blobId, width = image.width, height = image.height) },
                 )
             }
             val unbuilt = turns.filter { it.blobId != null && files[RecordTurn.traceKey(it.stepIndex, saved.turnIndexed)] == null }
@@ -5002,6 +5158,7 @@ class ConversationRepository(
     /** Builds a record turn's items (see [HeadlessTranscript.body]), timed for the chat's counters. */
     private fun turnBuilder(agentId: String, sink: GeneratedImageSink?): (HeadlessTranscript.Turn, String) -> List<TimelineItem> = { turn, key ->
         val startedAt = System.nanoTime()
+        keepInlineRecordImages(agentId, turn)
         HeadlessTranscript.body(turn, key, sink).also { TranscriptPerf.session(agentId).turnBuilt(System.nanoTime() - startedAt) }
     }
 
@@ -6117,6 +6274,10 @@ class ConversationRepository(
             val priorTranscript = messages.count { it.type == USER_MESSAGE && QueuePlacement.textKey(it.text) == key }
             val behind = queueTail(except = null)?.id ?: latestRun()?.id?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) }
             awaiting = awaiting + Awaiting(staged, behind, AppClock.now(), followupId = followupId, priorCopies = prior, priorTranscriptCopies = priorTranscript, sending = true, recordStep = newestRecordStep)
+            // Under the id the send mints for the message and its words too (see [PromptKey]): the record's copy of
+            // the message, when it comes without a run of its own, finds the pictures in the frame that draws it.
+            val pictures = staged.attachments.attachments
+            if (pictures.isNotEmpty()) promptImages = promptImages + PromptAttachments.keys(promptKey(followupId, staged)).associateWith { pictures }
         })
         replacing?.let { attachments.discard(it.attachments) }
         return staged
@@ -6184,7 +6345,7 @@ class ConversationRepository(
     private suspend fun accepted(e: Entry, agentId: String, staged: StagedFollowUp, run: RunDto, viaAccount: Boolean = false, followupId: String? = null) {
         val localId = staged.localId
         // Filed under the run so the next history load finds them; the bubble follows the files to their new paths.
-        val kept = runCatching { attachments.commit(agentId, run.id, staged.attachments) }.getOrDefault(staged.attachments.attachments)
+        val kept = runCatching { attachments.commit(agentId, run.id, staged.attachments, promptKey(followupId, staged)) }.getOrDefault(staged.attachments.attachments)
         e.publish(
             mutate = {
                 if (viaAccount) {
@@ -6278,7 +6439,7 @@ class ConversationRepository(
         // Whatever happened, the chat must be left consistent — including when the launcher is already cancelled.
         withContext(NonCancellable) {
             result.fold(
-                onSuccess = { launched -> settleLaunch(e, launched, localId, staged, now) },
+                onSuccess = { launched -> settleLaunch(e, launched, localId, staged, now, request.prompt.trim()) },
                 onFailure = { rollbackLaunch(e, localId, staged) },
             )
             synchronized(e) {
@@ -6291,7 +6452,7 @@ class ConversationRepository(
     }
 
     /** The server created the chat: its run takes the placeholder's place, the images are filed under it, and its stream starts. */
-    private suspend fun settleLaunch(e: Entry, launched: Launched, localId: String, staged: StagedAttachments, sentAt: Long) {
+    private suspend fun settleLaunch(e: Entry, launched: Launched, localId: String, staged: StagedAttachments, sentAt: Long, text: String) {
         val run = launched.run
         if (run == null) {
             // A retry adopted an agent whose run could not be read: the server owns the transcript from here on.
@@ -6300,7 +6461,7 @@ class ConversationRepository(
             if (e.attached > 0) reload(e.agentId)
             return
         }
-        val kept = runCatching { attachments.commit(e.agentId, run.id, staged) }.getOrDefault(staged.attachments)
+        val kept = runCatching { attachments.commit(e.agentId, run.id, staged, PromptKey(text = text, sentAtMs = sentAt)) }.getOrDefault(staged.attachments)
         e.publish(
             mutate = {
                 local = local.map { if (it.run.id == localId) it.copy(run = run) else it }
@@ -6675,6 +6836,8 @@ class ConversationRepository(
         const val STORY_KEY_PREFIX = 48
         /** The newest runs a queued message may have been taken into, or filed under, when the transcript is read for where it went (see [Entry.takenInto]). */
         const val TAKEN_INTO_RUNS = 3
+        /** How long a prompt's picture the record would not give waits before it is asked for again (see [keepRecordImages]). */
+        const val RECORD_IMAGE_RETRY_MS = 60_000L
         /** The pauses between looks for the next run and reads of the record's growth while the account runs on (see [keepFollowing]). */
         const val KEEP_FOLLOWING_BASE_MS = 2_000L
         const val KEEP_FOLLOWING_MAX_MS = 15_000L

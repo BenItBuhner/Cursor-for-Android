@@ -29,6 +29,7 @@ import com.cursorforandroid.data.local.CachedPlacement
 import com.cursorforandroid.data.local.CachedRecord
 import com.cursorforandroid.data.local.AttachmentStore
 import com.cursorforandroid.data.local.PreferencesStore
+import com.cursorforandroid.data.local.PromptKey
 import com.cursorforandroid.domain.AccountModel
 import com.cursorforandroid.domain.Agent
 import com.cursorforandroid.domain.AgentLifecycle
@@ -2254,7 +2255,7 @@ class AgentRepository(
             upsert(agent, startedIn)
             // The agent exists now; a full disk must not turn that into a launch error. A retry that found the agent
             // already created files the images under the same run, so this stays idempotent.
-            if (saveImages) run?.let { runCatching { attachments.save(agent.id, it.id, request.images, request.files) } }
+            if (saveImages) run?.let { runCatching { attachments.save(agent.id, it.id, request.images, request.files, PromptKey(text = request.prompt.trim(), sentAtMs = AppClock.now())) } }
             prefs.markLaunchedHere(agent.id)
             // Read as of now; the finished run will bump updatedAt past this and surface the unread dot.
             prefs.markRead(agent.id, AppClock.now())
