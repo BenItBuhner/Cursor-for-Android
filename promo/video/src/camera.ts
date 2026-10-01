@@ -389,15 +389,16 @@ const key = (at: number, zoom: number, fx: number, fy: number, x: number, y: num
  * or a beat. The phone swoops in turned and tilted and pushes slowly in on the held Project and its menu, drifting
  * after it across the grid. Cut close on the composer and push in along the listening onto the words; then up with the
  * message as it flies into the chat, the one move that answers the screen; then on in and down onto the edit in one
- * long push that peaks while its diff stands, and back in one long pull past the fold and the stretch to the run and
- * the follow-up field. Cut low on the composer and track along the follow-up to the queue and the steer, then rise with
- * the steer to its answer and ease in on it. Cut wide as the shade comes down and push in on the run's notification.
- * Cut to the answer and drift down the details to the pull request.
+ * long push that comes to rest on its diff, slowly up over the fold to keep the run in view, and back in one long pull
+ * that settles on the follow-up field as it is tapped. Cut low on the composer and track along the follow-up to the
+ * queue and the steer, then rise with the steer to its answer and ease in on it. Cut wide as the shade comes down and
+ * push in on the run's notification. Cut to the answer and drift down the details to the pull request.
  */
 function keysOf(reel: Reel): Record<Framing, Shot[]> {
   const v = (name: string, by = 0) => whenShown(reel, mark(reel.take, name)) + by;
   const said = (name: string, end: "from" | "to", by = 0) => whenShown(reel, stream(reel.take, name)[end]) + by;
   const moving = (keys: Key[], tight?: [number, number]): Shot => ({ keys, enter: 1, leave: 1, tight });
+  const settling = (keys: Key[], tight?: [number, number]): Shot => ({ keys, enter: 1, leave: 0, tight });
   const entrance = (keys: Key[]): Shot => ({ keys, enter: 3, leave: 1 });
   const flight: [number, number] = [v("the chat", -7), v("the chat", 27)];
   return {
@@ -408,7 +409,7 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
         key(v("the lift"), 2.05, 0.6, 0.63, 0.72, 0.55, -10, 5, 0),
         key(AT.dictate, 2.15, 0.4, 0.63, 0.64, 0.55, -6, 3, 1),
       ]),
-      moving(
+      settling(
         [
           key(AT.dictate, 2.05, 0.74, 0.44, 0.8, 0.52, -22, -5, -0.6),
           key(v("the words"), 2.6, 0.6, 0.385, 0.775, 0.52, -12, -1, -0.1),
@@ -421,8 +422,9 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
           key(v("the chat", 19), 2.4, 0.686, 0.131, 0.784, 0.408, -11, 3.2, 0.2),
           key(v("the chat", 27), 2.58, 0.69, 0.121, 0.785, 0.4, -11, 3.4, 0.25),
           key(v("the diff", 60), 3.05, 0.32, 0.31, 0.67, 0.42, -6, 3.6, 0.3),
-          key(v("the stretch", 8), 2.05, 0.42, 0.4, 0.68, 0.46, -12, 4, 0.6),
-          key(AT.steer, 1.6, 0.52, 0.72, 0.7, 0.5, -17, 4.5, 0.8),
+          key(v("fold", -6), 2.9, 0.34, 0.295, 0.675, 0.43, -8, 3.7, 0.4),
+          key(v("jump"), 2.65, 0.38, 0.21, 0.68, 0.43, -10, 3.8, 0.5),
+          key(AT.steer, 1.25, 0.52, 0.63, 0.7, 0.5, -17, 4.5, 0.8),
         ],
         flight,
       ),
@@ -451,7 +453,7 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
         key(v("the lift"), 1.28, 0.6, 0.62, 0.52, 0.785, -9, 11, 0),
         key(AT.dictate, 1.32, 0.42, 0.58, 0.47, 0.76, -6, 8, 1),
       ]),
-      moving(
+      settling(
         [
           key(AT.dictate, 1.6, 0.72, 0.44, 0.54, 0.78, -2, 12, -0.6),
           key(v("the words"), 2.05, 0.6, 0.38, 0.54, 0.765, -9, 10, -0.1),
@@ -464,8 +466,8 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
           key(v("the chat", 19), 2.17, 0.686, 0.131, 0.549, 0.512, -9, 8.1, 0.2),
           key(v("the chat", 27), 2.29, 0.69, 0.121, 0.55, 0.501, -9, 8, 0.25),
           key(v("the diff", 60), 2.45, 0.36, 0.29, 0.47, 0.73, -5, 7.5, 0.3),
-          key(v("the stretch", 8), 1.6, 0.42, 0.345, 0.49, 0.735, -10, 6.5, 0.6),
-          key(AT.steer, 1.15, 0.52, 0.6, 0.5, 0.735, -14, 6, 0.8),
+          key(v("jump"), 1.7, 0.42, 0.33, 0.49, 0.735, -10, 6.5, 0.6),
+          key(AT.steer, 0.97, 0.52, 0.72, 0.5, 0.735, -14, 6, 0.8),
         ],
         flight,
       ),
