@@ -362,9 +362,9 @@ internal class PromoRunStreamer(
             pause(400)
             say("hero.intro")
             pause(200)
-            edit(1, "src/styles/theme.css", 900)
+            edit(1, "src/styles/theme.css", 700)
             // Long enough for the first diff to be read and closed before the next edit joins it into a stretch.
-            pause(1_900)
+            pause(2_780)
             edit(2, "src/hooks/useTheme.ts", 900)
             edit(3, "src/components/ThemeToggle.tsx", 900)
             edit(4, "src/components/Header.tsx", 500)

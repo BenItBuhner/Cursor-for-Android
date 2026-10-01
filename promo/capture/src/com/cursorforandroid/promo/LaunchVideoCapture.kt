@@ -574,7 +574,7 @@ class LaunchVideoCapture {
         // these are the same on every device, and every take shows the same thing at the same moment.
         const val PANEL_AT = 900L
         /**
-         * Just over a second after the first diff lands, leaving its collapse time to finish before the next edit
+         * Almost two seconds after the first diff lands, leaving its collapse time to finish before the next edit
          * starts (see [PromoRunStreamer]'s hero), which would otherwise cut it off.
          */
         const val FOLD_AT = 4_400L

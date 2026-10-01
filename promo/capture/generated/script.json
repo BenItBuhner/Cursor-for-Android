@@ -451,10 +451,10 @@
  "edits": {
   "src/styles/theme.css": {
    "path": "src/styles/theme.css",
-   "diff": "@@ -1,16 +1,32 @@\n+:root {\n+  --bg: #ffffff;\n+  --fg: #111827;\n+  --card: #f3f4f6;\n+  --border: #e5e7eb;\n+  --muted: #6b7280;\n+}\n+\n+[data-theme=\"dark\"] {\n+  --bg: #0b0d12;\n+  --fg: #e5e7eb;\n+  --card: #151922;\n+  --border: #262b36;\n+  --muted: #9ca3af;\n+}\n+\n body {\n   margin: 0;\n   font-family: system-ui, sans-serif;\n-  background: #ffffff;\n-  color: #111827;\n+  background: var(--bg);\n+  color: var(--fg);\n }\n \n .card {\n-  background: #f3f4f6;\n-  border: 1px solid #e5e7eb;\n+  background: var(--card);\n+  border: 1px solid var(--border);\n   border-radius: 12px;\n }\n \n .muted {\n-  color: #6b7280;\n+  color: var(--muted);\n }",
-   "added": 21,
-   "removed": 5,
-   "tokens": 150
+   "diff": "@@ -1,6 +1,16 @@\n+:root {\n+  --bg: #fff;\n+  --fg: #111827;\n+}\n+\n+[data-theme=\"dark\"] {\n+  --bg: #0b0d12;\n+  --fg: #e5e7eb;\n+}\n+\n body {\n   margin: 0;\n   font-family: system-ui, sans-serif;\n-  background: #fff;\n-  color: #111827;\n+  background: var(--bg);\n+  color: var(--fg);\n }",
+   "added": 12,
+   "removed": 2,
+   "tokens": 62
   },
   "src/hooks/useTheme.ts": {
    "path": "src/hooks/useTheme.ts",
@@ -487,9 +487,9 @@
  },
  "pr": {
   "src/styles/theme.css": {
-   "diff": "@@ -1,16 +1,32 @@\n+:root {\n+  --bg: #ffffff;\n+  --fg: #111827;\n+  --card: #f3f4f6;\n+  --border: #e5e7eb;\n+  --muted: #6b7280;\n+}\n+\n+[data-theme=\"dark\"] {\n+  --bg: #0b0d12;\n+  --fg: #e5e7eb;\n+  --card: #151922;\n+  --border: #262b36;\n+  --muted: #9ca3af;\n+}\n+\n body {\n   margin: 0;\n   font-family: system-ui, sans-serif;\n-  background: #ffffff;\n-  color: #111827;\n+  background: var(--bg);\n+  color: var(--fg);\n }\n \n .card {\n-  background: #f3f4f6;\n-  border: 1px solid #e5e7eb;\n+  background: var(--card);\n+  border: 1px solid var(--border);\n   border-radius: 12px;\n }\n \n .muted {\n-  color: #6b7280;\n+  color: var(--muted);\n }",
-   "added": 21,
-   "removed": 5
+   "diff": "@@ -1,6 +1,16 @@\n+:root {\n+  --bg: #fff;\n+  --fg: #111827;\n+}\n+\n+[data-theme=\"dark\"] {\n+  --bg: #0b0d12;\n+  --fg: #e5e7eb;\n+}\n+\n body {\n   margin: 0;\n   font-family: system-ui, sans-serif;\n-  background: #fff;\n-  color: #111827;\n+  background: var(--bg);\n+  color: var(--fg);\n }",
+   "added": 12,
+   "removed": 2
   },
   "src/hooks/useTheme.ts": {
    "diff": "@@ -0,0 +1,35 @@\n+import { useEffect, useState } from \"react\";\n+\n+export type Theme = \"light\" | \"dark\";\n+\n+const query = \"(prefers-color-scheme: dark)\";\n+\n+const system = (): Theme =>\n+  matchMedia(query).matches ? \"dark\" : \"light\";\n+\n+const saved = (): Theme | null => {\n+  const t = localStorage.theme;\n+  return t === \"dark\" || t === \"light\" ? t : null;\n+};\n+\n+export function useTheme() {\n+  const [choice, setChoice] = useState(saved);\n+  const [os, setOs] = useState(system);\n+  const theme = choice ?? os;\n+\n+  useEffect(() => {\n+    const media = matchMedia(query);\n+    const follow = () => setOs(system());\n+    media.addEventListener(\"change\", follow);\n+    return () =>\n+      media.removeEventListener(\"change\", follow);\n+  }, []);\n+\n+  useEffect(() => {\n+    const root = document.documentElement;\n+    root.dataset.theme = theme;\n+    if (choice) localStorage.theme = choice;\n+  }, [theme, choice]);\n+\n+  return [theme, setChoice] as const;\n+}",
