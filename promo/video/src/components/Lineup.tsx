@@ -1,5 +1,5 @@
 import type React from "react";
-import type { Framing } from "../camera";
+import { LENS, type Framing } from "../camera";
 import { AT, beat, LINEUP, lineupReel, takeFrame } from "../edit";
 import { clamp01, easeInOut, easeOut, lerp, progress } from "../math";
 import { DP_WIDTH, takeOf, type DeviceId, type TakeId, type Theme } from "../takes";
@@ -97,6 +97,17 @@ const LAND = 20;
 const REFRAME = 30;
 const LEAD = 12;
 
+/**
+ * The camera's turn round the lineup, at an even pace from cut to cut: from the first [turn] to the second about the
+ * upright and from the first [tilt] to the second about the crosswise axis, in degrees, and from the first [scale] to the
+ * second, drifting back as it turns so the row, which stands near the frame's edges, stays inside it; all about the
+ * middle of the frame.
+ */
+const ORBIT: Record<Framing, { turn: [number, number]; tilt: [number, number]; scale: [number, number] }> = {
+  wide: { turn: [-10, 12], tilt: [6, 0], scale: [1.02, 0.94] },
+  tall: { turn: [9, -11], tilt: [5, 0], scale: [1.02, 0.95] },
+};
+
 /** The view at frame [f]: reframed around each device as it lands, from the shot before. */
 function viewAt(framing: Framing, all: Slot[], width: number, height: number, f: number): View {
   const r = ROOM[framing];
@@ -118,7 +129,7 @@ function viewAt(framing: Framing, all: Slot[], width: number, height: number, f:
 
 /**
  * The three devices landing one a beat, each named as it lands, all playing the same moment of the run in step: the
- * camera in on the phone, pulling back as the foldable and the tablet land beside it.
+ * camera in on the phone, pulling back as the foldable and the tablet land beside it, and turning round all three.
  */
 export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width: number; height: number }> = ({
   framing,
@@ -131,31 +142,45 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
   const lines = framing === "wide" ? ["Phone. Foldable. Tablet."] : ["Phone.", "Foldable.", "Tablet."];
   const all = slots(framing, theme, width, height);
   const view = viewAt(framing, all, width, height, f);
+  const orbit = ORBIT[framing];
+  const p = progress(f, AT.lineup, AT.end);
+  const origin = `${width / 2}px ${height / 2}px`;
   return (
     <>
-      {all.map((slot) => {
-        const i = LINEUP.indexOf(slot.device);
-        const landed = easeOut(progress(f, landAt(i), landAt(i) + LAND));
-        const x = view.x + (slot.x - view.cx) * view.zoom;
-        const y = view.y + (slot.y - view.cy) * view.zoom;
-        const w = slot.width * view.zoom;
-        return (
-          <div
-            key={slot.device}
-            style={{
-              position: "absolute",
-              inset: 0,
-              opacity: clamp01((f - landAt(i) + 1) / 4),
-              transform: `translateY(${(1 - landed) * 80}px) scale(${0.95 + 0.05 * landed})`,
-              transformOrigin: `${x + w / 2}px ${y + screenHeight(slot.take, w)}px`,
-            }}
-          >
-            <Device take={slot.take} x={x} y={y} width={w}>
-              <Screen take={slot.take} frame={takeFrame(lineupReel(slot.take), f)} width={w} />
-            </Device>
-          </div>
-        );
-      })}
+      <div style={{ position: "absolute", inset: 0, perspective: LENS[framing].perspective, perspectiveOrigin: origin }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            transformOrigin: origin,
+            transform: `rotateX(${lerp(...orbit.tilt, p)}deg) rotateY(${lerp(...orbit.turn, p)}deg) scale(${lerp(...orbit.scale, p)})`,
+          }}
+        >
+          {all.map((slot) => {
+            const i = LINEUP.indexOf(slot.device);
+            const landed = easeOut(progress(f, landAt(i), landAt(i) + LAND));
+            const x = view.x + (slot.x - view.cx) * view.zoom;
+            const y = view.y + (slot.y - view.cy) * view.zoom;
+            const w = slot.width * view.zoom;
+            return (
+              <div
+                key={slot.device}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  opacity: clamp01((f - landAt(i) + 1) / 4),
+                  transform: `translateY(${(1 - landed) * 80}px) scale(${0.95 + 0.05 * landed})`,
+                  transformOrigin: `${x + w / 2}px ${y + screenHeight(slot.take, w)}px`,
+                }}
+              >
+                <Device take={slot.take} x={x} y={y} width={w}>
+                  <Screen take={slot.take} frame={takeFrame(lineupReel(slot.take), f)} width={w} />
+                </Device>
+              </div>
+            );
+          })}
+        </div>
+      </div>
       <Headline
         lines={lines}
         f={f}

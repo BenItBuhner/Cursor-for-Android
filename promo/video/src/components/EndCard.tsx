@@ -1,6 +1,6 @@
 import type React from "react";
 import type { Framing } from "../camera";
-import { AT } from "../edit";
+import { AT, DURATION } from "../edit";
 import { clamp01, easeOut, progress } from "../math";
 import { COLOR, SANS, TRACK } from "../theme";
 import { AppIcon } from "./AppIcon";
@@ -8,7 +8,13 @@ import { AppIcon } from "./AppIcon";
 export const REPO = "github.com/BenItBuhner/cursor-for-android";
 export const DISCLAIMER = "Unofficial client for Cursor Cloud Agents. Not affiliated with Anysphere, Inc.";
 
-/** The close: the icon lands on the last hit, the name and where to get it rise under it, and the small print. */
+/** How far the camera pushes in on the name by the last frame, slowing to a stop as the video ends. */
+const PUSH = 0.06;
+
+/**
+ * The close: the icon lands on the last hit, the name and where to get it rise under it as the camera pushes slowly in,
+ * and the small print holds still under them.
+ */
 export const EndCard: React.FC<{ framing: Framing; f: number; width: number; height: number }> = ({ framing, f, width, height }) => {
   const wide = framing === "wide";
   const icon = wide ? 168 : 196;
@@ -19,6 +25,7 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
     return { opacity: clamp01((f - at + 1) / 8), transform: `translateY(${(1 - p) * by}px)` };
   };
   const landed = easeOut(progress(f, AT.end, AT.end + 18));
+  const push = 1 + PUSH * Math.sin((progress(f, AT.end, DURATION - 1) * Math.PI) / 2);
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <div
@@ -30,6 +37,7 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
+          transform: `scale(${push})`,
         }}
       >
         <div style={{ transform: `scale(${0.82 + 0.18 * landed})`, opacity: clamp01((f - AT.end + 1) / 5) }}>
