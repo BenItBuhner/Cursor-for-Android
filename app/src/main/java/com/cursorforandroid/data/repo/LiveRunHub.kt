@@ -97,13 +97,16 @@ class LiveRunHub(
      */
     private val terminalGraceMs: Long = TERMINAL_GRACE_MS,
     /**
-     * How long a watched live pass may go without an event — keep-alives are not events — before its connection is
-     * taken to have stalled: let go, the record asked whether the run is still under way, and the stream taken up again
-     * from the last event applied, with no "reconnecting" said. A held connection's keep-alives say nothing about
-     * whether the run's events still reach it, and one the server's side had let go of (a message steered into the
-     * turn, a queued one taken) kept an open chat on the turn's last word while the agent ran on. Doubles per
-     * consecutive pass that heard nothing, up to [stallMaxMs], so a long tool call costs a resume now and then. Zero
-     * or less turns the watch off (a test on a virtual clock that runs it until idle).
+     * How long a live pass a chat on screen reads may go without an event — keep-alives are not events — before its
+     * connection is taken to have stalled: let go, the record asked whether the run is still under way, and the stream
+     * taken up again from the last event applied, with no "reconnecting" said. A held connection's keep-alives say
+     * nothing about whether the run's events still reach it, and one the server's side had let go of (a message
+     * steered into the turn, a queued one taken) kept an open chat on the turn's last word while the agent ran on.
+     * Doubles per consecutive pass that heard nothing, up to [stallMaxMs], so a long tool call costs a resume now and
+     * then. Only a chat gets this (see [Entry.stallWatchedChanges]): a run followed for the notification alone holds
+     * its connection, and learns of its end from the agent list's look at the record — eight of them resuming at the
+     * cap more than doubled what the phone asked of Cursor with no chat open. Zero or less turns the watch off (a test
+     * on a virtual clock that runs it until idle).
      */
     private val stallTimeoutMs: Long = STALL_TIMEOUT_MS,
     private val stallMaxMs: Long = STALL_MAX_MS,
@@ -218,6 +221,19 @@ class LiveRunHub(
             if (now.isEmpty()) flowOf(true) else combine(now) { values -> values.any { it } }
         }.distinctUntilChanged()
 
+        /**
+         * True while a watched subscriber reads every word of the run — a chat on screen — and so would notice a
+         * connection the run's events no longer reach (see [stallTimeoutMs]). A subscriber that shows what the run is
+         * doing (the live notification, a follow-up waiting on the turn) does not: it hears the finish from the agent
+         * list's look at the record, and holding its connection costs nothing while taking it up again costs the
+         * record and a stream per stall window. False with nobody subscribed (a release's grace, a replay).
+         */
+        @OptIn(ExperimentalCoroutinesApi::class)
+        fun stallWatchedChanges(): Flow<Boolean> = watchersChanged.flatMapLatest {
+            val now = synchronized(entries) { watchers.filter { it.everyWord }.map { it.watched } }
+            if (now.isEmpty()) flowOf(false) else combine(now) { values -> values.any { it } }
+        }.distinctUntilChanged()
+
         /** How long a live pass may sit on what it applied before publishing it; see [paceOf]. */
         fun publishEveryMs(): Long = synchronized(entries) { paceOf(watchers, watchers.map { it.watched.value }) }
 
@@ -229,7 +245,10 @@ class LiveRunHub(
     }
 
     /** One live subscriber (see [snapshots]): its own object, so two subscribers passing the same flow are two. */
-    private class Watcher(val watched: StateFlow<Boolean>, val sampleMs: Long)
+    private class Watcher(val watched: StateFlow<Boolean>, val sampleMs: Long) {
+        /** Shows each event as it comes (a chat), rather than what the run is doing at a pace (the notification). */
+        val everyWord: Boolean get() = sampleMs == 0L
+    }
 
     /**
      * The slowest a live pass may publish for [watchers], whose watched words are [values]: every event (0) while any
@@ -283,7 +302,8 @@ class LiveRunHub(
      * [sampleMs] is for a collector that shows what the run is doing rather than every word of it (the live
      * notification): it hears each step change (see [Snapshot.stepChanges]) and the finish at once, and the words
      * streaming into the step under way at most once per period, the latest of it. A run only such collectors watch
-     * is published at that pace too, rather than rebuilt per token.
+     * is published at that pace too, rather than rebuilt per token, and its connection is held however quiet it goes:
+     * the stall watch (see [stallTimeoutMs]) runs for collectors that show every word, a chat on screen.
      */
     fun snapshots(agentId: String, runId: String, startedAtMillis: Long? = null, watched: StateFlow<Boolean>? = null, sampleMs: Long = 0L): Flow<Snapshot> = flow {
         val watcher = Watcher(watched ?: ALWAYS_WATCHED, sampleMs.coerceAtLeast(0L))
@@ -616,15 +636,20 @@ class LiveRunHub(
                 }
             },
             // The stall window runs on the clock too: a connection the run's events no longer reach goes on sending its
-            // keep-alives, and those say nothing about the run (see [stallTimeoutMs]).
-            if (stallMs <= 0) emptyFlow() else flow<Any> {
-                while (true) {
-                    val left = stallMs - (System.nanoTime() - heardAt.get()) / NANOS_PER_MS
-                    if (left > 0) {
-                        delay(left)
-                    } else {
-                        emit(StallTick)
-                        delay(stallMs)
+            // keep-alives, and those say nothing about the run (see [stallTimeoutMs]). It runs only while a chat on
+            // screen reads the run; a pass only the notification follows holds its connection, however quiet, and the
+            // window counts from when a chat arrives on it, not from the pass's last event.
+            if (stallMs <= 0) emptyFlow() else entry.stallWatchedChanges().flatMapLatest { shown ->
+                if (!shown) emptyFlow() else flow<Any> {
+                    heardAt.set(System.nanoTime())
+                    while (true) {
+                        val left = stallMs - (System.nanoTime() - heardAt.get()) / NANOS_PER_MS
+                        if (left > 0) {
+                            delay(left)
+                        } else {
+                            emit(StallTick)
+                            delay(stallMs)
+                        }
                     }
                 }
             },
