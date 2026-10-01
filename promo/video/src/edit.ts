@@ -231,6 +231,13 @@ export const LINEUP_DIFF = 83;
 export const SWEEPS = [AT.organize, AT.dictate, AT.code, AT.steer, AT.live, AT.ship, AT.lineup + LINEUP_DIFF] as const;
 
 /**
+ * The light that carries the hero into the lineup: the frame it sets out from off the frame's left, and the frames it
+ * takes to cross to off its right. Slower than a sweep, and from rest to rest, so its beam crosses the frame at an even
+ * pace, reaching the lineup's headline as the type starts to rise, and the hero's phone as the lineup's lands.
+ */
+export const WIPE = { from: AT.lineup - 14, frames: 36 };
+
+/**
  * Each device's take in the lineup: the same stretch, the first edit open as it is written and its diff landing at
  * [LINEUP_DIFF], in step. Held to the capture's own steps, which every take films on the same frames.
  */

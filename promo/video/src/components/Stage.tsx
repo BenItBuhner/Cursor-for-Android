@@ -1,5 +1,5 @@
 import type React from "react";
-import { AT, SWEEPS } from "../edit";
+import { SWEEPS, WIPE } from "../edit";
 import { easeOut, easeSmooth, lerp, progress } from "../math";
 import { COLOR } from "../theme";
 
@@ -11,13 +11,6 @@ const BAND = 0.55;
 
 /** The band's skew off the upright, in degrees. */
 const SKEW = -14;
-
-/**
- * The light that carries the hero into the lineup: the frame it sets out from off the frame's left, and the frames it
- * takes to cross to off its right. Slower than a sweep, and from rest to rest, so its beam crosses the frame at an even
- * pace, reaching the lineup's headline as the type starts to rise, and the hero's phone as the lineup's lands.
- */
-export const WIPE = { from: AT.lineup - 14, frames: 36 };
 
 /** Whether the light at [f] is the one carrying the hero into the lineup. */
 export const carrying = (f: number) => f >= WIPE.from && f < WIPE.from + WIPE.frames;

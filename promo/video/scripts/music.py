@@ -507,6 +507,10 @@ def score(cues: dict) -> np.ndarray:
     # The light sweeping the stage, each with a swell of air gathering into the cut and let go across it.
     for frame in cues["sweeps"]:
         mix.add(sec(frame) - 0.42, whoosh(0.75, 0.56), lv["whoosh"] * (0.8 if frame == at["organize"] else 1), verb=0.3)
+    # The light carrying the hero into the lineup: a longer swell of air the length of its crossing, breaking as its beam
+    # crosses the middle of the frame.
+    wipe = cues["wipe"]
+    mix.add(sec(wipe["from"]), whoosh(wipe["frames"] / fps, 0.5), lv["whoosh"] * 1.25, verb=0.35)
     # The send: a glass tick as the prompt flies.
     mix.add(sec(cues["send"]), tick(), lv["tick"], pan=0.15, verb=0.6)
     # The taps on screen, faintly.
