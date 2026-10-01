@@ -56,7 +56,7 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
               width: bloomSize,
               height: bloomSize,
               borderRadius: "50%",
-              background: `radial-gradient(circle, rgba(255,196,110,${(0.17 * bloom).toFixed(3)}) 0%, rgba(250,176,70,${(0.055 * bloom).toFixed(3)}) 28%, rgba(245,165,36,0) 60%)`,
+              background: `radial-gradient(circle, rgba(255,196,110,${(0.24 * bloom).toFixed(3)}) 0%, rgba(250,176,70,${(0.08 * bloom).toFixed(3)}) 28%, rgba(245,165,36,0) 60%)`,
             }}
           />
           <div style={{ position: "relative", transform: `scale(${1.22 - 0.22 * settled})`, opacity: clamp01((f - AT.end + 1) / 6) }}>

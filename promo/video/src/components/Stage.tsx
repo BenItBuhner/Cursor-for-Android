@@ -46,8 +46,11 @@ export const Stage: React.FC<{ f: number; width: number; height: number }> = ({ 
             width: band,
             left: -band + (width + 2 * band) * sweep,
             transform: "skewX(-14deg)",
-            background:
-              "linear-gradient(90deg, rgba(255,243,226,0) 0%, rgba(255,243,226,0.06) 35%, rgba(255,243,226,0.13) 50%, rgba(255,243,226,0.06) 65%, rgba(255,243,226,0) 100%)",
+            // A soft wash with a narrow, brighter core down its middle, so the light reads as a beam rather than a fog.
+            background: [
+              "linear-gradient(90deg, rgba(255,243,226,0) 44%, rgba(255,243,226,0.1) 49%, rgba(255,243,226,0.16) 50%, rgba(255,243,226,0.1) 51%, rgba(255,243,226,0) 56%)",
+              "linear-gradient(90deg, rgba(255,243,226,0) 0%, rgba(255,243,226,0.06) 35%, rgba(255,243,226,0.12) 50%, rgba(255,243,226,0.06) 65%, rgba(255,243,226,0) 100%)",
+            ].join(", "),
           }}
         />
       ) : null}

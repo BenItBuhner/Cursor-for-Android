@@ -81,7 +81,7 @@ export const Device: React.FC<{
         {children}
         {device === "foldable" ? <Crease width={width} height={height} /> : null}
         {device !== "tablet" ? <PunchHole take={take} width={width} height={height} /> : null}
-        {glint(0.08, 30)}
+        {glint(0.1, 30)}
       </div>
       {device === "tablet" ? (
         <div

@@ -1,7 +1,7 @@
 import type React from "react";
 import { cameraAt, HERO_PATHS, screenOf, type Framing } from "../camera";
 import { AT, HEROES } from "../edit";
-import { easeOut, progress } from "../math";
+import { easeInOut, progress } from "../math";
 import type { Theme } from "../takes";
 import { COLOR } from "../theme";
 import { Headline, LEADING } from "./Headline";
@@ -9,8 +9,8 @@ import { iconCentre } from "./TitleCard";
 
 /** How far the camera pushes in on the news, at an even pace from the open to the close. */
 const PUSH = 0.09;
-/** Frames the green takes to open from the icon's footprint to the whole frame. */
-export const OPEN = 16;
+/** Frames the green takes to open from the icon's footprint to the whole frame: slow off the icon, fast to the edges. */
+export const OPEN = 22;
 /**
  * The close: the frame the green starts closing into the phone, a little ahead of the hero's beat so the disc is well
  * in by the hit, and the frame it is gone.
@@ -32,7 +32,7 @@ export const AndroidCard: React.FC<{ framing: Framing; theme: Theme; f: number; 
 }) => {
   const size = framing === "wide" ? 216 : 184;
   const lines = framing === "wide" ? ["Now on Android."] : ["Now on", "Android."];
-  const open = easeOut(progress(f, AT.android, AT.android + OPEN));
+  const open = easeInOut(progress(f, AT.android, AT.android + OPEN));
   const close = progress(f, CLOSE.from, CLOSE.until);
   let clipPath: string | undefined;
   if (open < 1) {
@@ -55,7 +55,7 @@ export const AndroidCard: React.FC<{ framing: Framing; theme: Theme; f: number; 
         <Headline
           lines={lines}
           f={f}
-          at={AT.android + 4}
+          at={AT.android + 6}
           until={CLOSE.from + 2}
           size={size}
           x={0}

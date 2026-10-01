@@ -16,6 +16,8 @@ const CLEAR = 12;
 const CLEAR_STAGGER = 0.5;
 /** The tracking, in ems, tightening from the first value to [TRACK.display] as the type lands. */
 const TRACK_FROM = -0.008;
+/** The line mask's feathered top edge: clear at the edge, solid by 0.15em down, just over where the tallest glyph stands. */
+const FEATHER = "linear-gradient(to bottom, rgba(0,0,0,0) 0, #000 0.15em, #000 100%)";
 
 /**
  * A weight wave: a crest in the type's weight that sweeps across the text from the left edge to the right over [frames]
@@ -95,9 +97,12 @@ export const Kinetic: React.FC<{
             display: "block",
             overflow: "hidden",
             // The mask: the face's content area overruns a line of LEADING by 0.09em each way, its deepest descender
-            // ends 0.055em under the line, and its tallest glyph 0.15em under the line's top.
+            // ends 0.055em under the line, and its tallest glyph 0.15em under the line's top. Its top edge is
+            // feathered over the room above the tallest glyph, so a glyph wiping up dissolves rather than slices.
             padding: "0.02em 0.04em 0.08em",
             margin: "-0.02em -0.04em -0.08em",
+            WebkitMaskImage: FEATHER,
+            maskImage: FEATHER,
           }}
         >
           {line.map((g, j) => {
