@@ -19,7 +19,9 @@ import com.cursorforandroid.domain.Capabilities
 import com.cursorforandroid.domain.InteractionResolution
 import com.cursorforandroid.domain.PendingFollowup
 import com.cursorforandroid.domain.QueueLoad
+import com.cursorforandroid.domain.QueuePlacement
 import com.cursorforandroid.domain.SteerOutcome
+import com.cursorforandroid.domain.SteerPhase
 import com.cursorforandroid.domain.ToolPayload
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
@@ -30,6 +32,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -294,6 +297,70 @@ class SteeringRepositoryTest {
             "add:bc-1:Now:null:null:true", "list:bc-1",
         ).inOrder()
         steering.detach("bc-1")
+    }
+
+    /**
+     * An account row's steer is a steer on the card from the tap: "steering" while the promote is out, "steered" once the
+     * account took it, kept while the row is on the card — listed, or carried as waiting — and let go by the second
+     * read in a row to find it nowhere. One the account refuses or holds is no steer: the row goes back to waiting,
+     * saying so under it, and a refusal is the call's failure, never taken for a steer.
+     */
+    @Test
+    fun `a promote marks the row steering then steered, and a refused or held one leaves it waiting with a word`() = runBlocking<Unit> {
+        extended = true
+        api.addRunningAgent("bc-1", "Chat", "run-9")
+        val agents = agents()
+        agents.refresh()
+        val notes = CopyOnWriteArrayList<String>()
+        val placement = MutableStateFlow(QueuePlacement(waiting = listOf(PendingFollowup("fu-1", "First"))))
+        val gate = CompletableDeferred<Unit>()
+        val seenSteering = CompletableDeferred<SteerPhase?>()
+        lateinit var steering: SteeringRepository
+        val gated = object : RunControlApi by account {
+            override suspend fun promoteFollowup(agentId: String, followupId: String, expectedRunId: String?): SteerOutcome {
+                seenSteering.complete(steering.state(agentId).value.steers[followupId])
+                gate.await()
+                return account.promoteFollowup(agentId, followupId, expectedRunId)
+            }
+        }
+        steering = SteeringRepository(
+            session, agents, interactions = account, queueApi = account, runs = gated,
+            onQueuedNote = { _, id, note -> notes += "$id:$note" },
+            placement = { placement }, scope = scope, pollIntervalMs = 60_000, capabilities = capabilities,
+        )
+        account.queue = listOf(PendingFollowup("fu-1", "First"), PendingFollowup("fu-2", "Second"))
+        steering.refreshQueue("bc-1")
+
+        // Taken: steering while out, steered after, though the account's list no longer names it.
+        account.queue = listOf(PendingFollowup("fu-2", "Second"))
+        val promoted = async { steering.promotePending("bc-1", "fu-1") }
+        assertThat(seenSteering.await()).isEqualTo(SteerPhase.STEERING)
+        gate.complete(Unit)
+        assertThat(promoted.await().getOrNull()).isEqualTo(SteerOutcome.QUEUED)
+        assertThat(steering.state("bc-1").value.steers).containsExactly("fu-1", SteerPhase.STEERED)
+        assertThat(steering.state("bc-1").value.placed(placement.value).queue.first().let { it.id to it.steer }).isEqualTo("fu-1" to SteerPhase.STEERED)
+        // Filed by the transcript: nowhere on the card. Kept for one read, let go by the next.
+        placement.value = QueuePlacement(deliveredIds = setOf("fu-1"))
+        steering.refreshQueue("bc-1")
+        assertThat(steering.state("bc-1").value.steers).containsKey("fu-1")
+        steering.refreshQueue("bc-1")
+        assertThat(steering.state("bc-1").value.steers).isEmpty()
+
+        // Refused: a failure the caller can tell from any other, the row waiting with a word under it.
+        account.outcome = SteerOutcome.REJECTED
+        val refused = steering.promotePending("bc-1", "fu-2")
+        assertThat(refused.exceptionOrNull()).isInstanceOf(SteerRefusedException::class.java)
+        assertThat(steering.state("bc-1").value.steers).isEmpty()
+        // Held for the next turn: no steer either, said so.
+        account.outcome = SteerOutcome.QUEUED_FOR_NEXT_TURN
+        assertThat(steering.promotePending("bc-1", "fu-2").getOrNull()).isEqualTo(SteerOutcome.QUEUED_FOR_NEXT_TURN)
+        assertThat(steering.state("bc-1").value.steers).isEmpty()
+        assertThat(notes).containsExactly("fu-2:${SteeringRepository.STEER_REFUSED_NOTE}", "fu-2:${SteeringRepository.STEER_HELD_NOTE}").inOrder()
+        // A promote that fails outright leaves no steer behind.
+        account.failing = java.io.IOException("offline")
+        assertThat(steering.promotePending("bc-1", "fu-2").isFailure).isTrue()
+        assertThat(steering.state("bc-1").value.steers).isEmpty()
+        assertThat(steering.state("bc-1").value.inFlight).isEmpty()
     }
 
     /**

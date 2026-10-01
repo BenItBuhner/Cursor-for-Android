@@ -59,6 +59,7 @@ import com.cursorforandroid.share.ShareTarget
 import com.cursorforandroid.ui.components.SpinnerRing
 import com.cursorforandroid.ui.components.hitTestBoundary
 import com.cursorforandroid.ui.home.HomeScreen
+import com.cursorforandroid.ui.home.RememberNewChatPage
 import com.cursorforandroid.ui.home.rememberNewChatHome
 import com.cursorforandroid.ui.media.MediaViewerHost
 import com.cursorforandroid.ui.media.rememberMediaViewerState
@@ -453,14 +454,25 @@ private fun AppShell(
     }
     NotificationPermissionPrompt(graph = graph, hasRunningAgents = listState.runningCount > 0)
 
+    // The New Chat page as this account last left it (see NewChatPageCache): until the settings are read, their
+    // values from then, so the first frame lays the page out as it will stay.
+    val pageSeed = remember(graph, user) { graph.caches.newChatPage.seed(user) }
     // Extended mode: the account's rename is offered, and the sidebar footer says the mode is on. Until the setting
     // has been read the shell assumes the default, which only ever hides what the setting would allow.
-    val extendedMode by graph.extendedMode.enabled.collectAsStateWithLifecycle(initialValue = false)
+    val extendedMode by graph.extendedMode.enabled.collectAsStateWithLifecycle(initialValue = pageSeed?.extendedMode ?: false)
     val extendedNoticePending by graph.extendedMode.noticePending.collectAsStateWithLifecycle(initialValue = false)
     // Null until read, so a pane set to Projects never shows the recents for a frame first; the switch is read again
     // as nullable so the New Chat page's automatic pick waits on it rather than taking the shell's assumed "off".
-    val newChatHomeChoice by graph.prefs.newChatHomeChoice.collectAsStateWithLifecycle(initialValue = null)
-    val extendedModeRead by graph.extendedMode.enabled.collectAsStateWithLifecycle(initialValue = null)
+    val newChatHomeChoice by graph.prefs.newChatHomeChoice.collectAsStateWithLifecycle(initialValue = pageSeed?.choice)
+    val extendedModeRead by graph.extendedMode.enabled.collectAsStateWithLifecycle(initialValue = pageSeed?.extendedMode)
+    RememberNewChatPage(
+        cache = graph.caches.newChatPage,
+        user = user,
+        choice = newChatHomeChoice,
+        extendedMode = extendedModeRead,
+        list = listState,
+        projectsAvailable = isDemo || extendedMode,
+    )
     if (extendedNoticePending && !isDemo) {
         ExtendedModeUpgradeNotice(
             onOpenSettings = {

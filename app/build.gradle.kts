@@ -172,11 +172,11 @@ fun certificateSha256(signing: ReleaseSigning): String {
 val releaseCertSha256: String = releaseSigning?.let(::certificateSha256).orEmpty()
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Crash reports (opt-in; crash/CrashReporting.kt)
+// Crash reports (crash/CrashReporting.kt; currently unwired, with no Settings consent)
 //
 // `-Papp.sentryDsn=https://<key>@<host>/<project>` bakes the Sentry project into BuildConfig.SENTRY_DSN; the release
 // workflow passes it from the SENTRY_DSN secret when that exists. Without it the field is empty and the app has no
-// crash reporting at all: the Settings toggle says so and nothing is initialised. `-Papp.sentryProguardUuid=<uuid>` is
+// crash reporting at all. `-Papp.sentryProguardUuid=<uuid>` is
 // the id the workflow uploads this build's R8 mapping under, so a report from an obfuscated build can be read back;
 // it is only meaningful together with the DSN. Neither is ever set for a PR or debug build.
 // ---------------------------------------------------------------------------------------------------------------------

@@ -57,7 +57,7 @@ object NewChatHomePickerCopy {
     const val PROJECTS = "Projects"
     const val COMPOSER = "Composer only"
     const val NEEDS_MODE = "Projects need Extended mode"
-    const val NEEDS_MODE_DETAIL = "Until it is on, the Projects page lists your recent agents under a note."
+    const val NEEDS_MODE_DETAIL = "Until then, it lists recent agents."
 
     fun label(home: NewChatHome): String = when (home) {
         NewChatHome.RECENT -> RECENT
@@ -109,7 +109,7 @@ internal fun NewChatHomeCard(
     val chips = rememberComposerChips(graph)
     SettingsCard {
         Row(
-            Modifier.fillMaxWidth().selectableGroup().padding(horizontal = RowInset, vertical = 16.dp),
+            Modifier.fillMaxWidth().selectableGroup().padding(horizontal = RowInset, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             NewChatHome.entries.forEach { option ->
@@ -194,7 +194,7 @@ private fun PickerOption(
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
             label,
             style = type.base,
@@ -202,7 +202,7 @@ private fun PickerOption(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         CheckCircle(selected)
     }
 }
@@ -224,14 +224,14 @@ private fun CheckCircle(checked: Boolean) {
 }
 
 /**
- * A miniature's size in [room] (its option's width, less the ring): nine tenths of it, so the three stand apart, but
+ * A miniature's size in [room] (its option's width, less the ring): four fifths of it, so the three stand apart, but
  * never wider than [MiniatureMaxWidth] nor taller than [MiniatureMaxHeight] — a large phone's, a foldable's and a
  * tablet's thirds are wider than a phone's, and an upright page is tall, which drawn at the full width made each
  * miniature loom over the card. Its height is the [page]'s at that width.
  */
 internal fun miniatureSize(page: DpSize, room: Dp): DpSize {
     val aspect = page.height / page.width
-    val width = minOf(room * 0.9f, MiniatureMaxWidth, MiniatureMaxHeight / aspect).coerceAtLeast(0.dp)
+    val width = minOf(room * 0.8f, MiniatureMaxWidth, MiniatureMaxHeight / aspect).coerceAtLeast(0.dp)
     return DpSize(width, width * aspect)
 }
 
@@ -242,8 +242,8 @@ internal fun miniatureSize(page: DpSize, room: Dp): DpSize {
  */
 internal fun miniatureRadius(width: Dp): Dp = (width * 0.05f).coerceIn(4.dp, 6.dp)
 
-internal val MiniatureMaxWidth = 132.dp
-internal val MiniatureMaxHeight = 172.dp
+internal val MiniatureMaxWidth = 96.dp
+internal val MiniatureMaxHeight = 124.dp
 private val RingWidth = 2.dp
 private val RingGap = 2.dp
 private val RingInset = RingWidth + RingGap
