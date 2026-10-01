@@ -281,6 +281,9 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     /** Where each message sent from here and not yet filed stands, by its bubble's id — the transcript draws it on the bubble. */
     val outgoingStatuses: StateFlow<Map<String, OutgoingStatus>> = outgoing.statuses
     val toastMessage: StateFlow<String?> = toast.asStateFlow()
+    private val attachmentErrorState = MutableStateFlow<String?>(null)
+    /** Why the last picture or file could not be attached, shown under the composer until the attachments change. */
+    val attachmentError: StateFlow<String?> = attachmentErrorState.asStateFlow()
     private val refused = MutableStateFlow<String?>(null)
     private var refusalShown: Job? = null
     /** The queued follow-up whose remove, edit or up arrow was just refused, being on its way: its card says so, briefly. */
@@ -558,11 +561,15 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     }
 
     fun addAttachments(items: List<PendingAttachment>) {
+        attachmentErrorState.value = null
         thumbnails.update { cache -> cache + items.mapNotNull { a -> a.thumbnail?.let { a.id to it } } }
         setAttachments((attachments.value + items).take(PromptImage.MAX_COUNT))
     }
 
-    fun removeAttachment(item: PendingAttachment) = setAttachments(attachments.value.filterNot { it.id == item.id })
+    fun removeAttachment(item: PendingAttachment) {
+        attachmentErrorState.value = null
+        setAttachments(attachments.value.filterNot { it.id == item.id })
+    }
 
     private fun setAttachments(items: List<PendingAttachment>) {
         attachments.value = items
@@ -572,6 +579,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     /** Files of any type from the document picker (Extended mode); refused with a word when the mode is off. */
     fun addFiles(items: List<PendingFile>) {
         if (items.isEmpty()) return
+        attachmentErrorState.value = null
         if (!capabilities.value.promptFiles || graph.session.isDemo) {
             toast.value = AgentRepository.FILES_NEED_EXTENDED
             return
@@ -584,6 +592,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
 
     /** Takes a file off the message: its upload, under way or done, is cancelled with it. */
     fun removeFile(item: PendingFile) {
+        attachmentErrorState.value = null
         setFiles(files.value.filterNot { it.id == item.id })
         graph.attachmentUploads.cancel(item.id)
     }
@@ -636,6 +645,8 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     }
 
     fun showMessage(message: String) { toast.value = message }
+    fun showAttachmentError(message: String) { attachmentErrorState.value = message }
+    fun dismissAttachmentError() { attachmentErrorState.value = null }
     /** See [com.cursorforandroid.ui.compose.NewAgentViewModel.applyShare]: same merge into this chat's follow-up. */
     fun applyShare(text: String, items: List<PendingAttachment>, warning: String? = null) {
         setDraft(ShareDraft.mergeText(draft.value, text))
@@ -753,6 +764,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         draft.value = ""
         attachments.value = emptyList()
         files.value = emptyList()
+        attachmentErrorState.value = null
     }
 
     /** The server has the message: the model override it went out with is spent — unless another was picked meanwhile. */
@@ -798,6 +810,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         draft.value = ""
         attachments.value = emptyList()
         files.value = emptyList()
+        attachmentErrorState.value = null
         graph.attachmentUploads.forget(attached.map { it.id })
     }
 
