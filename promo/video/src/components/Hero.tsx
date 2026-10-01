@@ -1,24 +1,20 @@
 import type React from "react";
-import { cameraAt, HERO_SHOTS, TALL_TOP, type Framing } from "../camera";
-import { AT, HEROES, MOMENTS, shadeAt, takeFrame } from "../edit";
-import { easeOut, progress } from "../math";
+import { cameraAt, HERO_PATHS, LENS, screenOf, TALL_TOP, type Framing } from "../camera";
+import { HEROES, MOMENTS, shadeAt, takeFrame } from "../edit";
 import type { Theme } from "../takes";
-import { Device, screenHeight } from "./Device";
+import { Device } from "./Device";
 import { Headline, LEADING } from "./Headline";
 import { Screen } from "./Screen";
 
 /**
- * Where the hero goes in each framing: the phone's screen width at the camera's resting zoom, and the headline's size.
- * A wide frame sets the headline at [left], centred down the frame beside the phone; a tall one centres it across the
- * frame, over the phone, in the room over the screen's top ([TALL_TOP]) less [clear].
+ * Where the hero's headline goes in each framing, and its size. A wide frame sets it at [left], centred down the frame
+ * beside the phone; a tall one centres it across the frame, over the phone, in the room over the screen's resting top
+ * ([TALL_TOP]) less [clear].
  */
 const LAYOUT = {
-  wide: { rest: 404, size: 150, left: 150 },
-  tall: { rest: 614, size: 124, clear: 24 },
+  wide: { size: 150, left: 150 },
+  tall: { size: 124, clear: 24 },
 } as const;
-
-/** Frames the phone takes to rise into the frame as the first moment starts. */
-const ENTER = 28;
 
 export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; width: number; height: number }> = ({
   framing,
@@ -28,17 +24,25 @@ export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; width: 
   height,
 }) => {
   const reel = HEROES[theme];
-  const cam = cameraAt(HERO_SHOTS[theme][framing], f);
-  const w = LAYOUT[framing].rest * cam.zoom;
-  const h = screenHeight(reel.take, w);
-  const entered = easeOut(progress(f, AT.organize, AT.organize + ENTER));
-  const x = cam.x * width - cam.fx * w;
-  const y = cam.y * height - cam.fy * h + (1 - entered) * height * 0.75;
+  const cam = cameraAt(HERO_PATHS[theme][framing], f);
+  const screen = screenOf(framing, reel.take, cam);
+  const origin = `${cam.x * width}px ${cam.y * height}px`;
   return (
     <>
-      <Device take={reel.take} x={x} y={y} width={w}>
-        <Screen take={reel.take} frame={takeFrame(reel, f)} width={w} shade={shadeAt(f)} />
-      </Device>
+      <div style={{ position: "absolute", inset: 0, perspective: LENS[framing].perspective, perspectiveOrigin: origin }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            transformOrigin: origin,
+            transform: `rotateX(${cam.tilt}deg) rotateY(${cam.turn}deg) rotateZ(${cam.roll}deg)`,
+          }}
+        >
+          <Device take={reel.take} x={screen.left} y={screen.top} width={screen.width}>
+            <Screen take={reel.take} frame={takeFrame(reel, f)} width={screen.width} shade={shadeAt(f)} />
+          </Device>
+        </div>
+      </div>
       {MOMENTS.map((moment) => {
         if (f < moment.at || f >= moment.until) return null;
         if (framing === "wide") {
