@@ -38,8 +38,8 @@ export const Launch: React.FC<LaunchProps> = ({ framing, music, theme, probe = f
     <AbsoluteFill style={{ overflow: "hidden" }}>
       <Stage {...scene} />
       {f < AT.android + OPEN ? <TitleCard {...scene} /> : null}
-      {f >= AT.organize && f < AT.lineup ? <Hero {...scene} theme={theme} /> : null}
-      {f >= AT.android && f < AT.organize + CLOSE ? <AndroidCard {...scene} theme={theme} /> : null}
+      {f >= CLOSE.from && f < AT.lineup ? <Hero {...scene} theme={theme} /> : null}
+      {f >= AT.android && f < CLOSE.until ? <AndroidCard {...scene} theme={theme} /> : null}
       {f >= AT.lineup && f < AT.end ? <Lineup {...scene} theme={theme} /> : null}
       {f >= AT.end ? <EndCard {...scene} /> : null}
       {music ? <Audio src={staticFile("audio/score.wav")} /> : null}
