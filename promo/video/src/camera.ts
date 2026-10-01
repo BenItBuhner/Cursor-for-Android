@@ -388,11 +388,11 @@ const key = (at: number, zoom: number, fx: number, fy: number, x: number, y: num
  * The camera through [reel], in five shots cut on the beat, each a few long moves that turn seldom and never on a tap
  * or a beat. The phone swoops in turned and tilted and pushes slowly in on the held Project and its menu, drifting
  * after it across the grid. Cut close on the composer and push in along the listening onto the words; then up with the
- * message as it flies into the chat, the one move that answers the screen; then on in and down onto the edit in one
- * long push that comes to rest on its diff, slowly up over the fold to keep the run in view, and back in one long pull
- * that settles on the follow-up field as it is tapped. Cut low on the composer and track along the follow-up to the
- * queue and the steer, then rise with the steer to its answer and ease in on it. Cut wide as the shade comes down and
- * push in on the run's notification. Cut to the answer and drift down the details to the pull request.
+ * message as it flies into the chat, the one move that answers the screen; then back in one long pull that takes in
+ * the whole reply as it streams and the whole diff as it lands, keeps drawing back through the fold and settles on the
+ * follow-up field as it is tapped. Cut low on the composer and track along the follow-up to the queue and the steer,
+ * then rise with the steer to its answer and ease in on it. Cut wide as the shade comes down and push in on the run's
+ * notification. Cut to the answer and drift down the details to the pull request.
  */
 function keysOf(reel: Reel): Record<Framing, Shot[]> {
   const v = (name: string, by = 0) => whenShown(reel, mark(reel.take, name)) + by;
@@ -421,10 +421,9 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
           key(v("the chat", 13), 2.29, 0.674, 0.165, 0.782, 0.433, -11, 2.5, 0.15),
           key(v("the chat", 19), 2.4, 0.686, 0.131, 0.784, 0.408, -11, 3.2, 0.2),
           key(v("the chat", 27), 2.58, 0.69, 0.121, 0.785, 0.4, -11, 3.4, 0.25),
-          key(v("the diff", 60), 3.05, 0.32, 0.31, 0.67, 0.42, -6, 3.6, 0.3),
-          key(v("fold", -6), 2.9, 0.34, 0.295, 0.675, 0.43, -8, 3.7, 0.4),
-          key(v("jump"), 2.65, 0.38, 0.21, 0.68, 0.43, -10, 3.8, 0.5),
-          key(AT.steer, 1.25, 0.52, 0.63, 0.7, 0.5, -17, 4.5, 0.8),
+          key(v("the diff", 42), 2.25, 0.53, 0.36, 0.705, 0.49, -12.5, 3.6, 0.36),
+          key(v("jump"), 1.6, 0.48, 0.42, 0.7, 0.49, -15.5, 4, 0.55),
+          key(AT.steer, 1.25, 0.48, 0.63, 0.7, 0.5, -17, 4.5, 0.8),
         ],
         flight,
       ),
@@ -465,9 +464,11 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
           key(v("the chat", 13), 2.08, 0.674, 0.165, 0.547, 0.547, -9, 8.3, 0.15),
           key(v("the chat", 19), 2.17, 0.686, 0.131, 0.549, 0.512, -9, 8.1, 0.2),
           key(v("the chat", 27), 2.29, 0.69, 0.121, 0.55, 0.501, -9, 8, 0.25),
-          key(v("the diff", 60), 2.45, 0.36, 0.29, 0.47, 0.73, -5, 7.5, 0.3),
-          key(v("jump"), 1.7, 0.42, 0.33, 0.49, 0.735, -10, 6.5, 0.6),
-          key(AT.steer, 0.97, 0.52, 0.72, 0.5, 0.735, -14, 6, 0.8),
+          key(v("the chat", 37), 2.27, 0.68, 0.125, 0.548, 0.505, -9, 8, 0.26),
+          key(said("hero.intro", "from", 12), 1.8, 0.5, 0.215, 0.5, 0.585, -9.1, 7.9, 0.28),
+          key(v("the diff", 35), 1.66, 0.5, 0.33, 0.5, 0.635, -10, 7.5, 0.36),
+          key(v("jump"), 1.34, 0.5, 0.43, 0.5, 0.665, -12, 6.8, 0.6),
+          key(AT.steer, 0.97, 0.5, 0.72, 0.5, 0.735, -14, 6, 0.8),
         ],
         flight,
       ),
