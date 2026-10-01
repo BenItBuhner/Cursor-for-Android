@@ -1005,7 +1005,13 @@ class LiveRunHub(
         const val TERMINAL_GRACE_MS = 15_000L
         /** See [stallTimeoutMs]: a turn under way says something within this on a stream that still carries it, but for a long tool call. */
         const val STALL_TIMEOUT_MS = 30_000L
-        const val STALL_MAX_MS = 120_000L
+        /**
+         * The longest a pass that keeps hearing nothing goes between two resumes. Each resume is a record read and a
+         * stream reopened, for every followed run — eight followed agents inside long tool calls paid 1.5 requests
+         * a minute each at two minutes (v0.4.31, measured in `ChatRequestBudgetTest`); five keeps the recovery and
+         * most of the cost off.
+         */
+        const val STALL_MAX_MS = 300_000L
         const val PARKED_VERSION = 1
         /** Parked turns kept on disk, the last parked first; past these a reopen replays, as it did before there was parking. */
         const val MAX_PARKED = 64
