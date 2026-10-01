@@ -7,7 +7,6 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.cursorforandroid.crash.Breadcrumbs
 import com.cursorforandroid.crash.CrashContext
 import com.cursorforandroid.crash.CrashLog
-import com.cursorforandroid.crash.CrashReporting
 import com.cursorforandroid.data.api.AccountApi
 import com.cursorforandroid.data.api.AccountTranscriptionApi
 import com.cursorforandroid.data.api.AccountFollowup
@@ -187,6 +186,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -254,8 +254,6 @@ class AppGraph(
     private val app = context.applicationContext
 
     val prefs = PreferencesStore(context)
-    /** Opt-in crash reports; inert until the setting is on, and in a build with no DSN. Eager: it is only two strings. */
-    val crashReporting = CrashReporting(app)
     /**
      * Disk copies of what the API last returned; the app opens on them and revalidates in the background. Eager
      * because it is only file paths until something reads or writes, and the sign-out wipe goes through it.
@@ -803,7 +801,7 @@ class AppGraph(
     }
     val conversations: ConversationRepository get() = lazyConversations.value
 
-    /** Background live sync (Settings › Advanced › Keep chats live): started by [LiveSyncBinding]. */
+    /** Background live sync: started by [LiveSyncBinding]. */
     private val lazyLiveSync = lazy {
         LiveSync(
             target = object : LiveSync.Target {
@@ -815,8 +813,8 @@ class AppGraph(
         )
     }
     val liveSync: LiveSync get() = lazyLiveSync.value
-    /** Whether background live sync runs: the switch, outside the demo (which has no account to stream from). */
-    val liveSyncEnabled: Flow<Boolean> get() = combine(prefs.liveSync, prefs.demoMode) { on, demo -> on && !demo }
+    /** Whether background live sync runs: always, outside the demo (which has no account to stream from). */
+    val liveSyncEnabled: Flow<Boolean> get() = prefs.demoMode.map { demo -> !demo }
 
     /** The search palette's reading of the transcripts kept on this device (Ctrl+F, see [TranscriptSearchIndex]). */
     private val lazyTranscriptSearch = lazy { TranscriptSearchIndex(caches.conversations, caches.traces) }
