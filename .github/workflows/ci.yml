@@ -141,11 +141,14 @@ jobs:
   # because the runner's four vCPUs are two cores: with two or three test JVMs side by side the fault, benchmark and
   # Compose UI tests, which assert on or wait for wall-clock behaviour, timed out on one shard job in five; alone in
   # their JVM they never have. The checks are named "Unit tests (1/6)" .. "(6/6)" and "Unit tests (benchmarks)"; `ci`
-  # below folds them, and every other job, into the one check to require.
+  # below folds them, and every other job, into the one check to require. The 25-minute limit is seven over the slowest
+  # job seen (18); a test JVM that stops making progress is killed long before it, by the stall watchdog ("Test stalls"
+  # in app/build.gradle.kts), whose report - the stuck test, its last output, a thread dump - is in the log and is the
+  # `unit-test-stalls-*` artifact.
   unit-tests:
     name: Unit tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -198,6 +201,14 @@ jobs:
           path: app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
 
+      - name: Upload test stall reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-stalls-${{ steps.artifacts.outputs.suffix }}
+          path: app/build/reports/test-stalls/
+          if-no-files-found: ignore
+
   screenshots:
     name: Screenshot tests
     runs-on: ubuntu-latest
@@ -231,6 +242,7 @@ jobs:
             app/build/outputs/roborazzi/
             app/build/reports/roborazzi/
             app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/test-stalls/
           if-no-files-found: ignore
 
   # The one status to require in branch protection: "CI". It succeeds only when every job above did, so the set of
