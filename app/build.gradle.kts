@@ -1,6 +1,11 @@
 import java.security.KeyStore
 import java.security.MessageDigest
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 plugins {
     alias(libs.plugins.android.application)
@@ -502,6 +507,195 @@ tasks.withType<Test>().configureEach {
 if (providers.gradleProperty("app.skipScreenshotTests").map(String::toBoolean).getOrElse(false)) {
     tasks.withType<Test>().configureEach {
         exclude("com/cursorforandroid/screenshots/**")
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Test stalls
+//
+// A test JVM that stops making progress - a test waiting on a latch nothing counts down or a response no fake server
+// will send, a deadlock in a class's setup - used to sit there until the CI job's timeout took the runner half an hour
+// in, and left nothing to go on: the stuck test had not finished, so no report named it, and its last output was still
+// in Gradle's buffer. So every test task watches its JVMs ("Gradle Test Executor N"). When one has started or finished
+// no test or test class for `-Papp.testStallMinutes` (default 5; no single test in CI has taken two), the watchdog
+// logs, and saves under build/reports/test-stalls/, what that JVM was in the middle of, its last lines of output and
+// `jcmd Thread.print` and `GC.heap_info` of it, then kills it, so the task fails at once and says where. 0 turns the
+// watchdog off; a test JVM under a debugger (--debug-jvm, an IDE's debug run) is never watched.
+// ---------------------------------------------------------------------------------------------------------------------
+val testStallMinutes: Long = providers.gradleProperty("app.testStallMinutes").map(String::toLong).getOrElse(5L)
+
+/** Watches each run of a test task ([TestStallListener]). A class rather than a lambda for the configuration cache, as with [TestShardFilter]. */
+class TestStallWatchdog(private val stallMillis: Long, private val reportDir: File) : Action<Task>, java.io.Serializable {
+    override fun execute(task: Task) {
+        val test = task as Test
+        if (test.debug || test.allJvmArgs.any { "jdwp" in it }) return
+        val listener = TestStallListener(test, stallMillis, reportDir)
+        test.addTestListener(listener)
+        test.addTestOutputListener(listener)
+    }
+}
+
+/**
+ * One run of a test task, watched. The test events reach the build process as they happen, so it knows what each test
+ * JVM is in the middle of even once that JVM has stopped; a daemon thread looks every five seconds and ends with the run.
+ */
+class TestStallListener(private val task: Test, private val stallMillis: Long, private val reportDir: File) : TestListener, TestOutputListener {
+    /** One test JVM: when it last started or finished a test or class, what it has started and not finished, its last output. */
+    private class Jvm {
+        @Volatile var lastProgress: Long = System.nanoTime()
+        @Volatile var lastFinished: String? = null
+        val running = ConcurrentHashMap<TestDescriptor, Long>()
+        val output = ArrayDeque<String>()
+    }
+
+    private val jvms = ConcurrentHashMap<String, Jvm>()
+    private val gone: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    @Volatile private var runFinished = false
+
+    override fun beforeSuite(suite: TestDescriptor) {
+        if (suite.parent == null) watch() else progress(suite, started = true)
+    }
+
+    override fun afterSuite(suite: TestDescriptor, result: TestResult) {
+        when {
+            suite.parent == null -> runFinished = true
+            suite.parent?.parent == null -> {
+                gone += suite.name
+                jvms.remove(suite.name)
+            }
+            else -> progress(suite, started = false)
+        }
+    }
+
+    override fun beforeTest(testDescriptor: TestDescriptor) = progress(testDescriptor, started = true)
+
+    override fun afterTest(testDescriptor: TestDescriptor, result: TestResult) = progress(testDescriptor, started = false)
+
+    // Kept for the report, but not progress: a test stuck in a loop that logs is still stuck.
+    override fun onOutput(testDescriptor: TestDescriptor, outputEvent: TestOutputEvent) {
+        val jvm = jvmOf(testDescriptor) ?: return
+        synchronized(jvm.output) {
+            outputEvent.message.trimEnd('\n').lineSequence().forEach { line ->
+                jvm.output.addLast(line.take(500))
+                if (jvm.output.size > 40) jvm.output.removeFirst()
+            }
+        }
+    }
+
+    /** The JVM [descriptor] runs in: the run's suites are its JVMs ("Gradle Test Executor N"), their suites the classes. */
+    private fun jvmOf(descriptor: TestDescriptor): Jvm? {
+        var suite = descriptor
+        while (suite.parent?.parent != null) suite = suite.parent!!
+        if (suite.parent == null || suite.name in gone) return null
+        return jvms.computeIfAbsent(suite.name) { Jvm() }
+    }
+
+    private fun progress(descriptor: TestDescriptor, started: Boolean) {
+        val jvm = jvmOf(descriptor) ?: return
+        val now = System.nanoTime()
+        jvm.lastProgress = now
+        if (descriptor.parent?.parent == null) return
+        if (started) {
+            jvm.running[descriptor] = now
+        } else {
+            jvm.running.remove(descriptor)
+            jvm.lastFinished = if (descriptor.isComposite) descriptor.name else "${descriptor.className} > ${descriptor.name}"
+        }
+    }
+
+    private fun watch() {
+        thread(isDaemon = true, name = "Test stall watchdog (${task.path})") {
+            while (!runFinished && !task.state.executed) {
+                Thread.sleep(5_000)
+                val now = System.nanoTime()
+                for ((name, jvm) in jvms) {
+                    val silentMillis = TimeUnit.NANOSECONDS.toMillis(now - jvm.lastProgress)
+                    if (silentMillis >= stallMillis && jvms.remove(name, jvm)) {
+                        gone += name
+                        stalled(name, jvm, silentMillis / 1000)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stalled(name: String, jvm: Jvm, silentSeconds: Long) {
+        // Gradle hands a test JVM its display name, quoted, as the one argument to its main class: `'Gradle Test Executor 3'`.
+        // Matched among this build's own children, so it finds that JVM and never another build's.
+        val processes = ProcessHandle.current().descendants()
+            .filter { process -> process.info().arguments().map { args -> args.any { it.removeSurrounding("'") == name } }.orElse(false) }
+            .toList()
+        try {
+            val report = report(name, jvm, silentSeconds, processes)
+            val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+            val file = File(reportDir, "${task.name}-${name.substringAfterLast(' ')}-$stamp.txt")
+            val saved = runCatching { reportDir.mkdirs(); file.writeText(report) }.isSuccess
+            val outcome = if (processes.isEmpty()) "its process was not found, so it is left running" else "killing it so that ${task.path} fails now"
+            task.logger.error("Test stall: $outcome.${if (saved) " Saved to $file." else ""}\n$report")
+        } finally {
+            processes.forEach { process ->
+                process.descendants().forEach { it.destroyForcibly() }
+                process.destroyForcibly()
+            }
+        }
+    }
+
+    private fun report(name: String, jvm: Jvm, silentSeconds: Long, processes: List<ProcessHandle>): String = buildString {
+        val now = System.nanoTime()
+        fun since(start: Long) = "${TimeUnit.NANOSECONDS.toSeconds(now - start)} s"
+        appendLine("${task.path}: $name has started or finished no test for $silentSeconds s (the limit is ${stallMillis / 1000} s, -Papp.testStallMinutes).")
+        val running = jvm.running.entries.sortedBy { it.value }
+        val tests = running.filterNot { it.key.isComposite }
+        val classes = running.filter { it.key.isComposite }
+        when {
+            tests.isNotEmpty() -> tests.forEach { (test, start) -> appendLine("Running for ${since(start)}: ${test.className} > ${test.name}") }
+            classes.isNotEmpty() -> classes.forEach { (suite, start) ->
+                appendLine("In ${suite.name} for ${since(start)} with no test running: stuck in its setup or teardown, or between two of its tests.")
+            }
+            else -> appendLine("Between two test classes: no class had started.")
+        }
+        appendLine("Last finished: ${jvm.lastFinished ?: "nothing yet"}")
+        synchronized(jvm.output) {
+            appendLine()
+            appendLine("Its last ${jvm.output.size} lines of output:")
+            jvm.output.forEach { appendLine("  $it") }
+        }
+        processes.forEach { process ->
+            for (command in listOf(listOf("Thread.print", "-l"), listOf("GC.heap_info"))) {
+                appendLine()
+                appendLine("jcmd ${process.pid()} ${command.joinToString(" ")}:")
+                appendLine(jcmd(process, command))
+            }
+        }
+    }
+
+    /** `jcmd <pid> <command>` from the JDK that JVM runs on (or this build's, or the PATH's): what it printed, or why it could not. */
+    private fun jcmd(process: ProcessHandle, command: List<String>): String {
+        val executable = sequenceOf(process, ProcessHandle.current())
+            .mapNotNull { it.info().command().orElse(null) }
+            .map { File(File(it).parentFile, "jcmd") }
+            .firstOrNull { it.canExecute() }?.path ?: "jcmd"
+        val out = File.createTempFile("jcmd-", ".txt")
+        return try {
+            val jcmd = ProcessBuilder(listOf(executable, process.pid().toString()) + command).redirectErrorStream(true).redirectOutput(out).start()
+            if (jcmd.waitFor(60, TimeUnit.SECONDS)) {
+                out.readText()
+            } else {
+                jcmd.destroyForcibly()
+                out.readText() + "\n(jcmd gave no answer within 60 s)"
+            }
+        } catch (e: Exception) {
+            "jcmd could not run: $e"
+        } finally {
+            out.delete()
+        }
+    }
+}
+
+if (testStallMinutes > 0) {
+    val stallReportDir = layout.buildDirectory.dir("reports/test-stalls")
+    tasks.withType<Test>().configureEach {
+        doFirst(TestStallWatchdog(TimeUnit.MINUTES.toMillis(testStallMinutes), stallReportDir.get().asFile))
     }
 }
 
