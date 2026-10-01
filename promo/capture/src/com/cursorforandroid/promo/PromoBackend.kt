@@ -363,11 +363,13 @@ internal class PromoRunStreamer(
             say("hero.intro")
             pause(200)
             edit(1, "src/styles/theme.css", 900)
+            // Long enough for the first diff to be read and closed before the next edit joins it into a stretch.
+            pause(1_900)
             edit(2, "src/hooks/useTheme.ts", 900)
             edit(3, "src/components/ThemeToggle.tsx", 900)
             edit(4, "src/components/Header.tsx", 500)
             pause(200)
-            shell(1, "npm run typecheck", 2_400, TYPECHECK_OUTPUT)
+            shell(1, "npm run typecheck", 500, TYPECHECK_OUTPUT)
             if (steered(agentId)) {
                 pause(250)
                 say("hero.adapt")

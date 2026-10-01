@@ -287,8 +287,8 @@ class LaunchVideoCapture {
     /**
      * One take of the run on [d]'s screen, each step at the same moment of the capture's clock on every device: the
      * last of the Projects on the New Chat page held until it lifts and carried to the front; the task said into the
-     * composer's microphone, transcribed into it and sent; the stretch of edits opened as they land, and the first
-     * one's diff, then folded, and the transcript taken back to its end to follow the run again; a follow-up typed
+     * composer's microphone, transcribed into it and sent; the first edit opened while it is written, its diff landing
+     * in view, and closed again, and the transcript taken back to its end to follow the run again; a follow-up typed
      * while the agent works, queued behind the turn and steered into it; and once the run has opened its pull request
      * and answered, the pull request's section of the details. A wide window pins the details beside the chat as soon
      * as it opens, where the edits come in as they are made; a phone opens them at the end. With [probing], every step
@@ -326,20 +326,24 @@ class LaunchVideoCapture {
                     tap("panel", hasContentDescription("Open panel"))
                 }
 
-                at(EDITS_AT)
-                until("the edits", 3.0) { d.exists(WORKING) }
-                look("working")
-                tap("edits", WORKING)
-                d.hold(0.25)
-                tap("diff", editLine("theme.css"), unmerged = true)
+                // The first edit opened while it is written, so its diff lands where it is being watched, and closed
+                // again before the next edit makes the two a stretch.
+                until("the edit", 4.0) { d.exists(editing("theme.css"), unmerged = true) }
+                look("editing")
+                d.hold(0.2)
+                tap("edit", editing("theme.css"), unmerged = true)
+                look("opened")
+                until("the diff", 4.0) { d.exists(editLine("theme.css"), unmerged = true) }
                 look("diff")
-                // Opening the stretch left the transcript where it was read; folded, and back to its end, it follows again.
                 at(FOLD_AT)
-                tap("fold", WORKING)
-                at(JUMP_AT)
+                tap("fold", editLine("theme.css"), unmerged = true)
                 look("folded")
+                // Opening the edit left the transcript where it was read; back to its end, it follows again.
+                at(JUMP_AT)
                 tap("jump", LATEST)
                 look("following")
+                until("the stretch", 3.0) { d.exists(WORKING) }
+                look("working")
 
                 at(FOLLOW_UP_AT)
                 val followUp = hasSetTextAction() and hasAnyAncestor(hasTestTag("follow-up-composer"))
@@ -527,8 +531,11 @@ class LaunchVideoCapture {
     /** [text] said in the chat itself, not in the panel or the sidebar beside it. */
     private fun said(text: String) = hasText(text, substring = true) and hasAnyAncestor(hasTestTag("transcript"))
 
-    /** An edit's line in an open stretch, by its verb: the file's name on it opens the file rather than the diff. */
-    private fun editLine(file: String) = hasText("Edited") and hasAnyAncestor(hasClickAction() and hasAnyDescendant(hasText(file)))
+    /** An edit's line, by its verb: the file's name on it opens the file rather than the diff. */
+    private fun editLine(file: String, verb: String = "Edited") = hasText(verb) and hasAnyAncestor(hasClickAction() and hasAnyDescendant(hasText(file)))
+
+    /** An edit's line while the edit is being written. */
+    private fun editing(file: String) = editLine(file, "Editing")
 
     private companion object {
         const val HOME_PLACEHOLDER = "Ask Cursor to build, fix bugs, explore"
@@ -566,9 +573,12 @@ class LaunchVideoCapture {
         // Each step's moment after it, in ms after the send: the run is scripted to the millisecond from there, so
         // these are the same on every device, and every take shows the same thing at the same moment.
         const val PANEL_AT = 900L
-        const val EDITS_AT = 3_400L
-        const val FOLD_AT = 5_000L
-        const val JUMP_AT = 5_400L
+        /**
+         * Just over a second after the first diff lands, leaving its collapse time to finish before the next edit
+         * starts (see [PromoRunStreamer]'s hero), which would otherwise cut it off.
+         */
+        const val FOLD_AT = 4_400L
+        const val JUMP_AT = 5_000L
         const val FOLLOW_UP_AT = 5_900L
         const val STEER_AT = 9_000L
         const val SHIP_AT = 22_400L
