@@ -56,6 +56,7 @@ import com.cursorforandroid.domain.SteerPhase
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.runtime.produceState
 import com.cursorforandroid.domain.PromptFileKind
+import com.cursorforandroid.ui.components.StylusTextInput
 import com.cursorforandroid.util.ioThenMain
 import com.cursorforandroid.ui.components.ComposerAnchor
 import com.cursorforandroid.ui.components.LocalSendMotion
@@ -494,20 +495,22 @@ private fun AccountQueueRow(
             // into its place in the queue); a message emptied out is not saved from the keyboard.
             val saveOnEnter = save.takeIf { text.text.isNotBlank() }
             ImeEnterFallback(onEnter = saveOnEnter, composing = { text.composition != null }) {
-                BasicTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    textStyle = type.input.copy(color = colors.textPrimary),
-                    cursorBrush = SolidColor(colors.textPrimary),
-                    // The commands painted as they are reworded, the way the composer paints them.
-                    visualTransformation = SlashCommandVisualTransformation(commandTints()),
-                    modifier = Modifier
-                        .weight(1f)
-                        .stylusWriting()
-                        .sendOnHardwareEnter(text, onValueChange = { text = it }, onSend = saveOnEnter)
-                        .padding(vertical = 8.dp)
-                        .testTag("account-queue-edit"),
-                )
+                StylusTextInput {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        textStyle = type.input.copy(color = colors.textPrimary),
+                        cursorBrush = SolidColor(colors.textPrimary),
+                        // The commands painted as they are reworded, the way the composer paints them.
+                        visualTransformation = SlashCommandVisualTransformation(commandTints()),
+                        modifier = Modifier
+                            .weight(1f)
+                            .stylusWriting()
+                            .sendOnHardwareEnter(text, onValueChange = { text = it }, onSend = saveOnEnter)
+                            .padding(vertical = 8.dp)
+                            .testTag("account-queue-edit"),
+                    )
+                }
             }
             Spacer(Modifier.width(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
