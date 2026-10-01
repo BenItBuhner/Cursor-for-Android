@@ -24,6 +24,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
@@ -46,10 +47,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Settings › New chat page: the three layouts side by side as radio buttons, on a phone as on a tablet; until one is
- * tapped the one ringed is the page's own pick — Projects for an account with any, else Recent agents — the tap
- * written at once; the miniatures say nothing of their own; and, with no
- * Projects to pin, the note of what the Projects layout shows meanwhile.
+ * Settings › New chat page: the four layouts as radio buttons, two over two on a phone and in one row on a tablet;
+ * until one is tapped the one ringed is the page's own pick — Projects for an account with any, else Recent agents —
+ * the tap written at once; the miniatures say nothing of their own; and, with no Projects to pin, the note of what the
+ * Projects layout shows meanwhile.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -80,24 +81,50 @@ class NewChatHomePickerTest {
     private fun saved(): NewChatHome = runBlocking { graph.prefs.newChatHome.first() }
 
     @Test
-    fun `the three layouts sit side by side as radio buttons, each read as its name in full`() {
+    fun `on a phone the four layouts sit two over two as radio buttons, each read as its name in full`() {
         composeSettings(isDemo = true, list = NewChatHomeFixtures.list())
-        threeSideBySide()
+        laidOut(perRow = 2)
     }
 
     @Test
     @Config(sdk = [35], qualifiers = "w1000dp-h720dp-night-320dpi")
-    fun `on a tablet the three still share one row`() {
+    fun `on a tablet the four share one row`() {
         composeSettings(isDemo = true, list = NewChatHomeFixtures.list())
-        threeSideBySide()
+        laidOut(perRow = 4)
     }
 
-    /** One row, in the order they are offered, none cut short: each option's name fits its third. */
-    private fun threeSideBySide() {
-        val nodes = NewChatHome.entries.map { option(it).performScrollTo().fetchSemanticsNode() }
-        nodes.zipWithNext { left, right ->
-            assertThat(right.positionInRoot.y).isEqualTo(left.positionInRoot.y)
-            assertThat(right.positionInRoot.x).isGreaterThan(left.positionInRoot.x + left.size.width - 1)
+    @Test
+    @Config(sdk = [35], qualifiers = "w840dp-h900dp-night-420dpi")
+    fun `on a foldable's inner screen the four share one row`() {
+        composeSettings(isDemo = true, list = NewChatHomeFixtures.list())
+        laidOut(perRow = 4)
+    }
+
+    @Test
+    fun `the four go four abreast only where each has room for its name`() {
+        assertThat(optionsPerRow(OptionMinWidth * 4 + 12.dp * 3)).isEqualTo(4)
+        assertThat(optionsPerRow(OptionMinWidth * 4 + 12.dp * 3 - 1.dp)).isEqualTo(2)
+        assertThat(optionsPerRow(351.dp)).isEqualTo(2)
+    }
+
+    /**
+     * [perRow] to a row, in the order they are offered, the rows under one another and flush at the start, none cut
+     * short: each option's name fits its share of the row.
+     */
+    private fun laidOut(perRow: Int) {
+        option(NewChatHome.entries.first()).performScrollTo()
+        option(NewChatHome.entries.last()).performScrollTo()
+        val rows = NewChatHome.entries.map { option(it).fetchSemanticsNode() }.chunked(perRow)
+        assertThat(rows).hasSize((NewChatHome.entries.size + perRow - 1) / perRow)
+        rows.forEach { row ->
+            row.zipWithNext { left, right ->
+                assertThat(right.positionInRoot.y).isEqualTo(left.positionInRoot.y)
+                assertThat(right.positionInRoot.x).isGreaterThan(left.positionInRoot.x + left.size.width - 1)
+            }
+        }
+        rows.zipWithNext { above, below ->
+            assertThat(below.first().positionInRoot.x).isEqualTo(above.first().positionInRoot.x)
+            assertThat(below.first().positionInRoot.y).isGreaterThan(above.first().positionInRoot.y + above.first().size.height - 1)
         }
         for (home in NewChatHome.entries) {
             val label = NewChatHomePickerCopy.label(home)
@@ -117,25 +144,15 @@ class NewChatHomePickerTest {
         assertThat(saved()).isEqualTo(NewChatHome.RECENT)
         option(NewChatHome.RECENT).assertIsSelected()
         option(NewChatHome.PROJECTS).assertIsNotSelected()
+        option(NewChatHome.PROJECTS_RECENT).assertIsNotSelected()
         option(NewChatHome.COMPOSER).assertIsNotSelected()
 
-        option(NewChatHome.COMPOSER).performScrollTo().performClick()
-        compose.waitUntil(10_000) { saved() == NewChatHome.COMPOSER }
-        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(NewChatHomePickerTags.COMPOSER) and isSelected()).fetchSemanticsNodes().isNotEmpty() }
-        option(NewChatHome.RECENT).assertIsNotSelected()
-        option(NewChatHome.PROJECTS).assertIsNotSelected()
-
-        option(NewChatHome.PROJECTS).performScrollTo().performClick()
-        compose.waitUntil(10_000) { saved() == NewChatHome.PROJECTS }
-        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(NewChatHomePickerTags.PROJECTS) and isSelected()).fetchSemanticsNodes().isNotEmpty() }
-        option(NewChatHome.RECENT).assertIsNotSelected()
-
-        option(NewChatHome.COMPOSER).assertIsNotSelected()
-
-        option(NewChatHome.RECENT).performClick()
-        compose.waitUntil(10_000) { saved() == NewChatHome.RECENT }
-        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(NewChatHomePickerTags.RECENT) and isSelected()).fetchSemanticsNodes().isNotEmpty() }
-        option(NewChatHome.PROJECTS).assertIsNotSelected()
+        for (home in listOf(NewChatHome.COMPOSER, NewChatHome.PROJECTS, NewChatHome.PROJECTS_RECENT, NewChatHome.RECENT)) {
+            option(home).performScrollTo().performClick()
+            compose.waitUntil(10_000) { saved() == home }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(NewChatHomePickerTags.of(home)) and isSelected()).fetchSemanticsNodes().isNotEmpty() }
+            for (other in NewChatHome.entries - home) option(other).assertIsNotSelected()
+        }
     }
 
     /**

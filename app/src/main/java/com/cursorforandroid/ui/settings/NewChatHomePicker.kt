@@ -5,11 +5,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,11 +29,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -55,6 +56,7 @@ object NewChatHomePickerCopy {
     const val GROUP = "New chat page"
     const val RECENT = "Recent agents"
     const val PROJECTS = "Projects"
+    const val PROJECTS_RECENT = "Projects + Recent"
     const val COMPOSER = "Composer only"
     const val NEEDS_MODE = "Projects need Extended mode"
     const val NEEDS_MODE_DETAIL = "Until then, it lists recent agents."
@@ -62,6 +64,7 @@ object NewChatHomePickerCopy {
     fun label(home: NewChatHome): String = when (home) {
         NewChatHome.RECENT -> RECENT
         NewChatHome.PROJECTS -> PROJECTS
+        NewChatHome.PROJECTS_RECENT -> PROJECTS_RECENT
         NewChatHome.COMPOSER -> COMPOSER
     }
 }
@@ -69,19 +72,22 @@ object NewChatHomePickerCopy {
 object NewChatHomePickerTags {
     const val RECENT = "settings_new_chat_recent"
     const val PROJECTS = "settings_new_chat_projects"
+    const val PROJECTS_RECENT = "settings_new_chat_projects_recent"
     const val COMPOSER = "settings_new_chat_composer"
 
     fun of(home: NewChatHome): String = when (home) {
         NewChatHome.RECENT -> RECENT
         NewChatHome.PROJECTS -> PROJECTS
+        NewChatHome.PROJECTS_RECENT -> PROJECTS_RECENT
         NewChatHome.COMPOSER -> COMPOSER
     }
 }
 
 /**
  * Settings › New chat page, as the light/dark appearance pickers of iOS and One UI lay a choice out: each layout of
- * the New Chat pane side by side in miniature — the pane's own composables, drawn from the live list and scaled down
- * ([NewChatPageMiniature]) — its name under it, and the chosen one ringed and checked. A tap chooses, is written at
+ * the New Chat pane in miniature — the pane's own composables, drawn from the live list and scaled down
+ * ([NewChatPageMiniature]) — its name under it, and the chosen one ringed and checked: the four in one row where each
+ * has room for its name, two over two where a phone has not ([optionsPerRow]). A tap chooses, is written at
  * once, and the pane lays itself out that way the next time it is on screen. [pageSize] is the pane's (this screen
  * fills the same one), so a miniature has the page's proportions on a phone and on a tablet alike; [withHeader] is
  * whether the pane has its 44dp header, as it does wherever this screen has one.
@@ -108,17 +114,14 @@ internal fun NewChatHomeCard(
     val chosen = choice?.let { it.chosen ?: NewChatHome.automatic(projectsAvailable, hasProjects = list.projectRows.isNotEmpty(), settled = true) }
     val chips = rememberComposerChips(graph)
     SettingsCard {
-        Row(
-            Modifier.fillMaxWidth().selectableGroup().padding(horizontal = RowInset, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+        OptionRows(Modifier.fillMaxWidth().selectableGroup().padding(horizontal = RowInset, vertical = 12.dp)) {
             NewChatHome.entries.forEach { option ->
                 PickerOption(
                     label = NewChatHomePickerCopy.label(option),
                     selected = chosen == option,
                     onClick = { scope.launch { graph.prefs.setNewChatHome(option) } },
                     pageSize = pageSize,
-                    modifier = Modifier.weight(1f).testTag(NewChatHomePickerTags.of(option)),
+                    modifier = Modifier.testTag(NewChatHomePickerTags.of(option)),
                 ) { miniatureModifier ->
                     NewChatPageMiniature(
                         home = option,
@@ -140,6 +143,32 @@ internal fun NewChatHomeCard(
                 role = null,
                 leading = { RowGlyph(CursorIcons.project(null)) },
             )
+        }
+    }
+}
+
+/**
+ * The options in rows of [optionsPerRow] for the width this is given, each an equal share of a row with [OptionGap]
+ * between them and [OptionRowGap] between rows. Its own layout rather than a flow row, which sizes its items by their
+ * intrinsic widths — and an option, sizing its miniature to the room it gets, has none to give.
+ */
+@Composable
+private fun OptionRows(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else constraints.minWidth
+        val perRow = optionsPerRow(width.toDp()).coerceIn(1, measurables.size.coerceAtLeast(1))
+        val gap = OptionGap.roundToPx()
+        val rowGap = OptionRowGap.roundToPx()
+        val optionWidth = ((width - gap * (perRow - 1)) / perRow).coerceAtLeast(0)
+        val rows = measurables.map { it.measure(Constraints(minWidth = optionWidth, maxWidth = optionWidth)) }.chunked(perRow)
+        val rowHeights = rows.map { row -> row.maxOf { it.height } }
+        val height = rowHeights.sum() + rowGap * (rows.size - 1).coerceAtLeast(0)
+        layout(width, constraints.constrainHeight(height)) {
+            var y = 0
+            rows.forEachIndexed { index, row ->
+                row.forEachIndexed { column, placeable -> placeable.placeRelative(column * (optionWidth + gap), y) }
+                y += rowHeights[index] + rowGap
+            }
         }
     }
 }
@@ -224,9 +253,19 @@ private fun CheckCircle(checked: Boolean) {
 }
 
 /**
- * A miniature's size in [room] (its option's width, less the ring): four fifths of it, so the three stand apart, but
+ * How many of the layouts share a row of the card, whose options have [width] between them: all four while each has
+ * [OptionMinWidth] for its name under its miniature — a tablet's and a foldable's card — else two over two, as a
+ * phone's card is too narrow for "Projects + Recent" and "Composer only" to stand four abreast uncut.
+ */
+internal fun optionsPerRow(width: Dp): Int {
+    val options = NewChatHome.entries.size
+    return if ((width - OptionGap * (options - 1)) / options >= OptionMinWidth) options else 2
+}
+
+/**
+ * A miniature's size in [room] (its option's width, less the ring): four fifths of it, so the options stand apart, but
  * never wider than [MiniatureMaxWidth] nor taller than [MiniatureMaxHeight] — a large phone's, a foldable's and a
- * tablet's thirds are wider than a phone's, and an upright page is tall, which drawn at the full width made each
+ * tablet's options are wider than a phone's, and an upright page is tall, which drawn at the full width made each
  * miniature loom over the card. Its height is the [page]'s at that width.
  */
 internal fun miniatureSize(page: DpSize, room: Dp): DpSize {
@@ -244,6 +283,9 @@ internal fun miniatureRadius(width: Dp): Dp = (width * 0.05f).coerceIn(4.dp, 6.d
 
 internal val MiniatureMaxWidth = 96.dp
 internal val MiniatureMaxHeight = 124.dp
+internal val OptionMinWidth = 120.dp
+private val OptionGap = 12.dp
+private val OptionRowGap = 8.dp
 private val RingWidth = 2.dp
 private val RingGap = 2.dp
 private val RingInset = RingWidth + RingGap
