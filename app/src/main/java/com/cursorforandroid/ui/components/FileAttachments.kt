@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cursorforandroid.data.repo.AttachmentUploads
+import com.cursorforandroid.domain.FileFormat
 import com.cursorforandroid.domain.PromptFile
 import com.cursorforandroid.domain.PromptFileKind
 import com.cursorforandroid.domain.PromptImage
@@ -264,9 +265,34 @@ internal fun loadFile(resolver: ContentResolver, uri: Uri): Result<PendingFile> 
     val name = displayName(resolver, uri) ?: generatedName(declared)
     val tooLarge = PromptFile.tooLargeMessage(declared ?: PromptFile.resolveMimeType(null, name), name)
     val bytes = readBoundedBytes(declaredSize(resolver, uri), maxBytes = PromptFile.MAX_BYTES, tooLarge = tooLarge) { resolver.openInputStream(uri) }
-    // The bytes have the last word on an image's type, as they do for a paste: a gallery export declared as `image/*`.
-    val mime = sniffImageMime(bytes) ?: PromptFile.resolveMimeType(declared, name)
-    PendingFile.of(PromptFile(bytes, name, mime), id = uri.toString() + "@" + System.nanoTime())
+    val id = uri.toString() + "@" + System.nanoTime()
+    pictureFile(bytes, name, declared)?.let { return@runCatching PendingFile.of(it, id) }
+    // The bytes have the last word on a picture's type: a gallery export declared as `image/*` or not at all.
+    val mime = FileFormat.sniff(bytes)?.takeIf { it.isImage }?.mimeType ?: PromptFile.resolveMimeType(declared, name)
+    PendingFile.of(PromptFile(bytes, name, mime), id = id)
+}
+
+/**
+ * A picked picture as the prompt names it, `selected_images[]`: prepared the way an inline image is
+ * ([AttachmentImages.prepare]), transparency kept — oriented, scaled to what the model reads, within the account's per-image limit,
+ * stripped of anything after its end marker — and renamed to the format it now is. The account hands an image to the
+ * model as it was uploaded, so a full-resolution original reached the agent over its limits. Null for bytes that are
+ * no PNG, JPEG, GIF or WebP, which travel as the document they are; one of those that will not decode is refused,
+ * with the reason.
+ */
+internal fun pictureFile(bytes: ByteArray, name: String, declaredMime: String?): PromptFile? {
+    if (!AttachmentImages.isPicture(bytes)) return null
+    val image = AttachmentImages.prepare(bytes, declaredMime, keepTransparency = true)
+    return PromptFile(image.bytes, renamedFor(name, image.mimeType), image.mimeType)
+}
+
+/** [name] with the extension of [mimeType], when the image was converted to a format its name does not say. */
+internal fun renamedFor(name: String, mimeType: String): String {
+    val format = FileFormat.entries.firstOrNull { it.mimeType == mimeType } ?: return name
+    if (FileFormat.ofName(name) == format) return name
+    val dot = name.lastIndexOf('.')
+    val stem = if (dot > 0) name.substring(0, dot) else name
+    return "$stem.${format.extension}"
 }
 
 /**

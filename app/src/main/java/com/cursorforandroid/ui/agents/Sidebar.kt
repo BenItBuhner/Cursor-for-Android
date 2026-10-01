@@ -83,6 +83,7 @@ import com.cursorforandroid.domain.NestedRow
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.FlatIconButton
 import com.cursorforandroid.ui.components.PullRefreshHaptics
+import com.cursorforandroid.ui.components.StylusTextInput
 import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.ui.components.pressable
 import com.cursorforandroid.ui.components.SpinnerRing
@@ -583,22 +584,24 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit, onClose:
     ) {
         Icon(CursorIcons.Search, null, tint = colors.iconTertiary, modifier = Modifier.size(15.dp))
         Spacer(Modifier.width(8.dp))
-        BasicTextField(
-            value = field,
-            onValueChange = {
-                field = it
-                if (it.text != value) onValueChange(it.text)
-            },
-            singleLine = true,
-            textStyle = type.base.copy(color = colors.textPrimary),
-            cursorBrush = SolidColor(colors.textPrimary),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = {}),
-            modifier = Modifier.weight(1f).focusRequester(focusRequester),
-            decorationBox = { inner ->
-                Box { if (field.text.isEmpty()) Text("Search chats", style = type.base, color = colors.textQuaternary); inner() }
-            },
-        )
+        StylusTextInput {
+            BasicTextField(
+                value = field,
+                onValueChange = {
+                    field = it
+                    if (it.text != value) onValueChange(it.text)
+                },
+                singleLine = true,
+                textStyle = type.base.copy(color = colors.textPrimary),
+                cursorBrush = SolidColor(colors.textPrimary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = {}),
+                modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                decorationBox = { inner ->
+                    Box { if (field.text.isEmpty()) Text("Search chats", style = type.base, color = colors.textQuaternary); inner() }
+                },
+            )
+        }
         FlatIconButton(CursorIcons.Close, "Close search", onClick = onClose, size = 28.dp, iconSize = 14.dp)
     }
 }
