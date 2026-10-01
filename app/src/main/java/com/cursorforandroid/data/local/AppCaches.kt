@@ -40,6 +40,8 @@ class AppCaches(private val root: JsonDiskCache) {
     val catalog = CatalogCache(root.child("catalog"))
     val pullRequests = PullRequestCache(root.child("pullrequests"))
     val slashCommands = SlashCommandCache(root.child("slashcommands"))
+    /** The New Chat page as last drawn, for the next launch's first frame (see [NewChatPageCache]). */
+    val newChatPage = NewChatPageCache(root.child("newchat"))
     /** Which store each Project's coordinator owns, and the context documents opened from a chat (see `StoreFileRepository`). */
     val storeFiles: JsonDiskCache = root.child("storefiles")
     /** The account records' blobs (the Beta transcript engine's, see `BlobCache`). */

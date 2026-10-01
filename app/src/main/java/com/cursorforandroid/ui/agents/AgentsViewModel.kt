@@ -5,9 +5,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.api.userMessage
+import com.cursorforandroid.data.local.NewChatPageCache
 import com.cursorforandroid.data.repo.RefreshDepth
 import com.cursorforandroid.data.repo.AgentListState
 import com.cursorforandroid.data.repo.RefreshOutcome
+import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.domain.Agent
 import com.cursorforandroid.domain.AgentListOrganizer
 import com.cursorforandroid.domain.AgentRow
@@ -43,6 +45,7 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.random.Random
 
 /**
@@ -326,6 +329,18 @@ class AgentsViewModel(
 
     private val clock: Flow<Long> = merge(minuteClock, snoozeAlarm)
 
+    /**
+     * The New Chat page's Projects as the last session drew them (see [NewChatPageCache]): the page's shortcuts from
+     * the first frame, until the list's own first load — the disk's copy or the network's — takes over, after which
+     * they are never shown again.
+     */
+    private val seedAccount: String? = signedInAccount()
+    private val seedRows = AtomicReference(graph.caches.newChatPage.seed(signedInUser())?.projectRows().orEmpty())
+
+    private fun signedInUser() = (graph.session.state.value as? SessionState.SignedIn)?.user
+
+    private fun signedInAccount(): String? = signedInUser()?.let(NewChatPageCache::accountOf)
+
     // Expiry is [LocalAgentState.isSnoozed] against this clock. Do not persist it from a collector here:
     // writing DataStore while the list flow is on Default races Robolectric's Compose slot table.
 
@@ -338,10 +353,16 @@ class AgentsViewModel(
     ) { list, prefs, device, q, (now, work) ->
         val local = device.local
         val organized = listComputation.organize(list, prefs, device, q, now)
+        val seeded = if (list.hasLoaded || signedInAccount() != seedAccount) {
+            seedRows.set(emptyList())
+            null
+        } else {
+            seedRows.get().takeIf { it.isNotEmpty() }
+        }
         AgentListUiState(
             sections = organized.sections,
             recentRows = organized.recentRows,
-            projectRows = organized.projectRows,
+            projectRows = seeded ?: organized.projectRows,
             allAgents = list.agents,
             repoSlugs = listComputation.repoSlugs(list.agents),
             prefs = prefs,
@@ -365,7 +386,7 @@ class AgentsViewModel(
         // Grouping, filtering and sorting a few hundred rows is cheap, but not free on every keystroke of the search
         // field or every streamed patch; it runs off the main thread and only the result reaches the UI.
         .flowOn(graph.agentListDispatcher)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentListUiState())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AgentListUiState(projectRows = seedRows.get()))
 
     init {
         // A Project the list names but lacks is fetched by id so its workers can sit under it rather than under a
