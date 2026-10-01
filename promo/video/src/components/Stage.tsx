@@ -1,6 +1,6 @@
 import type React from "react";
-import { SWEEPS, WIPE } from "../edit";
-import { easeOut, easeSmooth, lerp, progress } from "../math";
+import { CARRIES, CARRY, carryFrom, SWEEPS } from "../edit";
+import { easeOut, lerp, progress } from "../math";
 import { COLOR } from "../theme";
 
 /** Frames a sweep takes to cross. */
@@ -12,13 +12,18 @@ const BAND = 0.55;
 /** The band's skew off the upright, in degrees. */
 const SKEW = -14;
 
-/** Whether the light at [f] is the one carrying the hero into the lineup. */
-export const carrying = (f: number) => f >= WIPE.from && f < WIPE.from + WIPE.frames;
+/** The cut the light at [f] is carrying, or null when none is. */
+export function carryAt(f: number): number | null {
+  for (const at of CARRIES) if (f >= carryFrom(at) && f < carryFrom(at) + CARRY.frames) return at;
+  return null;
+}
 
 /** Where the beam down the light's middle is at [f], as a fraction of the frame's width from its left edge, or null. */
 function beamFraction(f: number): number | null {
-  if (carrying(f)) return lerp(-0.35, 1.35, easeSmooth(progress(f, WIPE.from, WIPE.from + WIPE.frames)));
-  for (const at of SWEEPS) if (f >= at && f < at + SWEEP) return -BAND / 2 + (1 + 2 * BAND) * easeOut(progress(f, at, at + SWEEP));
+  const at = carryAt(f);
+  // At an even pace: it sets out and comes to rest off the frame, so nothing on it starts or stops.
+  if (at !== null) return lerp(-0.3, 1.3, progress(f, carryFrom(at), carryFrom(at) + CARRY.frames));
+  for (const s of SWEEPS) if (f >= s && f < s + SWEEP) return -BAND / 2 + (1 + 2 * BAND) * easeOut(progress(f, s, s + SWEEP));
   return null;
 }
 
@@ -38,16 +43,19 @@ export function beamAt(f: number, width: number): number | null {
  * The wipe the light carries at [f]: masks for the layer going out and the layer coming in, in the frame of a wrapper
  * skewed like the band (see [Wiped]), so the seam runs down the beam. The one going out stands solid until the beam
  * reaches it and burns out under its core; the one coming in comes up out of the stage in the beam's wake. The two
- * never both show at a point: at the seam, only the stage and the light. Null when no light is carrying one.
+ * never both show at a point: between them, only the stage and the light. Null when no light is carrying a cut.
  */
-export function wipeAt(f: number, width: number): { out: string; in: string } | null {
-  if (!carrying(f)) return null;
+export function wipeAt(f: number, width: number): { at: number; out: string; in: string } | null {
+  const at = carryAt(f);
+  if (at === null) return null;
   const beam = beamAt(f, width)!;
   const px = (v: number) => `${v.toFixed(0)}px`;
-  const seam = px(beam - width * 0.03);
+  // A gap of bare stage under the light between the two, so where they overlap they never read as one exposed on the other.
+  const gap = width * 0.12;
   return {
-    out: `linear-gradient(90deg, rgba(0,0,0,0) ${seam}, #000 ${px(beam + width * 0.07)})`,
-    in: `linear-gradient(90deg, #000 ${px(beam - width * 0.15)}, rgba(0,0,0,0) ${seam})`,
+    at,
+    out: `linear-gradient(90deg, rgba(0,0,0,0) ${px(beam)}, #000 ${px(beam + width * 0.08)})`,
+    in: `linear-gradient(90deg, #000 ${px(beam - gap - width * 0.14)}, rgba(0,0,0,0) ${px(beam - gap)})`,
   };
 }
 
@@ -76,8 +84,8 @@ const GRAIN = `url("data:image/svg+xml;utf8,${encodeURIComponent(
 export const Stage: React.FC<{ f: number; width: number; height: number }> = ({ f, width, height }) => {
   const sweep = sweepAt(f);
   const band = width * BAND;
-  // The light carrying the hero into the lineup burns brighter than a sweep, so the seam reads as light, not as an edge.
-  const glow = carrying(f) ? 2.6 : 1;
+  // A light carrying a cut burns brighter than a sweep, so the seam reads as light, not as an edge.
+  const glow = carryAt(f) !== null ? 2.4 : 1;
   const light = (a: number) => `rgba(255,243,226,${(a * glow).toFixed(3)})`;
   return (
     <div style={{ position: "absolute", inset: 0, background: COLOR.stage, overflow: "hidden" }}>

@@ -1,7 +1,7 @@
 import type React from "react";
 import { LENS, type Framing } from "../camera";
-import { AT, beat, LINEUP, lineupReel, takeFrame } from "../edit";
-import { clamp01, easeIn, easeOut, easeSmooth, lerp, progress } from "../math";
+import { AT, beat, DIP, LINEUP, lineupReel, takeFrame } from "../edit";
+import { clamp01, easeOut, easeSmooth, lerp, progress } from "../math";
 import { DP_WIDTH, takeOf, type DeviceId, type TakeId, type Theme } from "../takes";
 import { COLOR } from "../theme";
 import { Device, deviceMargin, screenHeight } from "./Device";
@@ -128,9 +128,6 @@ function viewAt(framing: Framing, all: Slot[], width: number, height: number, f:
   };
 }
 
-/** Frames before the end card the stage closes over the lineup, so the card lands out of a dark beat. */
-const DIP = 10;
-
 /**
  * The three devices landing one a beat, each named as it lands, all playing the same moment of the run in step: the
  * camera in on the phone, pulling back in one long move as the foldable and the tablet land beside it, and turning
@@ -151,7 +148,7 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
   const p = progress(f, AT.lineup, AT.end);
   const origin = `${width / 2}px ${height / 2}px`;
   const sheen = sweepAt(f);
-  const dim = easeIn(progress(f, AT.end - DIP, AT.end));
+  const dim = easeSmooth(progress(f, AT.end - DIP, AT.end));
   return (
     <>
       <div style={{ position: "absolute", inset: 0 }}>

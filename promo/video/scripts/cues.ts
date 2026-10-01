@@ -1,12 +1,13 @@
 // Writes public/audio/cues.json, what scripts/music.py scores the cut to: the tempo and length, where each part of the
-// beat sheet starts, the beats the lineup's devices land on, the frames the light sweeps the stage on, the light that
-// carries the hero into the lineup, the frame the prompt is sent on, and the frames of the video a finger comes down on.
+// beat sheet starts, the beats the lineup's devices land on, the frames the light sweeps the stage on, the lights that
+// carry the cuts, the dip into the end card, the frame the prompt is sent on, and the frames of the video a finger
+// comes down on.
 //
 //   npx tsx scripts/cues.ts
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AT, BPM, beat, DURATION, FPS, HEROES, LINEUP, lineupReel, SHADE, SWEEPS, takeFrame, THEME, whenShown, WIPE, type Reel } from "../src/edit";
+import { AT, BPM, beat, DURATION, FPS, HEROES, LINEUP, lineupReel, SHADE, SWEEPS, takeFrame, THEME, whenShown, CARRIES, CARRY, carryFrom, DIP, type Reel } from "../src/edit";
 import { mark, takeOf, takes } from "../src/takes";
 
 /** The most take frames one frame of the video moves through that still count as playing, not a cut. */
@@ -38,7 +39,8 @@ const cues = {
   at: AT,
   lands: LINEUP.map((_, i) => AT.lineup + beat(i)),
   sweeps: [...SWEEPS],
-  wipe: WIPE,
+  dip: DIP,
+  carries: CARRIES.map((at) => ({ at, from: carryFrom(at), frames: CARRY.frames })),
   send: whenShown(hero, mark(hero.take, "send")),
   taps: [...taps(hero, AT.organize, AT.lineup), ...swipes, ...taps(lineupReel(takeOf("phone", THEME)), AT.lineup, AT.end)].sort((a, b) => a - b),
 };

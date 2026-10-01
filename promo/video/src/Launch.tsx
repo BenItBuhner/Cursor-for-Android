@@ -34,19 +34,27 @@ export const Launch: React.FC<LaunchProps> = ({ framing, music, theme, probe = f
       </AbsoluteFill>
     );
   }
-  // A light crossing the stage carries the hero, its last frame held, out under its beam, and the lineup up in its wake.
+  // A light crossing the stage carries each cut: the shot going out, its camera held past the cut, burns out under its
+  // beam, and the one coming in, its camera held at its first frame until the cut, comes up in its wake.
   const wipe = wipeAt(f, width);
+  const intoLineup = wipe?.at === AT.lineup;
   return (
     <AbsoluteFill style={{ overflow: "hidden" }}>
       <Stage {...scene} />
       {f < AT.android + OPEN ? <TitleCard {...scene} /> : null}
-      {f >= CLOSE.from && (f < AT.lineup || wipe !== null) ? (
+      {f >= CLOSE.from && (f < AT.lineup || intoLineup) ? (
         <Wiped mask={wipe?.out}>
-          <Hero {...scene} theme={theme} />
+          <Hero {...scene} theme={theme} cam={wipe ? Math.min(f, wipe.at - 1) : f} />
         </Wiped>
       ) : null}
+      {wipe && !intoLineup ? (
+        <Wiped mask={wipe.in}>
+          <Hero {...scene} theme={theme} cam={Math.max(f, wipe.at)} />
+        </Wiped>
+      ) : null}
+      {f >= CLOSE.from && f < AT.lineup ? <HeroHeadlines framing={framing} f={f} height={height} /> : null}
       {f >= AT.android && f < CLOSE.until ? <AndroidCard {...scene} theme={theme} /> : null}
-      {(f >= AT.lineup || wipe !== null) && f < AT.end ? (
+      {(f >= AT.lineup || intoLineup) && f < AT.end ? (
         <Wiped mask={wipe?.in}>
           <Lineup {...scene} theme={theme} />
         </Wiped>

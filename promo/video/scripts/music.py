@@ -507,10 +507,11 @@ def score(cues: dict) -> np.ndarray:
     # The light sweeping the stage, each with a swell of air gathering into the cut and let go across it.
     for frame in cues["sweeps"]:
         mix.add(sec(frame) - 0.42, whoosh(0.75, 0.56), lv["whoosh"] * (0.8 if frame == at["organize"] else 1), verb=0.3)
-    # The light carrying the hero into the lineup: a longer swell of air the length of its crossing, breaking as its beam
-    # crosses the middle of the frame.
-    wipe = cues["wipe"]
-    mix.add(sec(wipe["from"]), whoosh(wipe["frames"] / fps, 0.5), lv["whoosh"] * 1.25, verb=0.35)
+    # The lights carrying the cuts: a swell of air the length of each crossing, breaking as its beam crosses the middle
+    # of the frame on the cut, the one into the lineup the fullest.
+    for carry in cues["carries"]:
+        lineup = carry["at"] == at["lineup"]
+        mix.add(sec(carry["from"]), whoosh(carry["frames"] / fps, 0.5), lv["whoosh"] * (1.25 if lineup else 1.05), verb=0.35)
     # The send: a glass tick as the prompt flies.
     mix.add(sec(cues["send"]), tick(), lv["tick"], pan=0.15, verb=0.6)
     # The taps on screen, faintly.
@@ -520,7 +521,15 @@ def score(cues: dict) -> np.ndarray:
     gain = pump(mix, kicks)
     wet = Pedalboard([Reverb(room_size=0.74, damping=0.4, wet_level=1.0, dry_level=0.0, width=1.0)])(mix.send.astype(np.float32), SR)
     wet = filt(wet, "highpass", 220)
-    return mix.dry + mix.pumped * gain + 0.55 * wet
+    out = mix.dry + mix.pumped * gain + 0.55 * wet
+    # The dip into the end card: the score falls away with the picture, 10 dB, and the last hit comes back up on the cut.
+    a, b = int((end - cues["dip"] / fps) * SR), int(end * SR)
+    u = np.linspace(0, 1, b - a)
+    duck = np.ones(out.shape[1])
+    duck[a:b] = 1 - (1 - 10 ** (-10 / 20)) * u * u * u * (10 + u * (6 * u - 15))
+    release = int(0.002 * SR)
+    duck[b - release : b] = np.linspace(duck[b - release], 1, release)
+    return out * duck
 
 
 # ---- mastering -------------------------------------------------------------------------------------------------------

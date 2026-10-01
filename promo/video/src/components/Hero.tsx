@@ -37,15 +37,20 @@ export const HeroHeadlines: React.FC<{ framing: Framing; f: number; height: numb
   </>
 );
 
-export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; width: number; height: number }> = ({
+/**
+ * The hero's phone at frame [f], the camera where it stands at frame [cam]: a shot held a few frames past its cut, or
+ * the next held at its first, while a light carries the cut across the frame. Its headlines are [HeroHeadlines].
+ */
+export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; cam?: number; width: number; height: number }> = ({
   framing,
   theme,
   f,
+  cam: camFrame = f,
   width,
   height,
 }) => {
   const reel = HEROES[theme];
-  const cam = cameraAt(HERO_PATHS[theme][framing], f);
+  const cam = cameraAt(HERO_PATHS[theme][framing], camFrame);
   const screen = screenOf(framing, reel.take, cam);
   const origin = `${cam.x * width}px ${cam.y * height}px`;
   return (
@@ -64,7 +69,6 @@ export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; width: 
           </Device>
         </div>
       </div>
-      <HeroHeadlines framing={framing} f={f} height={height} />
     </>
   );
 };

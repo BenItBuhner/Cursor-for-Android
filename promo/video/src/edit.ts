@@ -224,18 +224,24 @@ export const HEROES: Record<Theme, Reel> = { dark: hero(heroTake("dark")), light
 export const LINEUP_DIFF = 83;
 
 /**
- * The frames a light sweeps across the stage on, left to right behind whatever stands on it: each act's first frame
- * but the lineup's, whose light is the slower one that carries the hero into it (see [WIPE]), and the frame the
- * lineup's diff lands on all three devices.
+ * The frames a light sweeps across the stage on, left to right behind whatever stands on it, carrying nothing: the
+ * first act's first frame, which the green card closes into, and the frame the lineup's diff lands on all three devices.
  */
-export const SWEEPS = [AT.organize, AT.dictate, AT.code, AT.steer, AT.live, AT.ship, AT.lineup + LINEUP_DIFF] as const;
+export const SWEEPS = [AT.organize, AT.lineup + LINEUP_DIFF] as const;
 
 /**
- * The light that carries the hero into the lineup: the frame it sets out from off the frame's left, and the frames it
- * takes to cross to off its right. Slower than a sweep, and from rest to rest, so its beam crosses the frame at an even
- * pace, reaching the lineup's headline as the type starts to rise, and the hero's phone as the lineup's lands.
+ * The cuts a light carries: each act's first frame after the first, and the lineup's. Its beam crosses the frame at an
+ * even pace over [CARRY.frames], over the middle of the frame on the cut, and the shot going out burns out under it as
+ * the one coming in comes up in its wake.
  */
-export const WIPE = { from: AT.lineup - 14, frames: 36 };
+export const CARRIES = [AT.dictate, AT.code, AT.steer, AT.live, AT.ship, AT.lineup] as const;
+export const CARRY = { frames: 38 };
+
+/** Frames before the end card the stage closes over the lineup, and the score falls away, so the card lands out of a dark, quiet beat. */
+export const DIP = 16;
+
+/** The frame the light carrying the cut at [at] sets out from, off the frame's left. */
+export const carryFrom = (at: number) => at - CARRY.frames / 2;
 
 /**
  * Each device's take in the lineup: the same stretch, the first edit open as it is written and its diff landing at
