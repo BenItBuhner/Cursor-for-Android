@@ -95,6 +95,56 @@ class FileImportTest {
         assertThat(extended.files[1].file.kind).isEqualTo(PromptFileKind.Video)
     }
 
+    /**
+     * Extended mode used to upload a gallery picture as the gallery holds it: a full-resolution screenshot or photo,
+     * often over the account's 4 MB per image, with whatever the phone appended to it. It is prepared as an inline
+     * image is, and named after the format it now is.
+     */
+    @Test
+    fun `a full-size picture from the gallery in Extended mode is prepared for the model before it is uploaded`() {
+        val photo = Bitmap.createBitmap(2400, 1800, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(2400 * 1800) { i -> Color.rgb(i % 251, (i / 2400) % 241, (i * 7) % 239) }
+        photo.setPixels(pixels, 0, 2400, 0, 0, 2400, 1800)
+        val png = ByteArrayOutputStream().also { photo.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        val samsung = png + "SEFHk\u0000\u0000\u0000SEFT".toByteArray(Charsets.ISO_8859_1)
+
+        val imported = importMedia(context, listOf(temp("Screenshot_20260930.png", samsung)), extended = true, counts = none)
+
+        assertThat(imported.error).isNull()
+        val picked = imported.files.single()
+        assertThat(picked.isImage).isTrue()
+        assertThat(picked.file.mimeType).isEqualTo("image/jpeg")
+        assertThat(picked.file.name).isEqualTo("Screenshot_20260930.jpg")
+        assertThat(picked.file.sizeBytes).isAtMost(AttachmentImages.MAX_SEND_BYTES)
+        assertThat(String(picked.file.bytes, Charsets.ISO_8859_1)).doesNotContain("SEFT")
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(picked.file.bytes, 0, picked.file.sizeBytes, bounds)
+        assertThat(bounds.outWidth to bounds.outHeight).isEqualTo(AttachmentImages.MAX_EDGE_PX to 1176)
+        assertThat(picked.thumbnail).isNotNull()
+    }
+
+    @Test
+    fun `a broken picture is refused with the reason, and a HEIC stays the document it was`() {
+        val broken = importFiles(context, listOf(temp("shot.png", png().copyOf(30)), temp("notes.txt", "hi".toByteArray())), none)
+        assertThat(broken.error).isEqualTo("Couldn't read this PNG image. Re-save it as PNG or JPEG and attach it again.")
+        assertThat(broken.files.map { it.file.name }).containsExactly("notes.txt")
+
+        val heic = byteArrayOf(0, 0, 0, 0x18) + "ftypheic".toByteArray() + ByteArray(4) + "mif1heic".toByteArray() + ByteArray(64)
+        val kept = importFiles(context, listOf(temp("IMG_0042.heic", heic)), none)
+        assertThat(kept.error).isNull()
+        assertThat(kept.files.single().file.bytes).isEqualTo(heic)
+        assertThat(kept.files.single().file.mimeType).isEqualTo("image/heic")
+        assertThat(kept.files.single().isImage).isFalse()
+    }
+
+    @Test
+    fun `a picture renamed for its new format keeps its name when it already says it`() {
+        assertThat(renamedFor("IMG_0042.HEIC", "image/jpeg")).isEqualTo("IMG_0042.jpg")
+        assertThat(renamedFor("photo.jpeg", "image/jpeg")).isEqualTo("photo.jpeg")
+        assertThat(renamedFor("logo.png", "image/png")).isEqualTo("logo.png")
+        assertThat(renamedFor("clipboard", "image/png")).isEqualTo("clipboard.png")
+    }
+
     @Test
     fun `a file over 15 MB is refused before it is in memory, in the words of its kind, and the rest still load`() {
         fun huge(name: String): File = File.createTempFile("huge", name).also { file ->
