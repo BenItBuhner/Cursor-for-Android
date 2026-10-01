@@ -31,8 +31,8 @@ import java.time.Instant
  * asks the same thing of the server again and again fails here rather than on a key the API has stopped answering.
  *
  * The refused scenarios are the shared backoff's lock: a `429` or a `Retry-After` heard by one client holds the
- * host for every other (`HostPause`, `RetryInterceptor`, `SseRunStreamer`, `ApiThrottle`), and nothing asks again
- * inside the wait. For the record: v0.4.30 asked 5.25 a minute for one open chat and 8.25 for eight followed agents;
+ * endpoint it was heard on for every other, every chat's call to it included (`HostPause`, `RetryInterceptor`,
+ * `SseRunStreamer`; `ApiThrottle` holds the account's host), and nothing asks again inside the wait. For the record: v0.4.30 asked 5.25 a minute for one open chat and 8.25 for eight followed agents;
  * v0.4.31's stall watch, resuming every two minutes at its cap, made that 6.75 and 20.25. The watch now runs only for
  * a chat on screen (see `LiveRunHub.stallTimeoutMs`): the followed agents are back to the list's refresh alone, and a
  * chat opening on a connection the notification has held pays one record read and one stream, at once, to know it is
@@ -282,7 +282,12 @@ class ChatRequestBudgetTest {
         const val TOTAL_PER_MINUTE_FLEET = 12.0
         /** Eight followed agents and one open chat (measured 16.3): the fleet's refresh and the chat's queue read. */
         const val TOTAL_PER_MINUTE_FLEET_AND_CHAT = 20.0
-        /** A chat opened while every documented call is refused (measured 7.75): nothing asks again inside the wait. */
-        const val TOTAL_PER_MINUTE_REFUSED = 12.0
+        /**
+         * A chat opened while every documented call is refused: nothing asks again inside the wait. Measured 7.75 while
+         * one endpoint's refusal held them all and the chat, read once, stood on the notice for good; 12.0 now that each
+         * endpoint answers for itself and the chat is read again after each wait (three loads in the four minutes, each
+         * of their calls tried three times by `RetryInterceptor`, the wait named being short enough here to sleep).
+         */
+        const val TOTAL_PER_MINUTE_REFUSED = 16.0
     }
 }

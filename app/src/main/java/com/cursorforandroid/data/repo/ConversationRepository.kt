@@ -4904,14 +4904,17 @@ class ConversationRepository(
      * nothing tapped. True while the refusal is kept off the screen — the first [RATE_LIMIT_QUIET_HOLDS] in a row,
      * unless the reader asked for the read: a new Project's chat opened inside another endpoint's minute showed
      * "Rate limited by Cursor. Try again in 26 s." over an empty screen and stayed so (v0.4.31). Past them the limit
-     * is lasting, and said; the chat is still read again after each wait, so the notice goes the moment Cursor
-     * answers. Any other failure is not this function's: false, nothing scheduled.
+     * is lasting, and said; the chat is still read again, each wait double the last (never less than the one named,
+     * at most a minute past it), so the notice goes soon after Cursor answers without a lasting limit read into
+     * again at its own pace. Any other failure is not this function's: false, nothing scheduled.
      */
     private fun Entry.holdRateLimited(failure: Throwable?, asked: Boolean): Boolean {
-        val wait = failure.rateLimitWaitMs() ?: return false
+        val named = failure.rateLimitWaitMs() ?: return false
         val entry = this
         return synchronized(this) {
             val holds = ++rateLimitHolds
+            val past = (holds - RATE_LIMIT_QUIET_HOLDS).coerceIn(0, 6)
+            val wait = maxOf(named, (named shl past).coerceAtMost(HostPause.MAX_MS))
             quietJob?.cancel()
             confirmingOffline = false
             quietJob = scope.launch {
