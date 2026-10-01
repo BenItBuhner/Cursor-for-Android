@@ -165,13 +165,13 @@ class RefreshIndicatorScreenshotTest {
         frame()
         compose.mainClock.advanceTimeBy(400L)
         frame()
-        capture("938_sidebar_refresh_pulling_$suffix")
+        capture("950_sidebar_refresh_pulling_$suffix")
 
         fingerBy(110f * density)
         frame()
         compose.mainClock.advanceTimeBy(400L)
         frame()
-        capture("939_sidebar_refresh_armed_$suffix")
+        capture("951_sidebar_refresh_armed_$suffix")
 
         compose.onRoot().performTouchInput { up() }
         // Let go armed, Material springs the disc to the threshold and only then asks for the refresh: a second on,
@@ -183,7 +183,7 @@ class RefreshIndicatorScreenshotTest {
         compose.mainClock.advanceTimeBy(500L)
         frame()
         compose.onNodeWithTag(REFRESH_INDICATOR_TEST_TAG).assertExists()
-        capture("940_sidebar_refresh_refreshing_$suffix")
+        capture("952_sidebar_refresh_refreshing_$suffix")
     }
 
     @Test
