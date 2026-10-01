@@ -242,28 +242,44 @@ function overlaps(a: Point[], b: Point[]): boolean {
   return true;
 }
 
+type Box = [number, number, number, number];
+type Ink = { rising: Box; standing: Box; leaving: Box };
+
 /**
- * Each headline's ink as the cut sets it (Hero's layout, measured off a render): left, top, right and bottom, in pixels
- * of the frame.
+ * Each headline's ink as the cut sets it: left, top, right and bottom, in pixels of the frame, measured off a render of
+ * the headlines alone (Launch's probe prop) as the union over the frames its glyphs rise in ([RISING] from its first,
+ * when they show under their lines), over the frames it stands, and over the frames it wipes out ([LEAVING] before its
+ * last, when they show over their lines), less its last [GONE], when it is all but gone.
  */
-const INK: Record<Framing, Record<string, [number, number, number, number]>> = {
+const RISING = 44;
+const LEAVING = 14;
+const GONE = 4;
+const INK: Record<Framing, Record<string, Ink>> = {
   wide: {
-    "Organize projects.": [157, 407, 743, 703],
-    "Say what you want.": [152, 406, 780, 702],
-    "Watch it code.": [155, 407, 711, 672],
-    "Queue it. Steer it.": [156, 407, 745, 672],
-    "Follow it live.": [161, 407, 699, 672],
-    "Ship it.": [156, 484, 594, 624],
+    "Organize projects.": { rising: [154, 404, 757, 711], standing: [156, 406, 755, 707], leaving: [156, 382, 751, 707] },
+    "Say what you want.": { rising: [150, 406, 787, 711], standing: [150, 406, 785, 707], leaving: [152, 382, 779, 707] },
+    "Watch it code.": { rising: [152, 404, 725, 711], standing: [154, 406, 721, 677], leaving: [154, 382, 717, 677] },
+    "Queue it. Steer it.": { rising: [154, 404, 745, 711], standing: [154, 406, 741, 677], leaving: [156, 382, 737, 677] },
+    "Follow it live.": { rising: [158, 404, 701, 711], standing: [158, 406, 699, 677], leaving: [160, 382, 695, 677] },
+    "Ship it.": { rising: [154, 482, 595, 629], standing: [154, 484, 591, 625], leaving: [156, 460, 587, 625] },
   },
   tall: {
-    "Organize projects.": [300, 107, 785, 352],
-    "Say what you want.": [279, 106, 797, 350],
-    "Watch it code.": [314, 107, 772, 326],
-    "Queue it. Steer it.": [297, 107, 783, 326],
-    "Follow it live.": [322, 107, 767, 326],
-    "Ship it.": [358, 171, 720, 286],
+    "Organize projects.": { rising: [292, 96, 791, 349], standing: [294, 96, 789, 343], leaving: [296, 76, 789, 343] },
+    "Say what you want.": { rising: [276, 98, 801, 349], standing: [276, 98, 801, 343], leaving: [280, 76, 797, 343] },
+    "Watch it code.": { rising: [308, 96, 777, 349], standing: [310, 96, 775, 319], leaving: [312, 76, 773, 319] },
+    "Queue it. Steer it.": { rising: [296, 96, 783, 349], standing: [298, 96, 781, 319], leaving: [300, 76, 779, 319] },
+    "Follow it live.": { rising: [320, 96, 769, 349], standing: [322, 96, 767, 319], leaving: [324, 76, 765, 319] },
+    "Ship it.": { rising: [358, 160, 721, 281], standing: [360, 160, 719, 277], leaving: [360, 142, 717, 277] },
   },
 };
+
+/** The headline's ink at frame [f] of a moment from [at] to [until]: the box for how far along it is, or none once it is gone. */
+function inkAt(ink: Ink, f: number, at: number, until: number): Box | null {
+  if (f >= until - GONE) return null;
+  if (f < at + RISING) return ink.rising;
+  if (f >= until - LEAVING) return ink.leaving;
+  return ink.standing;
+}
 
 /** The room the phone keeps from a headline's ink, in pixels. */
 const CLEAR: Record<Framing, number> = { wide: 56, tall: 48 };
@@ -345,18 +361,19 @@ function problemsOf(reel: Reel, framing: Framing, path: Path): string[] {
   const away: number[] = [];
   for (const moment of MOMENTS) {
     const text = moment[framing].join(" ");
-    const ink = INK[framing][text];
-    if (!ink) throw new Error(`No ink measured for the ${framing} headline "${text}"`);
+    const measured = INK[framing][text];
+    if (!measured) throw new Error(`No ink measured for the ${framing} headline "${text}"`);
     const c = CLEAR[framing];
-    const box: Point[] = [
-      [ink[0] - c, ink[1] - c],
-      [ink[2] + c, ink[1] - c],
-      [ink[2] + c, ink[3] + c],
-      [ink[0] - c, ink[3] + c],
-    ];
     for (let f = moment.at; f < moment.until; f++) {
       const cam = cameraAt(path, f);
-      if (overlaps(outlineOf(framing, reel.take, cam), box)) near.push(f);
+      const ink = inkAt(measured, f, moment.at, moment.until);
+      const box: Point[] | null = ink && [
+        [ink[0] - c, ink[1] - c],
+        [ink[2] + c, ink[1] - c],
+        [ink[2] + c, ink[3] + c],
+        [ink[0] - c, ink[3] + c],
+      ];
+      if (box && overlaps(outlineOf(framing, reel.take, cam), box)) near.push(f);
       if (f >= landed && (cam.x < 0.05 || cam.x > 0.95 || cam.y < 0.05 || cam.y > 0.95)) away.push(f);
     }
   }
@@ -473,7 +490,7 @@ function keysOf(reel: Reel): Record<Framing, Shot[]> {
         flight,
       ),
       moving([
-        key(AT.steer, 1.33, 0.4, 0.88, 0.5, 0.915, 12, 18, 1),
+        key(AT.steer, 1.33, 0.4, 0.88, 0.5, 0.935, 12, 18, 1),
         key(v("queue"), 1.3, 0.64, 0.87, 0.53, 0.915, 1, 16, 0.4),
         key(v("steer", 16), 1.15, 0.68, 0.8, 0.53, 0.84, -6, 12, 0.1),
         key(said("hero.adapt", "from", 13), 1.25, 0.56, 0.34, 0.5, 0.58, -9, 8, -0.2),
@@ -502,7 +519,9 @@ export const HERO_PATHS: Record<Theme, Record<Framing, Path>> = { dark: pathsOf(
 const problems = (["dark", "light"] as const).flatMap((theme) =>
   (["wide", "tall"] as const).flatMap((framing) => problemsOf(HEROES[theme], framing, HERO_PATHS[theme][framing])),
 );
-if (problems.length) throw new Error(`The camera:\n${problems.join("\n")}`);
+// The headlines' ink is measured off a render of them alone (Launch's probe prop), which the camera's clearance is
+// checked against, so that render must go ahead of the check: REMOTION_PROBE=1 lets it.
+if (problems.length && !process.env.REMOTION_PROBE) throw new Error(`The camera:\n${problems.join("\n")}`);
 
 const still = (take: number) => whenShown(HEROES[THEME], take);
 const hero = HEROES[THEME].take;

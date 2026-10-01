@@ -24,6 +24,9 @@ export const AT = {
 
 export const DURATION = AT.end + beat(7);
 
+/** The frames a light sweeps across the stage on, left to right behind whatever stands on it: each act's first frame. */
+export const SWEEPS = [AT.organize, AT.dictate, AT.code, AT.steer, AT.live, AT.ship, AT.lineup] as const;
+
 /** The app's theme the cut is rendered in: the phone, the lineup and the score all follow it. */
 export const THEME: Theme = "dark";
 

@@ -4,16 +4,21 @@ import { AT, DURATION } from "../edit";
 import { clamp01, easeOut, progress } from "../math";
 import { COLOR, SANS, TRACK } from "../theme";
 import { AppIcon } from "./AppIcon";
+import { Kinetic } from "./Headline";
 
 export const REPO = "github.com/BenItBuhner/cursor-for-android";
 export const DISCLAIMER = "Unofficial client for Cursor Cloud Agents. Not affiliated with Anysphere, Inc.";
 
 /** How far the camera pushes in on the name by the last frame, slowing to a stop as the video ends. */
-const PUSH = 0.06;
+const PUSH = 0.05;
+/** Frames the icon takes to settle out of the push through the lineup, and the bloom behind it to come up and ease back. */
+const SETTLE = 26;
+const BLOOM = { up: 14, down: 70 };
 
 /**
- * The close: the icon lands on the last hit, the name and where to get it rise under it as the camera pushes slowly in,
- * and the small print holds still under them.
+ * The close: the lineup pushes through the phone into the icon, which settles from large to its size on the last hit
+ * as a warm bloom comes up behind it and eases back; the name rides a weight wave in under it, where to get it rises
+ * under that as the camera pushes slowly in, and the small print holds still under them.
  */
 export const EndCard: React.FC<{ framing: Framing; f: number; width: number; height: number }> = ({ framing, f, width, height }) => {
   const wide = framing === "wide";
@@ -21,11 +26,13 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
   const title = wide ? 112 : 92;
   const url = wide ? 36 : 34;
   const rise = (at: number, by: number) => {
-    const p = easeOut(progress(f, at, at + 22));
+    const p = easeOut(progress(f, at, at + 24));
     return { opacity: clamp01((f - at + 1) / 8), transform: `translateY(${(1 - p) * by}px)` };
   };
-  const landed = easeOut(progress(f, AT.end, AT.end + 18));
+  const settled = easeOut(progress(f, AT.end, AT.end + SETTLE));
+  const bloom = easeOut(progress(f, AT.end, AT.end + BLOOM.up)) * (1 - 0.55 * easeOut(progress(f, AT.end + BLOOM.up, AT.end + BLOOM.up + BLOOM.down)));
   const push = 1 + PUSH * Math.sin((progress(f, AT.end, DURATION - 1) * Math.PI) / 2);
+  const bloomSize = icon * 7;
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <div
@@ -40,23 +47,24 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
           transform: `scale(${push})`,
         }}
       >
-        <div style={{ transform: `scale(${0.82 + 0.18 * landed})`, opacity: clamp01((f - AT.end + 1) / 5) }}>
-          <AppIcon size={icon} glow={0.3} />
+        <div style={{ position: "relative" }}>
+          <div
+            style={{
+              position: "absolute",
+              left: icon / 2 - bloomSize / 2,
+              top: icon / 2 - bloomSize / 2,
+              width: bloomSize,
+              height: bloomSize,
+              borderRadius: "50%",
+              background: `radial-gradient(circle, rgba(245,165,36,${(0.22 * bloom).toFixed(3)}) 0%, rgba(245,165,36,${(0.07 * bloom).toFixed(3)}) 28%, rgba(245,165,36,0) 60%)`,
+            }}
+          />
+          <div style={{ position: "relative", transform: `scale(${1.42 - 0.42 * settled})`, opacity: clamp01((f - AT.end + 1) / 4) }}>
+            <AppIcon size={icon} glow={0.6} />
+          </div>
         </div>
-        <div
-          style={{
-            marginTop: icon * 0.26,
-            fontFamily: SANS,
-            fontWeight: 500,
-            fontSize: title,
-            lineHeight: 1.05,
-            letterSpacing: TRACK.display,
-            color: COLOR.ink,
-            whiteSpace: "nowrap",
-            ...rise(AT.end + 5, title * 0.35),
-          }}
-        >
-          Cursor for Android
+        <div style={{ marginTop: icon * 0.26 }}>
+          <Kinetic lines={["Cursor for Android"]} f={f} at={AT.end + 6} size={title} align="center" />
         </div>
         <div
           style={{
@@ -67,7 +75,7 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
             letterSpacing: TRACK.text,
             color: COLOR.inkSoft,
             whiteSpace: "nowrap",
-            ...rise(AT.end + 12, url * 0.6),
+            ...rise(AT.end + 26, url * 0.6),
           }}
         >
           {REPO}
@@ -87,7 +95,7 @@ export const EndCard: React.FC<{ framing: Framing; f: number; width: number; hei
           letterSpacing: TRACK.text,
           color: COLOR.inkSoft,
           padding: `0 ${width * 0.08}px`,
-          ...rise(AT.end + 20, 10),
+          ...rise(AT.end + 36, 10),
         }}
       >
         {DISCLAIMER}

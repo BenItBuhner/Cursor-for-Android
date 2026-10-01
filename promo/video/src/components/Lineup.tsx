@@ -1,11 +1,13 @@
 import type React from "react";
 import { LENS, type Framing } from "../camera";
 import { AT, beat, LINEUP, lineupReel, takeFrame } from "../edit";
-import { clamp01, easeOut, easeSmooth, lerp, progress } from "../math";
+import { clamp01, easeIn, easeOut, easeSmooth, lerp, progress } from "../math";
 import { DP_WIDTH, takeOf, type DeviceId, type TakeId, type Theme } from "../takes";
+import { COLOR } from "../theme";
 import { Device, deviceMargin, screenHeight } from "./Device";
 import { Headline } from "./Headline";
 import { Screen } from "./Screen";
+import { sweepAt } from "./Stage";
 
 type Slot = { device: DeviceId; take: TakeId; x: number; y: number; width: number };
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -126,9 +128,15 @@ function viewAt(framing: Framing, all: Slot[], width: number, height: number, f:
 }
 
 /**
+ * The push through the phone into the end card: over the lineup's last [PUSH.frames] the whole lineup swells about the
+ * phone's screen by [PUSH.by], gathering pace into the cut, as the stage closes over it for the last [PUSH.dim].
+ */
+const PUSH = { frames: 16, by: 0.55, dim: 7 };
+
+/**
  * The three devices landing one a beat, each named as it lands, all playing the same moment of the run in step: the
  * camera in on the phone, pulling back in one long move as the foldable and the tablet land beside it, and turning
- * round all three.
+ * round all three; then pushing through the phone into the end card.
  */
 export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width: number; height: number }> = ({
   framing,
@@ -144,52 +152,61 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
   const orbit = ORBIT[framing];
   const p = progress(f, AT.lineup, AT.end);
   const origin = `${width / 2}px ${height / 2}px`;
+  const sheen = sweepAt(f);
+  const phone = all.find((s) => s.device === "phone")!;
+  const through = easeIn(progress(f, AT.end - PUSH.frames, AT.end));
+  const dim = progress(f, AT.end - PUSH.dim, AT.end) ** 1.5;
+  const px = view.x + (phone.x + phone.width / 2 - view.cx) * view.zoom;
+  const py = view.y + (phone.y + screenHeight(phone.take, phone.width) * 0.5 - view.cy) * view.zoom;
   return (
     <>
-      <div style={{ position: "absolute", inset: 0, perspective: LENS[framing].perspective, perspectiveOrigin: origin }}>
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            transformOrigin: origin,
-            transform: `rotateX(${lerp(...orbit.tilt, p)}deg) rotateY(${lerp(...orbit.turn, p)}deg) scale(${lerp(...orbit.scale, p)})`,
-          }}
-        >
-          {all.map((slot) => {
-            const i = LINEUP.indexOf(slot.device);
-            const landed = easeOut(progress(f, landAt(i), landAt(i) + LAND));
-            const x = view.x + (slot.x - view.cx) * view.zoom;
-            const y = view.y + (slot.y - view.cy) * view.zoom;
-            const w = slot.width * view.zoom;
-            return (
-              <div
-                key={slot.device}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  opacity: clamp01((f - landAt(i) + 1) / 4),
-                  transform: `translateY(${(1 - landed) * 80}px) scale(${0.95 + 0.05 * landed})`,
-                  transformOrigin: `${x + w / 2}px ${y + screenHeight(slot.take, w)}px`,
-                }}
-              >
-                <Device take={slot.take} x={x} y={y} width={w}>
-                  <Screen take={slot.take} frame={takeFrame(lineupReel(slot.take), f)} width={w} />
-                </Device>
-              </div>
-            );
-          })}
+      <div style={{ position: "absolute", inset: 0, transformOrigin: `${px}px ${py}px`, transform: `scale(${1 + PUSH.by * through})` }}>
+        <div style={{ position: "absolute", inset: 0, perspective: LENS[framing].perspective, perspectiveOrigin: origin }}>
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              transformOrigin: origin,
+              transform: `rotateX(${lerp(...orbit.tilt, p)}deg) rotateY(${lerp(...orbit.turn, p)}deg) scale(${lerp(...orbit.scale, p)})`,
+            }}
+          >
+            {all.map((slot) => {
+              const i = LINEUP.indexOf(slot.device);
+              const landed = easeOut(progress(f, landAt(i), landAt(i) + LAND));
+              const x = view.x + (slot.x - view.cx) * view.zoom;
+              const y = view.y + (slot.y - view.cy) * view.zoom;
+              const w = slot.width * view.zoom;
+              return (
+                <div
+                  key={slot.device}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    opacity: clamp01((f - landAt(i) + 1) / 4),
+                    transform: `translateY(${(1 - landed) * 80}px) scale(${0.95 + 0.05 * landed})`,
+                    transformOrigin: `${x + w / 2}px ${y + screenHeight(slot.take, w)}px`,
+                  }}
+                >
+                  <Device take={slot.take} x={x} y={y} width={w} sheen={sheen}>
+                    <Screen take={slot.take} frame={takeFrame(lineupReel(slot.take), f)} width={w} />
+                  </Device>
+                </div>
+              );
+            })}
+          </div>
         </div>
+        <Headline
+          lines={lines}
+          f={f}
+          at={AT.lineup}
+          size={size}
+          x={0}
+          y={framing === "wide" ? height * 0.11 : height * 0.075}
+          align="center"
+          wordAt={LINEUP.map((_, i) => landAt(i))}
+        />
       </div>
-      <Headline
-        lines={lines}
-        f={f}
-        at={AT.lineup}
-        size={size}
-        x={0}
-        y={framing === "wide" ? height * 0.11 : height * 0.075}
-        align="center"
-        wordAt={LINEUP.map((_, i) => landAt(i))}
-      />
+      {dim > 0 ? <div style={{ position: "absolute", inset: 0, background: COLOR.stage, opacity: dim }} /> : null}
     </>
   );
 };

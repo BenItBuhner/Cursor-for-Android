@@ -25,13 +25,15 @@ const rimOf = (short: number) => Math.max(1.5, short * 0.0045);
  * [take]'s device, its screen [width] pixels across with its top left at [x, y] of the parent: thin black glass in a
  * graphite frame, the camera where that device has it, and [children] (the screen) inside.
  */
-export const Device: React.FC<{ take: TakeId; x: number; y: number; width: number; children: React.ReactNode }> = ({
-  take,
-  x,
-  y,
-  width,
-  children,
-}) => {
+export const Device: React.FC<{
+  take: TakeId;
+  x: number;
+  y: number;
+  width: number;
+  /** How far across the device the stage's light is ([sweepAt]), 0 off its left to 1 off its right, or null. */
+  sheen?: number | null;
+  children: React.ReactNode;
+}> = ({ take, x, y, width, sheen = null, children }) => {
   const device = takes[take].device;
   const height = screenHeight(take, width);
   const short = Math.min(width, height);
@@ -39,25 +41,45 @@ export const Device: React.FC<{ take: TakeId; x: number; y: number; width: numbe
   const radius = short * glassOf(take).radius;
   const rim = rimOf(short);
   const edge = bezel + rim;
+  const outer = width + 2 * edge;
+  const sheenAt = sheen === null ? null : -outer * 1.2 + outer * 3.4 * sheen;
+  const light = (alpha: number, blur: number) =>
+    `linear-gradient(104deg, rgba(255,246,232,0) 0%, rgba(255,246,232,${alpha * 0.45}) ${50 - blur}%, rgba(255,246,232,${alpha}) 50%, rgba(255,246,232,${alpha * 0.45}) ${50 + blur}%, rgba(255,246,232,0) 100%)`;
+  const glint = (alpha: number, blur: number) =>
+    sheenAt === null ? null : (
+      <div
+        style={{
+          position: "absolute",
+          top: -outer * 0.3,
+          bottom: -outer * 0.3,
+          width: outer * 1.2,
+          left: sheenAt,
+          background: light(alpha, blur),
+          pointerEvents: "none",
+        }}
+      />
+    );
   return (
     <div
       style={{
         position: "absolute",
         left: x - edge,
         top: y - edge,
-        width: width + 2 * edge,
+        width: outer,
         height: height + 2 * edge,
         borderRadius: radius + edge,
-        background: "linear-gradient(150deg, #6d6d74 0%, #26262b 18%, #1a1a1e 55%, #2e2e33 82%, #77777e 100%)",
-        boxShadow: `0 ${short * 0.06}px ${short * 0.14}px -${short * 0.03}px rgba(20,18,11,0.42), 0 ${short * 0.012}px ${short * 0.03}px rgba(20,18,11,0.2)`,
+        background: "linear-gradient(150deg, #7a7a82 0%, #2a2a2f 18%, #1a1a1e 55%, #2e2e33 82%, #84848c 100%)",
+        boxShadow: `0 ${short * 0.1}px ${short * 0.26}px -${short * 0.04}px rgba(0,0,0,0.7), 0 ${short * 0.02}px ${short * 0.05}px rgba(0,0,0,0.5), 0 0 ${short * 0.5}px rgba(255,236,210,0.045)`,
       }}
     >
+      <div style={{ position: "absolute", inset: 0, borderRadius: radius + edge, overflow: "hidden" }}>{glint(0.5, 22)}</div>
       {device === "phone" ? <PhoneButtons width={width} height={height} edge={edge} rim={rim} /> : null}
       <div style={{ position: "absolute", inset: rim, borderRadius: radius + bezel, background: "#050506" }} />
       <div style={{ position: "absolute", left: edge, top: edge, width, height, borderRadius: radius, overflow: "hidden", isolation: "isolate" }}>
         {children}
         {device === "foldable" ? <Crease width={width} height={height} /> : null}
         {device !== "tablet" ? <PunchHole take={take} width={width} height={height} /> : null}
+        {glint(0.05, 30)}
       </div>
       {device === "tablet" ? (
         <div

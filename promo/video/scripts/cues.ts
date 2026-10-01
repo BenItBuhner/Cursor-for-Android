@@ -1,12 +1,13 @@
 // Writes public/audio/cues.json, what scripts/music.py scores the cut to: the tempo and length, where each part of the
-// beat sheet starts, the beats the lineup's devices land on, and the frames of the video a finger comes down on.
+// beat sheet starts, the beats the lineup's devices land on, the frames the light sweeps the stage on, the frame the
+// prompt is sent on, and the frames of the video a finger comes down on.
 //
 //   npx tsx scripts/cues.ts
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AT, BPM, beat, DURATION, FPS, HEROES, LINEUP, lineupReel, SHADE, takeFrame, THEME, type Reel } from "../src/edit";
-import { takeOf, takes } from "../src/takes";
+import { AT, BPM, beat, DURATION, FPS, HEROES, LINEUP, lineupReel, SHADE, SWEEPS, takeFrame, THEME, whenShown, type Reel } from "../src/edit";
+import { mark, takeOf, takes } from "../src/takes";
 
 /** The most take frames one frame of the video moves through that still count as playing, not a cut. */
 const PLAYING = 4;
@@ -28,6 +29,7 @@ function taps(reel: Reel, from: number, until: number): number[] {
 const swipes = [SHADE.pull.at, SHADE.fling.at - 4];
 
 const video = join(dirname(fileURLToPath(import.meta.url)), "..");
+const hero = HEROES[THEME];
 const cues = {
   fps: FPS,
   bpm: BPM,
@@ -35,10 +37,10 @@ const cues = {
   theme: THEME,
   at: AT,
   lands: LINEUP.map((_, i) => AT.lineup + beat(i)),
-  taps: [...taps(HEROES[THEME], AT.organize, AT.lineup), ...swipes, ...taps(lineupReel(takeOf("phone", THEME)), AT.lineup, AT.end)].sort(
-    (a, b) => a - b,
-  ),
+  sweeps: [...SWEEPS],
+  send: whenShown(hero, mark(hero.take, "send")),
+  taps: [...taps(hero, AT.organize, AT.lineup), ...swipes, ...taps(lineupReel(takeOf("phone", THEME)), AT.lineup, AT.end)].sort((a, b) => a - b),
 };
 mkdirSync(join(video, "public", "audio"), { recursive: true });
 writeFileSync(join(video, "public", "audio", "cues.json"), `${JSON.stringify(cues, null, 2)}\n`);
-console.log(`cues: ${cues.frames} frames at ${cues.bpm} bpm in the ${cues.theme} cut, taps at ${cues.taps.join(", ")}`);
+console.log(`cues: ${cues.frames} frames at ${cues.bpm} bpm in the ${cues.theme} cut, the send at ${cues.send}, taps at ${cues.taps.join(", ")}`);
