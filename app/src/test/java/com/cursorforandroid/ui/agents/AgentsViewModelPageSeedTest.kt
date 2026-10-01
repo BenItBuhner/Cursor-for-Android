@@ -105,6 +105,19 @@ class AgentsViewModelPageSeedTest {
     }
 
     @Test
+    fun `a Project hidden from the page is not among the seeded rows`() = runBlocking<Unit> {
+        val graph = graph()
+        val rows = NewChatHomeFixtures.list().projectRows
+        graph.caches.newChatPage.save(
+            NewChatPageSnapshot.of(graph.user, NewChatHomeChoice(null), extendedMode = false, projects = rows, hidden = setOf(rows.first().agent.id)),
+        )
+
+        val vm = AgentsViewModel(graph)
+        assertThat(vm.uiState.value.projectRows.map { it.agent.id }).isEqualTo(rows.drop(1).map { it.agent.id })
+        listGate.complete(Unit)
+    }
+
+    @Test
     fun `another account's page is not listed`() = runBlocking<Unit> {
         val graph = graph()
         graph.savePage(CursorUser("Other", "someone-else@example.com", null, null, null), stalePage())

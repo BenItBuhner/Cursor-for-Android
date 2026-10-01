@@ -123,7 +123,8 @@ internal sealed interface HomeBlock {
         override val key: String get() = "empty"
     }
 
-    data class Projects(val rows: List<AgentRow>) : HomeBlock {
+    /** Every Project, first to last, with the ones [hidden] from the page (shown only while they are arranged). */
+    data class Projects(val rows: List<AgentRow>, val hidden: Set<String> = emptySet()) : HomeBlock {
         override val key: String get() = "projects"
     }
 

@@ -65,6 +65,18 @@ class NewChatPageCacheTest {
     }
 
     @Test
+    fun `the Projects hidden from the page are kept with it, and left off the seed`() = runBlocking<Unit> {
+        val rows = NewChatHomeFixtures.list().projectRows
+        val hidden = setOf(rows[1].agent.id, rows[3].agent.id)
+        launch().save(NewChatPageSnapshot.of(alex, NewChatHomeChoice(null), extendedMode = true, projects = rows, hidden = hidden + "bc-not-a-project"))
+
+        val seed = launch().seed(alex)!!
+        assertThat(seed.hiddenProjectIds).isEqualTo(hidden)
+        assertThat(seed.projects.map { it.agent.id }).isEqualTo(rows.map { it.agent.id })
+        assertThat(seed.projectRows().map { it.agent.id }).isEqualTo(rows.map { it.agent.id }.filterNot { it in hidden })
+    }
+
+    @Test
     fun `an automatic layout is saved as none chosen`() = runBlocking<Unit> {
         launch().save(snapshot(choice = null))
         assertThat(launch().seed(alex)!!.choice).isEqualTo(NewChatHomeChoice(null))

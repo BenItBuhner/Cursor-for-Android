@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
@@ -20,8 +21,11 @@ import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
+import com.cursorforandroid.data.local.NewChatPageSnapshot
 import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.domain.CursorUser
+import com.cursorforandroid.domain.NewChatHomeChoice
+import com.cursorforandroid.ui.home.NewChatHomeFixtures
 import com.cursorforandroid.ui.home.NewChatHomeTags
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
@@ -79,6 +83,14 @@ class NewChatPageFirstFrameTest {
     private fun firstLaunch(launch: Launch): Int {
         pageFile.delete()
         shown = launch
+        host()
+        compose.waitUntil(30_000) { tiles().isNotEmpty() }
+        compose.waitUntil(30_000) { pageFile.isFile }
+        compose.waitForIdle()
+        return tiles().size
+    }
+
+    private fun host() {
         compose.setContent {
             CursorTheme(mode = ThemeMode.Dark) {
                 val current = shown ?: return@CursorTheme
@@ -91,14 +103,10 @@ class NewChatPageFirstFrameTest {
                 }
             }
         }
-        compose.waitUntil(30_000) { tiles().isNotEmpty() }
-        compose.waitUntil(30_000) { pageFile.isFile }
-        compose.waitForIdle()
-        return tiles().size
     }
 
-    /** Swaps in [next]'s shell with the clock held, and checks the frames from its first. */
-    private fun secondLaunch(next: Launch, projects: Int) {
+    /** Swaps in [next]'s shell with the clock held, up to the first frame it is drawn in. */
+    private fun swapTo(next: Launch) {
         compose.mainClock.autoAdvance = false
         compose.runOnIdle { shown = next }
         var frames = 0
@@ -107,7 +115,11 @@ class NewChatPageFirstFrameTest {
             compose.mainClock.advanceTimeByFrame()
             compose.waitForIdle()
         }
+    }
 
+    /** Swaps in [next]'s shell, and checks the frames from its first. */
+    private fun secondLaunch(next: Launch, projects: Int) {
+        swapTo(next)
         assertWithMessage("Project shortcuts on the first frame").that(tiles()).hasSize(projects)
         File("build/outputs/roborazzi").mkdirs()
         captureScreenRoboImage("build/outputs/roborazzi/new_chat_first_frame.png", RoborazziOptions(taskType = RoborazziTaskType.Record))
@@ -137,6 +149,24 @@ class NewChatPageFirstFrameTest {
         val first = demoLaunch()
         val projects = firstLaunch(first)
         secondLaunch(Launch(first.graph, first.user), projects)
+    }
+
+    @Test
+    fun `the Projects hidden from the page are not on its first frame`() {
+        val rows = NewChatHomeFixtures.list().projectRows
+        val hidden = setOf(rows[0].agent.id, rows[2].agent.id)
+        val writer = demoLaunch()
+        runBlocking {
+            writer.graph.caches.newChatPage.save(NewChatPageSnapshot.of(writer.user, NewChatHomeChoice(null), extendedMode = true, projects = rows, hidden = hidden))
+        }
+        host()
+        val next = demoLaunch()
+        next.graph.caches.newChatPage.warm()
+        swapTo(next)
+
+        fun drawn(name: String) = compose.onAllNodes(hasTestTag(NewChatHomeTags.PROJECT_SHORTCUT) and hasText(name, substring = true)).fetchSemanticsNodes().isNotEmpty()
+        assertThat(tiles()).hasSize(rows.size - hidden.size)
+        rows.forEach { row -> assertWithMessage(row.agent.name).that(drawn(row.agent.name)).isEqualTo(row.agent.id !in hidden) }
     }
 
     private companion object {

@@ -16,8 +16,8 @@ internal const val NEW_CHAT_PAGE_SAVE_DELAY_MS = 500L
 
 /**
  * Keeps the New Chat page's picture in [cache] for the next launch's first frame: the layout chosen, Extended mode,
- * and the Project shortcuts exactly as the page lists them ([homeBlocks]), once the list has loaded and both settings
- * have been read — never the picture this launch was seeded from.
+ * and the Projects exactly as the page lists them ([homeBlocks]) with the ones hidden there, once the list has loaded
+ * and both settings have been read — never the picture this launch was seeded from.
  */
 @Composable
 internal fun RememberNewChatPage(
@@ -28,12 +28,12 @@ internal fun RememberNewChatPage(
     list: AgentListUiState,
     projectsAvailable: Boolean,
 ) {
-    val snapshot = remember(user, choice, extendedMode, list.hasLoaded, list.projectRows, projectsAvailable) {
+    val snapshot = remember(user, choice, extendedMode, list.hasLoaded, list.projectRows, list.local, projectsAvailable) {
         if (!list.hasLoaded || choice == null || extendedMode == null) {
             null
         } else {
-            val rows = homeBlocks(NewChatHome.PROJECTS, list, projectsAvailable).firstNotNullOfOrNull { (it as? HomeBlock.Projects)?.rows }
-            NewChatPageSnapshot.of(user, choice, extendedMode, rows.orEmpty())
+            val block = homeBlocks(NewChatHome.PROJECTS, list, projectsAvailable).firstNotNullOfOrNull { it as? HomeBlock.Projects }
+            NewChatPageSnapshot.of(user, choice, extendedMode, block?.rows.orEmpty(), block?.hidden.orEmpty())
         }
     }
     LaunchedEffect(cache, snapshot) {

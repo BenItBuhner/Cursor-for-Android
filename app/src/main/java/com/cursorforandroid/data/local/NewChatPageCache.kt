@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The New Chat page as it was last drawn: whose it was, the layout chosen in Settings, whether Extended mode was on,
- * and the Project shortcuts it showed — each with the chats inside it, which is what its working glyph counts. What
+ * its Projects and which of them were hidden there — each with the chats inside it, which is what its working glyph counts. What
  * the first frame of the next launch draws while the settings, the list's own disk copy (much larger: every row with
  * its record) and the network are still on their way, so the page opens as it was left rather than empty.
  */
@@ -27,18 +27,23 @@ data class NewChatPageSnapshot(
     /** Settings › New chat page as chosen, by its key; null while nothing has been chosen there. */
     val chosenHome: String? = null,
     val extendedMode: Boolean = false,
+    /** Every Project the page had, first to last, the hidden ones among them. */
     val projects: List<CachedShortcutRow> = emptyList(),
+    /** The Projects dragged below the page's "Hidden" line, which it leaves off. */
+    val hiddenProjectIds: Set<String> = emptySet(),
 ) {
     val choice: NewChatHomeChoice get() = NewChatHomeChoice(NewChatHome.chosen(chosenHome))
 
-    fun projectRows(): List<AgentRow> = projects.map(CachedShortcutRow::toRow)
+    /** The shortcuts the page drew: its Projects, the hidden ones left off. */
+    fun projectRows(): List<AgentRow> = projects.filterNot { it.agent.id in hiddenProjectIds }.map(CachedShortcutRow::toRow)
 
     companion object {
-        fun of(user: CursorUser, choice: NewChatHomeChoice, extendedMode: Boolean, projects: List<AgentRow>) = NewChatPageSnapshot(
+        fun of(user: CursorUser, choice: NewChatHomeChoice, extendedMode: Boolean, projects: List<AgentRow>, hidden: Set<String> = emptySet()) = NewChatPageSnapshot(
             account = NewChatPageCache.accountOf(user),
             chosenHome = choice.chosen?.key,
             extendedMode = extendedMode,
             projects = projects.map { CachedShortcutRow.of(it, nested = false) },
+            hiddenProjectIds = hidden.filterTo(HashSet()) { id -> projects.any { it.agent.id == id } },
         )
     }
 }
