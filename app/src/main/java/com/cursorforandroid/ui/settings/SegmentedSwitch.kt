@@ -1,8 +1,8 @@
 package com.cursorforandroid.ui.settings
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,7 +105,9 @@ internal fun <T> SegmentedSwitch(
         Row(Modifier.selectableGroup()) {
             options.forEach { option ->
                 val chosen = option == selected
-                val text by animateColorAsState(if (chosen) colors.textPrimary else colors.textTertiary, tween(SlideMillis, easing = SlideEasing), label = "label")
+                // The selection animates, not the colour: a theme change (often the very tap on this switch) repaints the labels at once.
+                val emphasis by animateFloatAsState(if (chosen) 1f else 0f, tween(SlideMillis, easing = SlideEasing), label = "label")
+                val text = lerp(colors.textTertiary, colors.textPrimary, emphasis)
                 Box(
                     Modifier
                         .width(SegmentWidth)
