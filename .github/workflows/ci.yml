@@ -160,19 +160,18 @@ jobs:
 
       - uses: ./.github/actions/android-toolchain
 
-      # The same stamp the build job uses, so AppVersionTest's parity check runs against a resolved dev version name
-      # and not just the base one: a versionCode derived from the base would pass unnoticed otherwise.
-      - name: Stamp dev version
-        id: stamp
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: echo "suffix=-dev.${GITHUB_RUN_NUMBER}+g${HEAD_SHA::7}" >> "$GITHUB_OUTPUT"
-
+      # A stamp of the same shape as the build job's, so AppVersionTest's parity check runs against a resolved dev
+      # version name and not just the base one: a versionCode derived from the base would pass unnoticed otherwise.
+      # It is a constant, not the run's number and commit: the suffix is compiled into BuildConfig, which is an input
+      # of compileDebugKotlin, so a per-run stamp made every run's compile a build-cache miss (100 s a shard, then
+      # 60 s more for the test sources). With the constant, a run whose sources match the cache's restores the
+      # compile instead. Nothing in the tests needs the real stamp; the APKs the build jobs upload still carry it.
+      #
       # The Roborazzi walkthrough is covered by the `screenshots` job below.
       - name: Run JVM unit tests (${{ matrix.shard }})
         run: >
           ./gradlew :app:testDebugUnitTest -Papp.skipScreenshotTests=true -Papp.testShard=${{ matrix.shard }}
-          -Papp.testForks=1 -Papp.versionNameSuffix="${{ steps.stamp.outputs.suffix }}"
+          -Papp.testForks=1 -Papp.versionNameSuffix=-dev.1+gci
 
       # Named for the shard ("1-of-6" .. "6-of-6"): an artifact name cannot hold the slash.
       - name: Name the artifacts
