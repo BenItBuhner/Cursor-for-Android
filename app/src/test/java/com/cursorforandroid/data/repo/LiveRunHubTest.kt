@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -760,8 +761,9 @@ class LiveRunHubTest {
     }
 
     @Test
-    fun `a run only the notification follows holds its quiet connection - a chat arriving on it gets the stall watch`() = runBlocking {
-        hub = stallingHub()
+    fun `a run only the notification follows holds its quiet connection - a chat arriving on it has it verified and taken up at once`() = runBlocking {
+        // A stall window of five seconds: a chat made to wait it out would show as seconds, not scheduling noise.
+        hub = stallingHub(stallMs = 5_000, stallMaxMs = 20_000)
         api.addRunningAgent("bc-1", "Agent", "run-1")
         streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
         streamer.emit("run-1", RunStreamEvent.Assistant("Hello"))
@@ -769,28 +771,88 @@ class LiveRunHubTest {
         val follower = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 100).collect { } }
         awaitUntil { snapshot()?.items?.isNotEmpty() == true }
 
-        // The open connection hears nothing more of the run for many stall windows: it is held, not taken up again.
+        // The open connection hears nothing more of the run (the server's side let go of it); the run goes on. With
+        // no chat on it the connection is held: no record read, no second connection.
         streamer.strand("run-1")
-        delay(1_500)
+        streamer.emit("run-1", RunStreamEvent.Assistant(" world"))
+        delay(1_000)
         assertThat(connections()).isEqualTo(1)
         assertThat(api.getRunCalls).isEqualTo(0)
         assertThat(current().reconnecting).isFalse()
         assertThat(current().finished).isFalse()
 
-        // A chat opens on the run: the stall window counts from now, and the stream is taken up again from its last event.
-        streamer.emit("run-1", RunStreamEvent.Assistant(" world"))
-        val chat = scope.launch { hub.snapshots("bc-1", "run-1").collect { } }
-        awaitUntil { (snapshot()?.items?.lastOrNull() as? AssistantMessage)?.markdown == "Hello world" }
+        // A chat opens on the run: the record is asked and the stream taken up from its last event at once — the
+        // words the dead connection missed are on screen well inside the window, with no "reconnecting" said.
+        val seen = CopyOnWriteArrayList<LiveRunHub.Snapshot>()
+        val opened = System.nanoTime()
+        val chat = scope.launch { hub.snapshots("bc-1", "run-1").collect { seen += it } }
+        awaitUntil(2_000) { (snapshot()?.items?.lastOrNull() as? AssistantMessage)?.markdown == "Hello world" }
+        assertThat((System.nanoTime() - opened) / 1_000_000).isLessThan(2_000)
+        // (The fake streamer sends no positions, so the resume here is a rebuild from the run's first event; the
+        // story never goes back while it catches up.)
         assertThat(connections()).isEqualTo(2)
         assertThat(api.getRunCalls).isEqualTo(1)
-        assertThat(current().reconnecting).isFalse()
+        assertThat(seen.none { it.reconnecting }).isTrue()
+        assertThat(seen.map { it.items.size }.zipWithNext().none { (a, b) -> b < a }).isTrue()
 
         // The chat leaves; the notification's connection goes on being held through the next quiet spell.
         chat.cancel()
         streamer.strand("run-1")
-        delay(1_500)
+        delay(1_000)
         assertThat(connections()).isEqualTo(2)
         assertThat(api.getRunCalls).isEqualTo(1)
+        follower.cancel()
+    }
+
+    @Test
+    fun `a chat back in front after the app was away has its held connection verified and taken up at once`() = runBlocking {
+        hub = stallingHub(stallMs = 5_000, stallMaxMs = 20_000)
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
+        streamer.emit("run-1", RunStreamEvent.Assistant("Hello"))
+        val follower = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 100).collect { } }
+        // The chat is on screen: watched, every word.
+        val onScreen = MutableStateFlow(true)
+        val chat = scope.launch { hub.snapshots("bc-1", "run-1", watched = onScreen).collect { } }
+        awaitUntil { snapshot()?.items?.isNotEmpty() == true }
+        assertThat(connections()).isEqualTo(1)
+
+        // The app goes to the background: nothing shows the chat, the notification keeps the connection. While the
+        // app is away the connection dies and the run goes on.
+        onScreen.value = false
+        delay(200)
+        streamer.strand("run-1")
+        streamer.emit("run-1", RunStreamEvent.Assistant(" world"))
+        delay(1_000)
+        assertThat(connections()).isEqualTo(1)
+        assertThat(api.getRunCalls).isEqualTo(0)
+
+        // Back in front: verified and taken up at once, well inside the window.
+        val back = System.nanoTime()
+        onScreen.value = true
+        awaitUntil(2_000) { (snapshot()?.items?.lastOrNull() as? AssistantMessage)?.markdown == "Hello world" }
+        assertThat((System.nanoTime() - back) / 1_000_000).isLessThan(2_000)
+        assertThat(connections()).isEqualTo(2)
+        assertThat(api.getRunCalls).isEqualTo(1)
+        assertThat(current().reconnecting).isFalse()
+        chat.cancel()
+        follower.cancel()
+    }
+
+    @Test
+    fun `a chat on a run from the start opens its own connection and verifies nothing`() = runBlocking {
+        hub = stallingHub(stallMs = 5_000, stallMaxMs = 20_000)
+        api.addRunningAgent("bc-1", "Agent", "run-1")
+        streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
+        streamer.emit("run-1", RunStreamEvent.Assistant("Hello"))
+        val chat = scope.launch { hub.snapshots("bc-1", "run-1").collect { } }
+        awaitUntil { snapshot()?.items?.isNotEmpty() == true }
+        // A follower arriving beside it changes nothing either: only a chat arriving is a reason to verify.
+        val follower = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 100).collect { } }
+        delay(500)
+        assertThat(connections()).isEqualTo(1)
+        assertThat(api.getRunCalls).isEqualTo(0)
+        chat.cancel()
         follower.cancel()
     }
 

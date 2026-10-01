@@ -36,6 +36,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -105,8 +106,9 @@ class LiveRunHub(
      * Doubles per consecutive pass that heard nothing, up to [stallMaxMs], so a long tool call costs a resume now and
      * then. Only a chat gets this (see [Entry.stallWatchedChanges]): a run followed for the notification alone holds
      * its connection, and learns of its end from the agent list's look at the record — eight of them resuming at the
-     * cap more than doubled what the phone asked of Cursor with no chat open. Zero or less turns the watch off (a test
-     * on a virtual clock that runs it until idle).
+     * cap more than doubled what the phone asked of Cursor with no chat open. A chat arriving on such a held
+     * connection has it verified and taken up again at once, not after a window (see [follow]). Zero or less turns
+     * the watch off (a test on a virtual clock that runs it until idle).
      */
     private val stallTimeoutMs: Long = STALL_TIMEOUT_MS,
     private val stallMaxMs: Long = STALL_MAX_MS,
@@ -303,7 +305,9 @@ class LiveRunHub(
      * notification): it hears each step change (see [Snapshot.stepChanges]) and the finish at once, and the words
      * streaming into the step under way at most once per period, the latest of it. A run only such collectors watch
      * is published at that pace too, rather than rebuilt per token, and its connection is held however quiet it goes:
-     * the stall watch (see [stallTimeoutMs]) runs for collectors that show every word, a chat on screen.
+     * the stall watch (see [stallTimeoutMs]) runs for collectors that show every word, a chat on screen — and one of
+     * those arriving on a held connection costs the record and a stream at once, so the chat is never shown a
+     * connection the run has left behind.
      */
     fun snapshots(agentId: String, runId: String, startedAtMillis: Long? = null, watched: StateFlow<Boolean>? = null, sampleMs: Long = 0L): Flow<Snapshot> = flow {
         val watcher = Watcher(watched ?: ALWAYS_WATCHED, sampleMs.coerceAtLeast(0L))
@@ -637,11 +641,14 @@ class LiveRunHub(
             },
             // The stall window runs on the clock too: a connection the run's events no longer reach goes on sending its
             // keep-alives, and those say nothing about the run (see [stallTimeoutMs]). It runs only while a chat on
-            // screen reads the run; a pass only the notification follows holds its connection, however quiet, and the
-            // window counts from when a chat arrives on it, not from the pass's last event.
-            if (stallMs <= 0) emptyFlow() else entry.stallWatchedChanges().flatMapLatest { shown ->
+            // screen reads the run; a pass only the notification follows holds its connection, however quiet. A chat
+            // arriving on a pass already open — the chat opened, or the app back in front with it — does not wait a
+            // window to learn whether that connection is dead: the pass is let go at once, the record asked, and the
+            // stream taken up from the last event applied. A pass a chat was on from its start has a connection it
+            // opened itself, and nothing to verify.
+            if (stallMs <= 0) emptyFlow() else entry.stallWatchedChanges().withIndex().flatMapLatest { (change, shown) ->
                 if (!shown) emptyFlow() else flow<Any> {
-                    heardAt.set(System.nanoTime())
+                    if (change > 0) emit(ChatArrived)
                     while (true) {
                         val left = stallMs - (System.nanoTime() - heardAt.get()) / NANOS_PER_MS
                         if (left > 0) {
@@ -675,6 +682,13 @@ class LiveRunHub(
                         // Between looks an unwatched pass rests anyway, and a run said over has its own grace.
                         val quiet = System.nanoTime() - heardAt.get() >= stallMs * NANOS_PER_MS
                         if (quiet && !unwatched && live === entry.live && !live.finished && entry.endSaidAt.value == 0L) throw StallNow
+                        return@collect
+                    }
+                    ChatArrived -> {
+                        // Whether the pass was watched before the chat came is not asked: a connection held for the
+                        // notification was watched all along, and whether it is still a connection to the run is
+                        // what the chat needs to know now.
+                        if (live === entry.live && !live.finished && entry.endSaidAt.value == 0L) throw StallNow
                         return@collect
                     }
                     Unwatched -> { unwatched = true; windowStartedAt = System.nanoTime(); return@collect }
@@ -1018,6 +1032,7 @@ class LiveRunHub(
     private object GraceUp
     private object Flush
     private object StallTick
+    private object ChatArrived
 
     /** A turn under way, parked off the table (see [park]). */
     @Serializable
