@@ -60,7 +60,11 @@ object LoadNotices {
         return state.transcriptError?.let { LoadNotice(LoadNotice.Kind.LoadError, "Couldn't refresh the transcript: $it", TRANSCRIPT_REFRESH_DETAIL) }
     }
 
-    fun recordFallback(state: ConversationState): LoadNotice? = state.recordFallback?.takeIf { state.error == null }?.let(::recordFallback)
+    /**
+     * The record's refusal, while nothing else has failed. Not a rate limit's: the documented endpoints carry the chat
+     * and the record is asked again once the pause has passed, so there is nothing for the reader to do about it.
+     */
+    fun recordFallback(state: ConversationState): LoadNotice? = state.recordFallback?.takeIf { state.error == null && !it.rateLimited }?.let(::recordFallback)
 
     /**
      * The record's refusal in the words [RecordFallbackRow] has always used: the title names the reason, the detail

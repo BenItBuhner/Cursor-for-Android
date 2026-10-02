@@ -390,8 +390,8 @@ internal fun CatchUpIndicator(
 internal fun catchUpIndicatorScale(gap: Float, size: Float, margin: Float): Float = ((gap - 2f * margin) / size).coerceIn(0f, 1f)
 
 /**
- * What the reader is told once the indicator is home: only a failure, in the server's words. The answer is the
- * indicator's own going home, with its tick; a pause the server asked for is spun through, held.
+ * A failure's words, which the transcript's notice says (see `ConversationRepository.catchUp`); null for an answer.
+ * The answer is the indicator's own going home, with its tick; a pause the server asked for is spun through, held.
  */
 internal fun CatchUpStatus.word(): String? = (this as? CatchUpStatus.Failed)?.message
 
