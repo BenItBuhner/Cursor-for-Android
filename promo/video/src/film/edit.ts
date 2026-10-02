@@ -55,8 +55,10 @@ export const PHONE_TAKE: [number, number][] = [
   [beat(11), MIC],
   [SHOT.say.to - 3, SEND],
   [SHOT.say.to - 1, SEND + 2],
-  [SHOT.code.from, 515],
-  [beat(21) + 5, 610],
+  [SHOT.code.from, 560],
+  // Past 607, the frame between the edit's row going and its diff drawn: the diff lands whole, on the beat.
+  [beat(21) - 1, 606],
+  [beat(21), 609],
   [beat(23), 640],
   [beat(26) + 10, 700],
   [SHOT.code.to - 1, 818],
@@ -100,7 +102,7 @@ export function screenOn(f: number): number {
 }
 
 /**
- * The diff card's lift off the glass once its lines have landed (take 610, film 635), and its settling back down, all
+ * The diff card's lift off the glass once its lines have landed (take 609, film 630), and its settling back down, all
  * the way, before the take folds it into "2 edits" at take 738 (film 806).
  */
 export const LIFT = { up: beat(21) + 10, down: beat(25) + 14, rise: 36, fall: 30 };
@@ -131,17 +133,39 @@ export type Words = {
   grade?: number;
 };
 
+/** Every verb at one size and one margin, the title's two lines at another, the devices' names at a third. */
+const VERB = { size: { wide: 140, tall: 136 }, at: { wide: [0.067, 0.11], tall: [0.09, 0.07] } } as const;
+const TITLE = { wide: 124, tall: 124 };
+const NAME = { size: { wide: 112, tall: 112 }, at: VERB.at };
+const verb = (text: string, from: number, to: number, ink: "day" | "night", grade?: number): Words => ({
+  text: { wide: text, tall: text },
+  from,
+  to,
+  size: { ...VERB.size },
+  at: { wide: [...VERB.at.wide], tall: [...VERB.at.tall] },
+  ink,
+  grade,
+});
+const name = (text: string, shot: { from: number; to: number }): Words => ({
+  text: { wide: text, tall: text },
+  from: shot.from,
+  to: shot.to,
+  size: { ...NAME.size },
+  at: { wide: [...NAME.at.wide], tall: [...NAME.at.tall] },
+  ink: "day",
+});
+
 export const WORDS: Words[] = [
-  { text: { wide: "Cursor", tall: "Cursor" }, from: beat(6), to: beat(8), size: { wide: 150, tall: 132 }, at: { wide: [0.5, 0.31], tall: [0.5, 0.4] }, align: "center", ink: "day" },
-  { text: { wide: "Now on Android.", tall: "Now on\nAndroid." }, from: beat(8), to: beat(10) - 6, size: { wide: 112, tall: 116 }, at: { wide: [0.5, 0.33], tall: [0.5, 0.36] }, align: "center", ink: "day" },
-  { text: { wide: "Say it.", tall: "Say it." }, from: beat(11), to: beat(15), size: { wide: 168, tall: 150 }, at: { wide: [0.067, 0.11], tall: [0.09, 0.07] }, ink: "day" },
-  { text: { wide: "Watch it\ncode.", tall: "Watch it\ncode." }, from: beat(20), to: beat(24), size: { wide: 132, tall: 128 }, at: { wide: [0.058, 0.1], tall: [0.09, 0.065] }, ink: "day" },
-  { text: { wide: "Steer it.", tall: "Steer it." }, from: beat(34), to: beat(36) - 8, size: { wide: 150, tall: 140 }, at: { wide: [0.067, 0.11], tall: [0.09, 0.07] }, ink: "day" },
-  { text: { wide: "Follow it\nlive.", tall: "Follow it\nlive." }, from: beat(40), to: beat(44), size: { wide: 140, tall: 150 }, at: { wide: [0.06, 0.12], tall: [0.09, 0.08] }, ink: "night" },
-  { text: { wide: "Ship it.", tall: "Ship it." }, from: beat(47), to: beat(51), size: { wide: 168, tall: 156 }, at: { wide: [0.067, 0.11], tall: [0.09, 0.07] }, ink: "day", grade: beat(48) },
-  { text: { wide: "Phone.", tall: "Phone." }, from: SHOT.phone.from, to: SHOT.phone.to, size: { wide: 120, tall: 120 }, at: { wide: [0.067, 0.12], tall: [0.09, 0.08] }, ink: "day" },
-  { text: { wide: "Foldable.", tall: "Foldable." }, from: SHOT.foldable.from, to: SHOT.foldable.to, size: { wide: 120, tall: 120 }, at: { wide: [0.067, 0.12], tall: [0.09, 0.08] }, ink: "day" },
-  { text: { wide: "Tablet.", tall: "Tablet." }, from: SHOT.tablet.from, to: SHOT.tablet.to, size: { wide: 120, tall: 120 }, at: { wide: [0.067, 0.12], tall: [0.09, 0.08] }, ink: "day" },
+  { text: { wide: "Cursor", tall: "Cursor" }, from: beat(6), to: beat(8), size: TITLE, at: { wide: [0.5, 0.31], tall: [0.5, 0.4] }, align: "center", ink: "day" },
+  { text: { wide: "Now on Android.", tall: "Now on\nAndroid." }, from: beat(8), to: beat(10), size: TITLE, at: { wide: [0.5, 0.31], tall: [0.5, 0.36] }, align: "center", ink: "day" },
+  verb("Say it.", beat(11), beat(15), "day"),
+  verb("Watch it\ncode.", beat(20), beat(24), "day"),
+  verb("Steer it.", beat(32), beat(36), "day"),
+  verb("Follow it\nlive.", beat(40), beat(44), "night"),
+  verb("Ship it.", beat(47), beat(51), "day", beat(48)),
+  name("Phone.", SHOT.phone),
+  name("Foldable.", SHOT.foldable),
+  name("Tablet.", SHOT.tablet),
 ];
 
 /** The frames the score's foley lands on: the screen waking, the lamp's switch, the notification, the pull request's tap. */

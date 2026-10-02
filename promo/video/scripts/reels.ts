@@ -1,13 +1,13 @@
 // Renders the screens the film puts on the devices' glass (src/film/reels.ts) to public/reel/<id>/NNNN.jpg, one still
-// per take frame a reel needs, in the order the reel lists them.
+// per take frame a reel needs, in the order the reel lists them, with the manifest they were rendered from.
 //
 //   npx tsx scripts/reels.ts [--only=phone,phone-lock,foldable,tablet] [--concurrency=3]
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { REELS, type ReelId } from "../src/film/reels";
+import { REELS, reelManifest, type ReelId } from "../src/film/reels";
 
 const video = join(dirname(fileURLToPath(import.meta.url)), "..");
 const args: Record<string, string> = Object.fromEntries(
@@ -35,5 +35,6 @@ for (const id of ids) {
   mkdirSync(dir, { recursive: true });
   for (const file of readdirSync(raw)) copyFileSync(join(raw, file), join(dir, `${file.split(".")[0]!.padStart(4, "0")}.jpg`));
   rmSync(raw, { recursive: true, force: true });
+  writeFileSync(join(dir, "manifest.json"), reelManifest(id));
   console.log(`${id}: ${REELS[id].frames.length} stills in public/reel/${id}`);
 }

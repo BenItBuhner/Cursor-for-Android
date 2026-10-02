@@ -79,11 +79,11 @@ const say: Key[] = [
   { f: SHOT.say.to - 1, ...sayStart, az: rel(P0, -8), el: 31, dist: 16.5, frame: [0.66, 0.56] },
 ];
 
+/** One unbroken slow move: down the glass with the card as it lifts, then back off it, racking to the composer. */
 const code: Key[] = [
   { f: SHOT.code.from, at: card(0.3), az: rel(P0, -18), el: 48, dist: 19, fov: 26, frame: [0.62, 0.5], focus: G(0.42, 0.3), depth: 5, bokeh: 6 },
-  { f: 700, at: card(0.46, LIFTED), az: rel(P0, -11), el: 50, dist: 18, fov: 26, frame: [0.62, 0.5], focus: G(0.42, 0.46, LIFTED), depth: 5, bokeh: 6 },
-  { f: 786, at: card(0.52, 0.1), az: rel(P0, -9), el: 49, dist: 18, fov: 26, frame: [0.62, 0.5], focus: G(0.42, 0.5), depth: 5, bokeh: 6 },
-  { f: SHOT.code.to - 1, at: G(0.5, 0.8), az: rel(P0, -6), el: 42, dist: 19, fov: 26, frame: [0.62, 0.52], focus: composer, depth: 3.5, bokeh: 7 },
+  { f: 700, at: card(0.46, LIFTED), az: rel(P0, -12), el: 48, dist: 19, fov: 26, frame: [0.62, 0.5], focus: G(0.42, 0.46, LIFTED), depth: 5, bokeh: 6, ease: "linear" },
+  { f: SHOT.code.to - 1, at: G(0.5, 0.62), az: rel(P0, -6), el: 45, dist: 21.5, fov: 26, frame: [0.62, 0.52], focus: composer, depth: 3.5, bokeh: 7, ease: "linear" },
 ];
 
 const above: Cam = { at: centre, az: rel(P0, 0), el: 89.9, dist: 47, fov: 26, frame: [0.6, 0.5], focus: centre, depth: 12, bokeh: 3 };
@@ -146,7 +146,7 @@ export const RUNS: Run[] = [
     from: SHOT.steer.from,
     to: SHOT.live.to,
     wide: steerLive,
-    tall: steerLive.map((k, i) => (i < 2 ? tall(k, { frame: [0.58, 0.62], dist: k.dist * 1.15 }) : tall(k, { fov: 32, frame: [0.5, i === 4 ? 0.48 : 0.6] }))),
+    tall: steerLive.map((k, i) => (i < 2 ? tall(k, { at: G(0.44, 0.85), frame: [0.5, 0.6], dist: k.dist * 1.55, el: k.el + 4 }) : tall(k, { fov: 32, frame: [0.5, i === 4 ? 0.48 : 0.6] }))),
   },
   { from: SHOT.ship.from, to: SHOT.ship.to, wide: ship, tall: [] },
   { from: SHOT.phone.from, to: SHOT.phone.to, wide: hero("phone", SHOT.phone.from, SHOT.phone.to, false), tall: hero("phone", SHOT.phone.from, SHOT.phone.to, true) },

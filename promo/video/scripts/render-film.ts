@@ -6,7 +6,7 @@
 //
 // Needs the takes (npm run footage), python3 with scripts/requirements.txt for the score, and ffmpeg.
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,8 +38,12 @@ function run(command: string, argv: string[]) {
 
 if (!existsSync(join(video, "public", "footage", "takes.json"))) run("node", ["scripts/footage.mjs"]);
 const { DURATION, FPS, SHOT, WORDS } = await import("../src/film/edit");
-const { REELS } = await import("../src/film/reels");
-if (Object.keys(REELS).some((id) => !existsSync(join(video, "public", "reel", id)))) run("npx", ["tsx", "scripts/reels.ts"]);
+const { REELS, reelManifest } = await import("../src/film/reels");
+const stale = (Object.keys(REELS) as (keyof typeof REELS)[]).filter((id) => {
+  const manifest = join(video, "public", "reel", id, "manifest.json");
+  return !existsSync(manifest) || readFileSync(manifest, "utf8") !== reelManifest(id);
+});
+if (stale.length) run("npx", ["tsx", "scripts/reels.ts", `--only=${stale.join(",")}`]);
 
 mkdirSync(film, { recursive: true });
 const made: string[] = [];

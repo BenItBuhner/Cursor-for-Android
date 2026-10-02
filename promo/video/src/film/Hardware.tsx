@@ -494,7 +494,8 @@ const Lifted: React.FC<{
   const shadow = useMemo(() => softShadow(g.lw, g.lh, 0.2), [g.lw, g.lh]);
   const ground = useMemo(() => swatch(SCREEN_GROUND), []);
   const rim = useMemo(() => swatch(LIFT_RIM), []);
-  if (lift.by <= 0.0005) return null;
+  // Below this the card is back on the glass: drawn there, it would sink under its own recess.
+  if (lift.by <= 0.012) return null;
   const by = lift.by;
   let cast: [number, number] = [0.08 * by, -0.25 * by];
   if (sun) {

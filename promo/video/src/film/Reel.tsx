@@ -10,7 +10,14 @@ export const Reel: React.FC<{ id: ReelId }> = ({ id }) => {
   const reel = REELS[id];
   return (
     <AbsoluteFill>
-      <Screen take={reel.take} frame={reel.frames[i] ?? 0} width={takes[reel.take].width} lock={reel.lock} />
+      <Screen
+        take={reel.take}
+        frame={reel.frames[i] ?? 0}
+        width={takes[reel.take].width}
+        lock={reel.lock}
+        clock={reel.clock(reel.frames[i] ?? 0)}
+        runFor={reel.runFor}
+      />
     </AbsoluteFill>
   );
 };
