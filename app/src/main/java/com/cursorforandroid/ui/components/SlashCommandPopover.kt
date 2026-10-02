@@ -201,6 +201,7 @@ fun SlashCommandPopover(
                         icon = null,
                         tint = colors.textTertiary,
                         highlighted = highlighted,
+                        dense = true,
                         onClick = { onPick(item) },
                     )
                 }
@@ -241,6 +242,7 @@ private fun SlashModeRow(item: SlashItem.Mode, highlighted: Boolean, onClick: ()
         subtitle = item.pill.description,
         subtitleMaxLines = 1,
         highlighted = highlighted,
+        dense = true,
         trailing = {
             if (item.on) {
                 Icon(CursorIcons.Check, "On", tint = CursorTheme.colors.iconSecondary, modifier = Modifier.size(CursorDimens.menuIcon))
@@ -266,6 +268,7 @@ private fun SlashModelRow(item: SlashItem.Model, highlighted: Boolean, onClick: 
         icon = null,
         hint = hint,
         highlighted = highlighted,
+        dense = true,
         trailing = if (item.current) ({ Icon(CursorIcons.Check, "Current model", tint = CursorTheme.colors.iconSecondary, modifier = Modifier.size(CursorDimens.menuIcon)) }) else null,
         onClick = onClick,
     )
@@ -282,6 +285,7 @@ private fun SlashCommandRow(entry: SlashCommand, highlighted: Boolean, onClick: 
         hint = entry.argumentHint,
         subtitleMaxLines = 1,
         highlighted = highlighted,
+        dense = true,
         trailing = if (glyph != null) ({ Icon(glyph, null, tint = CursorTheme.colors.iconQuaternary, modifier = Modifier.size(CursorDimens.menuIcon)) }) else null,
         onClick = onClick,
     )

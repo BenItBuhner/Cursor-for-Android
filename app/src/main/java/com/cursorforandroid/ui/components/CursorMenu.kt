@@ -181,7 +181,9 @@ internal fun menuProperties(focusable: Boolean, keepsKeyboard: Boolean): PopupPr
  * corner concentric with the menu's. A [tint] other than the primary text colour (a destructive red) colours the
  * glyph as well; [iconTint] colours the glyph alone (a mode's own colour). Not [enabled], the row dims and takes no
  * taps. [highlighted] is the row a physical keyboard would pick ([PopoverSelection]): it wears the hover fill in the
- * press highlight's place and is scrolled into view.
+ * press highlight's place and is scrolled into view. A row is [CursorDimens.menuRowTouch] tall on a phone and
+ * [CursorDimens.menuRowRegular] elsewhere, as a picker's are; [dense] keeps it at [CursorDimens.menuRowDense], for a
+ * type-ahead list that shares the room above a raised keyboard.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -196,6 +198,7 @@ fun CursorMenuItem(
     enabled: Boolean = true,
     subtitleMaxLines: Int = 2,
     highlighted: Boolean = false,
+    dense: Boolean = false,
     trailing: (@Composable RowScope.() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
@@ -208,6 +211,7 @@ fun CursorMenuItem(
         tint == colors.textPrimary -> colors.iconSecondary
         else -> tint
     }
+    val metrics = if (dense) PickerMetrics(CursorDimens.menuRowDense, type.base, compact = false) else pickerMetrics()
     val inView = remember { BringIntoViewRequester() }
     LaunchedEffect(highlighted) { if (highlighted) inView.bringIntoView() }
     Row(
@@ -225,7 +229,7 @@ fun CursorMenuItem(
                 },
             )
             .pressable(onClick, CursorTheme.shapes.menuItem, enabled = enabled, role = null)
-            .heightIn(min = CursorDimens.menuRow)
+            .heightIn(min = metrics.row)
             .padding(horizontal = CursorDimens.menuItemPadding, vertical = if (subtitle != null) 7.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -235,10 +239,10 @@ fun CursorMenuItem(
         }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(label, style = type.base, color = labelColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Text(label, style = metrics.label, color = labelColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (hint != null) {
                     Spacer(Modifier.width(6.dp))
-                    Text(hint, style = type.base, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(hint, style = metrics.label, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (subtitle != null) {

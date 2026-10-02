@@ -389,7 +389,7 @@ private fun ConnectorRow(connector: McpConnector, onToggle: (Boolean) -> Unit, o
         Modifier
             .fillMaxWidth()
             .padding(horizontal = CursorDimens.menuInset)
-            .heightIn(min = CursorDimens.menuRow)
+            .heightIn(min = pickerMetrics().row)
             .padding(horizontal = CursorDimens.menuItemPadding, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
