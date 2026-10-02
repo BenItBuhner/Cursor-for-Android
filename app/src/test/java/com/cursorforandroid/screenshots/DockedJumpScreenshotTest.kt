@@ -68,11 +68,11 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 /**
  * The bottom of a chat scrolled off its newest message, the jump button docked at the end of the strips' row over the
  * composer: alone, where the lowest strip would stand; beside a queued follow-up; beside the queue under the goal — on
- * a phone and a tablet, dark and light (`1000`–`1011`). Then the button on its way: the strips making its room before
- * it is drawn (`1012`), and it fading and growing into the room they made (`1013`). And the pull to catch up answered,
+ * a phone and a tablet, dark and light (`1050`–`1061`). Then the button on its way: the strips making its room before
+ * it is drawn (`1062`), and it fading and growing into the room they made (`1063`). And the pull to catch up answered,
  * its indicator caught fading out over the transcript as the gap closes, on a phone dark and light and a tablet
- * (`1014`–`1016`), and while the pull is out a row the answer brought in drawn under the indicator, past where the
- * list's edge used to cut it flat (`1017`).
+ * (`1064`–`1066`), and while the pull is out a row the answer brought in drawn under the indicator, past where the
+ * list's edge used to cut it flat (`1067`).
  *
  * The clock is held, so the frames part of the way are the same frame on every run. Written to `screenshots/` and
  * compared pixel for pixel in CI.
@@ -209,51 +209,51 @@ class DockedJumpScreenshotTest {
         capture(name)
     }
 
-    @Test fun alonePhoneDark() = docked("1000_jump_docked_alone_phone_dark", ThemeMode.Dark, cards = 0, withGoal = false)
+    @Test fun alonePhoneDark() = docked("1050_jump_docked_alone_phone_dark", ThemeMode.Dark, cards = 0, withGoal = false)
 
     @Test @Config(qualifiers = PHONE_LIGHT)
-    fun alonePhoneLight() = docked("1001_jump_docked_alone_phone_light", ThemeMode.Light, cards = 0, withGoal = false)
+    fun alonePhoneLight() = docked("1051_jump_docked_alone_phone_light", ThemeMode.Light, cards = 0, withGoal = false)
 
     @Test @Config(qualifiers = TABLET_DARK)
-    fun aloneTabletDark() = docked("1002_jump_docked_alone_tablet_dark", ThemeMode.Dark, cards = 0, withGoal = false)
+    fun aloneTabletDark() = docked("1052_jump_docked_alone_tablet_dark", ThemeMode.Dark, cards = 0, withGoal = false)
 
     @Test @Config(qualifiers = TABLET_LIGHT)
-    fun aloneTabletLight() = docked("1003_jump_docked_alone_tablet_light", ThemeMode.Light, cards = 0, withGoal = false)
+    fun aloneTabletLight() = docked("1053_jump_docked_alone_tablet_light", ThemeMode.Light, cards = 0, withGoal = false)
 
-    @Test fun queuePhoneDark() = docked("1004_jump_docked_queue_phone_dark", ThemeMode.Dark, cards = 1, withGoal = false)
+    @Test fun queuePhoneDark() = docked("1054_jump_docked_queue_phone_dark", ThemeMode.Dark, cards = 1, withGoal = false)
 
     @Test @Config(qualifiers = PHONE_LIGHT)
-    fun queuePhoneLight() = docked("1005_jump_docked_queue_phone_light", ThemeMode.Light, cards = 1, withGoal = false)
+    fun queuePhoneLight() = docked("1055_jump_docked_queue_phone_light", ThemeMode.Light, cards = 1, withGoal = false)
 
     @Test @Config(qualifiers = TABLET_DARK)
-    fun queueTabletDark() = docked("1006_jump_docked_queue_tablet_dark", ThemeMode.Dark, cards = 1, withGoal = false)
+    fun queueTabletDark() = docked("1056_jump_docked_queue_tablet_dark", ThemeMode.Dark, cards = 1, withGoal = false)
 
     @Test @Config(qualifiers = TABLET_LIGHT)
-    fun queueTabletLight() = docked("1007_jump_docked_queue_tablet_light", ThemeMode.Light, cards = 1, withGoal = false)
+    fun queueTabletLight() = docked("1057_jump_docked_queue_tablet_light", ThemeMode.Light, cards = 1, withGoal = false)
 
-    @Test fun queueAndGoalPhoneDark() = docked("1008_jump_docked_queue_goal_phone_dark", ThemeMode.Dark, cards = 2, withGoal = true)
+    @Test fun queueAndGoalPhoneDark() = docked("1058_jump_docked_queue_goal_phone_dark", ThemeMode.Dark, cards = 2, withGoal = true)
 
     @Test @Config(qualifiers = PHONE_LIGHT)
-    fun queueAndGoalPhoneLight() = docked("1009_jump_docked_queue_goal_phone_light", ThemeMode.Light, cards = 2, withGoal = true)
+    fun queueAndGoalPhoneLight() = docked("1059_jump_docked_queue_goal_phone_light", ThemeMode.Light, cards = 2, withGoal = true)
 
     @Test @Config(qualifiers = TABLET_DARK)
-    fun queueAndGoalTabletDark() = docked("1010_jump_docked_queue_goal_tablet_dark", ThemeMode.Dark, cards = 2, withGoal = true)
+    fun queueAndGoalTabletDark() = docked("1060_jump_docked_queue_goal_tablet_dark", ThemeMode.Dark, cards = 2, withGoal = true)
 
     @Test @Config(qualifiers = TABLET_LIGHT)
-    fun queueAndGoalTabletLight() = docked("1011_jump_docked_queue_goal_tablet_light", ThemeMode.Light, cards = 2, withGoal = true)
+    fun queueAndGoalTabletLight() = docked("1061_jump_docked_queue_goal_tablet_light", ThemeMode.Light, cards = 2, withGoal = true)
 
     @Test
     fun stripsMakingRoom() {
         dock(ThemeMode.Dark, cards = 2, withGoal = true)
         frames(5)
-        capture("1012_jump_docking_strips_making_room_phone_dark")
+        capture("1062_jump_docking_strips_making_room_phone_dark")
     }
 
     @Test
     fun growingIntoTheRoom() {
         dock(ThemeMode.Dark, cards = 2, withGoal = true)
         frames(11)
-        capture("1013_jump_docking_growing_into_the_room_phone_dark")
+        capture("1063_jump_docking_growing_into_the_room_phone_dark")
     }
 
     // --- the pull to catch up, answered ---------------------------------------------------------------------------
@@ -315,20 +315,20 @@ class DockedJumpScreenshotTest {
         capture(name)
     }
 
-    @Test fun answerFadingPhoneDark() = answerFading("1014_catch_up_answer_fading_phone_dark", ThemeMode.Dark)
+    @Test fun answerFadingPhoneDark() = answerFading("1064_catch_up_answer_fading_phone_dark", ThemeMode.Dark)
 
     @Test @Config(qualifiers = PHONE_LIGHT)
-    fun answerFadingPhoneLight() = answerFading("1015_catch_up_answer_fading_phone_light", ThemeMode.Light)
+    fun answerFadingPhoneLight() = answerFading("1065_catch_up_answer_fading_phone_light", ThemeMode.Light)
 
     @Test @Config(qualifiers = TABLET_DARK)
-    fun answerFadingTabletDark() = answerFading("1016_catch_up_answer_fading_tablet_dark", ThemeMode.Dark)
+    fun answerFadingTabletDark() = answerFading("1066_catch_up_answer_fading_tablet_dark", ThemeMode.Dark)
 
     @Test
     fun rowUnderTheGap() {
         pulled(ThemeMode.Dark)
         rows += elsewhere
         frames(2)
-        capture("1017_catch_up_row_under_the_gap_phone_dark")
+        capture("1067_catch_up_row_under_the_gap_phone_dark")
     }
 
     private companion object {
