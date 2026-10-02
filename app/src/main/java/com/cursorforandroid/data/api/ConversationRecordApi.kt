@@ -336,7 +336,11 @@ class HeadlessConversationApi(
         override suspend fun blob(id: String, whole: Boolean): ByteArray {
             counter.blobs.incrementAndGet()
             val held = blobs.read(agentId, id)
-            if (held != null && !(whole && held.partial)) return held.bytes
+            // A prefetched copy too: a coordinator's turn is read to its messages from such copies and stands as
+            // complete, its steps never read again whole, so the copy on the phone is all there was to show of it.
+            // Refusing it here failed every turn the state read had prefetched — the newest — on a reopen whose
+            // turn files were gone.
+            if (held != null) return held.bytes
             throw java.io.IOException("Not held on this device: $id")
         }
 

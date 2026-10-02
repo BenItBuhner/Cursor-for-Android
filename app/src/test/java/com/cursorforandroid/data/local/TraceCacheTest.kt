@@ -89,6 +89,26 @@ class TraceCacheTest {
         assertThat(File(root, "bc-1").listFiles()!!.count { it.name.startsWith("run-") }).isEqualTo(kept.size)
     }
 
+    /**
+     * A record turn's file is the transcript a saved window paints from: the traces the run monitor files for a
+     * Project's every later run — newer than the window's turns, by the hundred — go before any of them, by count
+     * and by bytes (Bennett's Project of 2026-10-02 reopened on bare prompts).
+     */
+    @Test
+    fun `the record's turn files are kept over newer run traces`() = runBlocking<Unit> {
+        val traces = cache(maxBytesPerAgent = 40_000, maxRunsPerAgent = 50)
+        val turns = (1..30).map { trace("${TraceCache.RECORD_TURN_KEY_PREFIX}$it", at = it.toLong(), reply = "t".repeat(500)) }
+        traces.put("bc-1", turns)
+
+        (1..200).forEach { i -> traces.put("bc-1", listOf(trace("run-$i", at = 1_000L + i, reply = "r".repeat(500)))) }
+
+        val kept = traces.runIds("bc-1")
+        assertThat(kept).containsAtLeastElementsIn(turns.map { it.runId })
+        assertThat(kept).contains("run-200")
+        assertThat(kept).doesNotContain("run-1")
+        assertThat(traces.read("bc-1", turns.map { it.runId }).keys).containsExactlyElementsIn(turns.map { it.runId })
+    }
+
     /** One run whose trace is bigger than the whole budget is still kept: the run just watched is always there. */
     @Test
     fun `a single trace larger than the budget is still kept`() = runBlocking<Unit> {

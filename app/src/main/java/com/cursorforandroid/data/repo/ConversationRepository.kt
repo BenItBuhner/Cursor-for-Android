@@ -4647,20 +4647,26 @@ class ConversationRepository(
      * Writes the record's window to disk: the conversation's copy of where it sits, and one file per turn for the
      * turns [previous] did not already hold with the same steps (a finished turn's items never change; the live
      * turn's are rewritten as it grows).
+     *
+     * What was read is on the screen by the time this runs, and the screen may leave in that very frame: the window's
+     * file is written with its turns', past the cancellation, or the next open has turn files no window names and
+     * reads the chat again from the start.
      */
     private suspend fun persistRecord(e: Entry, window: RecordWindow, previous: RecordWindow?, backend: CursorBackend, tokens: CacheTokens) {
-        val before = previous?.turns?.associateBy { it.stepIndex }
-        val changed = window.turns.takeLast(keptTurns(window)).filter { turn ->
-            val old = before?.get(turn.stepIndex)
-            old == null || old.stepCount != turn.stepCount || old.items !== turn.items
-        }
-        if (changed.isNotEmpty()) {
-            val now = AppClock.now()
-            withContext(NonCancellable) {
+        withContext(NonCancellable) {
+            val before = previous?.turns?.associateBy { it.stepIndex }
+            val changed = window.turns.takeLast(keptTurns(window)).filter { turn ->
+                val old = before?.get(turn.stepIndex)
+                old == null || old.stepCount != turn.stepCount || old.items !== turn.items
+            }
+            if (changed.isNotEmpty()) {
+                val now = AppClock.now()
                 writeTraces(e.agentId, changed.map { turn -> CachedTrace(turn.traceKey, now - (window.total - turn.stepIndex), turn.items) }, tokens)
             }
+            persist(e, backend, tokens)
         }
-        persist(e, backend, tokens)
+        // Work cancelled meanwhile goes no further than the write: what follows it reads the network.
+        currentCoroutineContext().ensureActive()
     }
 
     private fun monotonicMillis(): Long = System.nanoTime() / 1_000_000
@@ -5331,11 +5337,16 @@ class ConversationRepository(
         val store = cache ?: return
         if (backend.isDemo) return
         val snapshot = synchronized(e) { if (e.hasInputs || e.local.isNotEmpty()) e.toCached() else null } ?: return
-        store.write(snapshot, tokens.conversations)
-        // The Beta engine's window to its own file too (see [ConversationCache.readRecord]): a later write of the
-        // chat without it — the documented path's — leaves this one standing for the next Beta open.
-        snapshot.record?.takeIf { it.turnIndexed && it.turns.isNotEmpty() }?.let { store.writeRecord(snapshot.agentId, it, tokens.conversations) }
+        // Taken from memory already, so written whole whoever cancels the work it came with: a screen leaving
+        // mid-write left the window's file behind the turn files it names. The tokens keep a sign-out's wipe.
+        withContext(NonCancellable) {
+            store.write(snapshot, tokens.conversations)
+            // The Beta engine's window to its own file too (see [ConversationCache.readRecord]): a later write of the
+            // chat without it — the documented path's — leaves this one standing for the next Beta open.
+            snapshot.record?.takeIf { it.turnIndexed && it.turns.isNotEmpty() }?.let { store.writeRecord(snapshot.agentId, it, tokens.conversations) }
+        }
         diskIndex[snapshot.agentId] = snapshot.agentUpdatedAtMillis
+        currentCoroutineContext().ensureActive()
     }
 
     /** The Beta engine's saved window of the chat (see [ConversationCache.readRecord]); null under Stable, in the demo, or with none. */

@@ -5,8 +5,10 @@ import com.cursorforandroid.data.local.BlobDiskStore
 import com.cursorforandroid.domain.TranscriptPerf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -105,14 +107,17 @@ class BlobCache(
         disk?.let { store -> onDisk { store.write(agentId, blobId, value) } }
     }
 
-    /** The disk is a copy: a write it fails leaves the blob in memory and the read it came with standing. */
-    private suspend inline fun onDisk(write: () -> Unit) {
+    /**
+     * The disk is a copy: a write it fails leaves the blob in memory and the read it came with standing. A blob in
+     * hand is written whatever cancels the read it came with — a screen leaving half-way through a load — so the
+     * next process holds what this one read rather than asking for it again.
+     */
+    private suspend inline fun onDisk(crossinline write: suspend () -> Unit) {
         try {
-            write()
-        } catch (e: CancellationException) {
-            throw e
+            withContext(NonCancellable) { write() }
         } catch (_: Exception) {
         }
+        currentCoroutineContext().ensureActive()
     }
 
     /**
@@ -179,7 +184,7 @@ class BlobCache(
         val merged = (ids + (prefetched[agentId] ?: disk?.readIndex(agentId).orEmpty())).distinct().take(MAX_HELD_IDS)
         prefetched[agentId] = merged
         val store = disk ?: return
-        store.writeIndex(agentId, merged)
+        onDisk { store.writeIndex(agentId, merged) }
         // The prefetched copies onto the disk too, marked as such (see [BlobDiskStore.readPartial]): a turn built from
         // one is rebuilt from it after a restart, and the next state read names it as held.
         for (id in ids) held(agentId, id)?.takeIf { it.partial }?.let { onDisk { store.writePartial(agentId, id, it.bytes) } }
