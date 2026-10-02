@@ -504,7 +504,9 @@ class TraceCache(
      * from the record's steps, and a build that reads more of them — a coordinator's streamed message, from 5 — must
      * not keep showing a turn an earlier build read less of.
      */
-    private fun readableVersions(key: String): Iterable<Int> = if (key.startsWith(RECORD_KEY_PREFIX) || key.startsWith(RECORD_TURN_KEY_PREFIX)) RECORD_READABLE_VERSIONS else READABLE_VERSIONS
+    private fun readableVersions(key: String): Iterable<Int> = if (isRecordKey(key)) RECORD_READABLE_VERSIONS else READABLE_VERSIONS
+
+    private fun isRecordKey(key: String): Boolean = key.startsWith(RECORD_KEY_PREFIX) || key.startsWith(RECORD_TURN_KEY_PREFIX)
 
     /** The runs the agent has a trace for, from the index. */
     suspend fun runIds(agentId: String): Set<String> {
@@ -535,7 +537,7 @@ class TraceCache(
                     }
                 }
                 if (!wrote) return
-                val kept = withinBudget(index.values.sortedByDescending { it.createdAtMillis })
+                val kept = withinBudget(index.values.sortedWith(compareBy<CachedTraceIndex.Entry> { !isRecordKey(it.runId) }.thenByDescending { it.createdAtMillis }))
                 val keptIds = kept.mapTo(HashSet()) { it.runId }
                 index.values.filter { it.runId !in keptIds }.forEach {
                     files.remove(it.runId)
@@ -612,8 +614,15 @@ class TraceCache(
     private class Holding(val file: File, val isAgent: Boolean, val bytes: Long, val rank: Int, val usedAt: Long)
 
     /**
-     * The newest runs — already ordered newest first — that fit the agent's budget: at most [maxRunsPerAgent] of them,
-     * and no more bytes than [maxBytesPerAgent] once the newest is in. The newest run is always kept, whatever it weighs.
+     * The first of [runs] — the record's turns, then the runs, each newest first — that fit the agent's budget: at
+     * most [maxRunsPerAgent] of them, and no more bytes than [maxBytesPerAgent] once the first is in. The first is
+     * always kept, whatever it weighs.
+     *
+     * A record turn's file is the transcript itself where the record is read (the saved window names it, and the
+     * screen paints from it before the network answers); a run's trace there only stands in for a turn the record
+     * gave without its steps. Ranked by stamp alone, the traces the run monitor files for a Project's every finished
+     * run — stamped at their start, after the window's turns were written — pushed the window's turns out of the
+     * budget while nobody had the chat open, and it reopened on bare prompts (Bennett, 2026-10-02).
      */
     private fun withinBudget(runs: List<CachedTraceIndex.Entry>): List<CachedTraceIndex.Entry> {
         var used = 0L
