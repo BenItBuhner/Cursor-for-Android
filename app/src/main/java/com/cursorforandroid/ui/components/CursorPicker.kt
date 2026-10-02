@@ -16,7 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
@@ -91,6 +91,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
@@ -325,6 +326,7 @@ object PickerTags {
     const val List = "cursor-picker-list"
     const val Submenu = "cursor-picker-submenu"
     const val Back = "cursor-picker-back"
+    const val Backdrop = "cursor-picker-backdrop"
 }
 
 /** The row a keyboard or pointer is on, for tests: the highlight is drawn, not announced. */
@@ -741,7 +743,10 @@ private fun AnchoredPicker(state: PickerState, anchor: IntRect, area: IntRect, w
                 Box(
                     Modifier
                         .layoutId("backdrop")
-                        .pointerInput(state) { detectTapGestures { state.close() } },
+                        .focusProperties { canFocus = false }
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = state::close)
+                        .semantics { contentDescription = "Close ${state.title}"; traversalIndex = 1f }
+                        .testTag(PickerTags.Backdrop),
                 )
                 Column(
                     modifier

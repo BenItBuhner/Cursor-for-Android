@@ -135,6 +135,8 @@ class CustomizeSheetTest {
         assertThat(composed("Reset")).isFalse()
 
         viewModel.setShowRuntime(true)
+        awaitOnScreen { compose.runOnIdle { viewModel.uiState.value.prefs.showRuntime } }
+        compose.waitForIdle()
         compose.onNodeWithTag(PickerTags.List).performScrollToNode(hasTestTag(RESET_TAG))
         awaitOnScreen { composed("Reset") }
         val reset = compose.onNodeWithTag(RESET_TAG).fetchSemanticsNode().boundsInRoot
