@@ -128,7 +128,8 @@ class WidgetSyncTest {
 
         assertThat(renders.size).isAtLeast(1)
         // And no two renders are further apart than the settle window plus a generous margin for the machine.
-        val gaps = renders.zipWithNext { a, b -> b - a }
+        // The settle-window render can still land while this reads, so iterate a copy taken under the list's lock.
+        val gaps = synchronized(renders) { renders.toList() }.zipWithNext { a, b -> b - a }
         assertThat(gaps.maxOrNull() ?: 0L).isLessThan(1_750)
     }
 
