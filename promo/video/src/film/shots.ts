@@ -31,8 +31,6 @@ const G = (u: number, v: number, above = 0) => onGlass(P0, u, v, above);
 const deg = (r: number) => (r * 180) / Math.PI;
 /** A world azimuth from one measured round from [pose]'s bottom edge (0) toward its right side (+90). */
 const rel = (pose: Pose, az: number) => deg(pose.turn) - 90 + az;
-const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 
 /**
  * A camera: orbiting [at] at azimuth [az] and elevation [el] (degrees) and [dist] centimetres, [fov] vertical, with
@@ -64,8 +62,6 @@ const card = (v: number, above = 0) => G(0.5, v, above);
 const composer = G(0.42, 0.89);
 const centre = G(0.5, 0.5);
 const notice = G(0.5, 0.34);
-const bar = G(0.88, 0.36);
-const checks = G(0.85, 0.735);
 const LIFTED = 0.45;
 
 const wake: Key[] = [
@@ -77,7 +73,8 @@ const titleWide: Cam = { at: centre, az: rel(P0, -14), el: 58, dist: 75, fov: 22
 const sayStart: Cam = { at: mic, az: rel(P0, -26), el: 36, dist: 21, fov: 24, frame: [0.68, 0.56], focus: prompt, depth: 4.4, bokeh: 6 };
 const say: Key[] = [
   { f: SHOT.title.from, ...titleWide },
-  { f: SHOT.title.to - 24, ...titleWide, dist: 72, ease: "linear" },
+  { f: SHOT.title.to - 1, ...titleWide, dist: 71.5, ease: "linear" },
+  { f: SHOT.say.from, ...sayStart },
   { f: SHOT.say.from + 36, ...sayStart },
   { f: SHOT.say.to - 1, ...sayStart, az: rel(P0, -8), el: 31, dist: 16.5, frame: [0.66, 0.56] },
 ];
@@ -92,15 +89,15 @@ const code: Key[] = [
 const above: Cam = { at: centre, az: rel(P0, 0), el: 89.9, dist: 47, fov: 26, frame: [0.6, 0.5], focus: centre, depth: 12, bokeh: 3 };
 const lastLive: Cam = { ...above, at: notice, dist: 37, frame: [0.62, 0.36] };
 const steerLive: Key[] = [
-  { f: SHOT.steer.from, at: G(0.56, 0.86), az: rel(P0, 28), el: 32, dist: 16, fov: 24, frame: [0.62, 0.6], focus: composer, depth: 4, bokeh: 6 },
-  { f: SHOT.steer.to - 44, at: G(0.56, 0.82), az: rel(P0, 16), el: 36, dist: 14.5, fov: 24, frame: [0.62, 0.6], focus: G(0.42, 0.8), depth: 4, bokeh: 6, ease: "linear" },
-  { f: SHOT.live.from + 4, ...above },
+  { f: SHOT.steer.from, at: G(0.56, 0.86), az: rel(P0, 28), el: 22, dist: 11.5, fov: 24, frame: [0.62, 0.6], focus: composer, depth: 3.2, bokeh: 6 },
+  { f: SHOT.steer.to - 1, at: G(0.56, 0.82), az: rel(P0, 16), el: 24, dist: 10.5, fov: 24, frame: [0.62, 0.6], focus: G(0.42, 0.8), depth: 3.2, bokeh: 6, ease: "linear" },
+  { f: SHOT.live.from, ...above },
   { f: NIGHT, ...above, dist: 45, ease: "linear" },
   { f: SHOT.live.to - 1, ...lastLive, ease: "linear" },
 ];
 
-/** The match cut: the PR's "checks passed" lands where the progress bar's end was, the same framing a night later. */
-const shipStart: Cam = { ...lastLive, at: add(lastLive.at, sub(checks, bar)), focus: checks };
+/** The time cut into the next morning: the night's last framing held, the sun back on the stone and the PR on the glass. */
+const shipStart: Cam = lastLive;
 const ship: Key[] = [
   { f: SHOT.ship.from, ...shipStart },
   { f: 1446, at: G(0.62, 0.735), az: rel(P0, -6), el: 74, dist: 29, fov: 26, frame: [0.62, 0.56], focus: G(0.56, 0.735), depth: 6, bokeh: 4 },
@@ -167,11 +164,11 @@ export const RUNS: Run[] = [
   { from: SHOT.end.from, to: SHOT.end.to, wide: [{ f: SHOT.end.from, ...end }, { f: SHOT.end.to - 1, ...end, dist: 66, ease: "linear" }], tall: [] },
 ];
 
-// The tall ship keeps the match cut: its first frame is the tall live's last, moved by the same step down the glass.
+// The tall ship keeps the time cut: its first frame is the tall live's last.
 {
   const live = RUNS[3]!.tall;
   const last = live[live.length - 1]!;
-  const start: Key = { ...last, f: SHOT.ship.from, at: add(last.at, sub(checks, bar)), focus: checks };
+  const start: Key = { ...last, f: SHOT.ship.from };
   RUNS[4]!.tall = [start, ...ship.slice(1).map((k) => tall(k, { frame: [0.55, 0.6], dist: k.dist * 1.2 }))];
   RUNS[9]!.tall = RUNS[9]!.wide.map((k) => tall(k, { fov: 30 * 1.5, frame: [0.5, 0.5] }));
 }

@@ -132,8 +132,8 @@ export type Words = {
 };
 
 export const WORDS: Words[] = [
-  { text: { wide: "Cursor", tall: "Cursor" }, from: beat(6), to: beat(8), size: { wide: 150, tall: 132 }, at: { wide: [0.5, 0.39], tall: [0.5, 0.4] }, align: "center", ink: "day" },
-  { text: { wide: "Now on Android.", tall: "Now on\nAndroid." }, from: beat(8), to: beat(10) - 6, size: { wide: 112, tall: 116 }, at: { wide: [0.5, 0.41], tall: [0.5, 0.36] }, align: "center", ink: "day" },
+  { text: { wide: "Cursor", tall: "Cursor" }, from: beat(6), to: beat(8), size: { wide: 150, tall: 132 }, at: { wide: [0.5, 0.31], tall: [0.5, 0.4] }, align: "center", ink: "day" },
+  { text: { wide: "Now on Android.", tall: "Now on\nAndroid." }, from: beat(8), to: beat(10) - 6, size: { wide: 112, tall: 116 }, at: { wide: [0.5, 0.33], tall: [0.5, 0.36] }, align: "center", ink: "day" },
   { text: { wide: "Say it.", tall: "Say it." }, from: beat(11), to: beat(15), size: { wide: 168, tall: 150 }, at: { wide: [0.067, 0.11], tall: [0.09, 0.07] }, ink: "day" },
   { text: { wide: "Watch it\ncode.", tall: "Watch it\ncode." }, from: beat(20), to: beat(24), size: { wide: 132, tall: 128 }, at: { wide: [0.058, 0.1], tall: [0.09, 0.065] }, ink: "day" },
   { text: { wide: "Steer it.", tall: "Steer it." }, from: beat(34), to: beat(36) - 8, size: { wide: 150, tall: 140 }, at: { wide: [0.067, 0.11], tall: [0.09, 0.07] }, ink: "day" },

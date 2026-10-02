@@ -9,7 +9,8 @@
     "music:film": "tsx scripts/film-cues.ts && python3 scripts/music.py public/audio/film-score.wav film-cues.json",
     "studio": "remotion studio",
     "typecheck": "tsc --noEmit",
-    "render": "tsx scripts/render.ts"
+    "render": "tsx scripts/render.ts",
+    "render:film": "tsx scripts/render-film.ts"
   },
   "dependencies": {
     "@react-three/drei": "9.114.0",
