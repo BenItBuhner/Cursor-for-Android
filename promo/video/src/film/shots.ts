@@ -100,7 +100,7 @@ const steerLive: Key[] = [
 const shipStart: Cam = lastLive;
 const ship: Key[] = [
   { f: SHOT.ship.from, ...shipStart },
-  { f: 1446, at: G(0.62, 0.735), az: rel(P0, -6), el: 74, dist: 29, fov: 26, frame: [0.62, 0.56], focus: G(0.56, 0.735), depth: 6, bokeh: 4 },
+  { f: 1500, at: G(0.62, 0.735), az: rel(P0, -6), el: 74, dist: 29, fov: 26, frame: [0.62, 0.56], focus: G(0.56, 0.735), depth: 6, bokeh: 4 },
   { f: SHOT.ship.to - 1, at: G(0.6, 0.72), az: rel(P0, -14), el: 64, dist: 25, fov: 26, frame: [0.62, 0.56], focus: G(0.56, 0.735), depth: 5, bokeh: 4.5, ease: "linear" },
 ];
 

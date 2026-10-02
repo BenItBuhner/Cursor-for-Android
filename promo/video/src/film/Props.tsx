@@ -87,7 +87,7 @@ export const Cup: React.FC<{ x: number; y: number; turn: number; fill: number }>
     return {
       body,
       glaze: new THREE.MeshPhysicalMaterial({ map: glaze, roughness: 0.42, clearcoat: 0.55, clearcoatRoughness: 0.18, side: THREE.DoubleSide }),
-      handle: new THREE.TorusGeometry(2.05, 0.42, 20, 48, Math.PI * 1.15),
+      handle: new THREE.TorusGeometry(2.05, 0.42, 20, 48, Math.PI),
       coffee: new THREE.MeshPhysicalMaterial({ map: coffeeTexture(), roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02 }),
       stain: new THREE.MeshStandardMaterial({ map: stainTexture(), roughness: 0.45 }),
     };
@@ -97,7 +97,8 @@ export const Cup: React.FC<{ x: number; y: number; turn: number; fill: number }>
     <group position={[x, y, 0]} rotation={[0, 0, turn]} scale={0.84}>
       <group>
         <mesh geometry={parts.body} material={parts.glaze} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow />
-        <mesh geometry={parts.handle} material={parts.glaze} position={[4.15, 0, 4.9]} rotation={[Math.PI / 2, 0, -Math.PI * 0.575]} castShadow />
+        {/* The handle's open ends sit inside the wall's thickness (4.0 to 4.3 cm out), short of the inside. */}
+        <mesh geometry={parts.handle} material={parts.glaze} position={[4.45, 0, 4.9]} rotation={[Math.PI / 2, 0, -Math.PI / 2]} castShadow />
         {fill > 0.01 ? (
           <mesh position={[0, 0, level]} material={parts.coffee}>
             <circleGeometry args={[insideRadius(level), 96]} />
