@@ -4,10 +4,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -29,7 +25,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -96,6 +91,9 @@ import com.cursorforandroid.ui.components.rememberQueueFlights
 import com.cursorforandroid.ui.components.arrivalGlide
 import com.cursorforandroid.ui.components.rememberArrivalGlide
 import com.cursorforandroid.ui.components.CursorIcons
+import com.cursorforandroid.ui.components.DockGap
+import com.cursorforandroid.ui.components.DockedJumpButton
+import com.cursorforandroid.ui.components.DockedRowHeight
 import com.cursorforandroid.ui.components.CursorMenu
 import com.cursorforandroid.ui.components.CursorMenuItem
 import com.cursorforandroid.ui.components.FlatIconButton
@@ -113,7 +111,6 @@ import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.ui.components.rememberRunStopConfirmation
 import com.cursorforandroid.ui.components.RollingText
 import com.cursorforandroid.ui.components.SpinnerRing
-import com.cursorforandroid.ui.components.cursorSurface
 import com.cursorforandroid.ui.components.composerDockPadding
 import com.cursorforandroid.ui.components.AttachmentCounts
 import com.cursorforandroid.ui.components.pressable
@@ -541,6 +538,14 @@ fun ConversationScreen(
             },
         )
 
+        val composerExpansion = rememberComposerExpansion()
+        // The jump button, docked at the end of the cards' row over the composer (see GoalDock): out while the reader
+        // holds older turns on screen, but not over an expanded composer. It stands at the row's end, clear of the
+        // catch-up indicator in the middle of the gap, so a reader scrolling away from a pull still being answered
+        // has it there at once.
+        val pastTwoItems by remember(presentedState) { derivedStateOf { presentedState.value.items.size > 2 } }
+        val jumpShown = !following && pastTwoItems && !composerExpansion.expanded
+
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Box(Modifier.matchParentSize().readerBackdrop(readerScroll))
             val paneWidth = Modifier.widthIn(max = CursorDimens.composerMaxWidth).fillMaxWidth()
@@ -758,28 +763,9 @@ fun ConversationScreen(
                 onRise = { snackbar.currentSnackbarData?.dismiss() },
             )
 
-            val pastTwoItems by remember(presentedState) { derivedStateOf { presentedState.value.items.size > 2 } }
-            val jumpShown = !following && pastTwoItems
-            androidx.compose.animation.AnimatedVisibility(
-                visible = jumpShown,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = JumpButtonGap),
-                enter = fadeIn(tween(160)) + scaleIn(tween(160), initialScale = 0.8f),
-                exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.8f),
-            ) {
-                Box(
-                    Modifier
-                        // The flat icon-button box: one step up from the composer's round buttons it floats above.
-                        .size(CursorDimens.iconButton)
-                        .cursorSurface(colors.elevated, colors.strokeStrong, CircleShape)
-                        .pressable({ scope.launch { transcriptScroll.jumpToBottom() } }, CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(CursorIcons.ArrowDown, "Scroll to latest", tint = colors.iconPrimary, modifier = Modifier.size(16.dp))
-                }
-            }
-            // A word up while the jump button is out sits above it, never over it: the button stays the reader's to
+            // A word up while the jump button is out sits above its row, never over it: the button stays the reader's to
             // tap (a catch-up's answer lands there as the reader flings back to the newest message). Read at layout.
-            val snackbarLift = animateDpAsState(if (jumpShown) CursorDimens.iconButton + JumpButtonGap else 0.dp, tween(160), label = "snackbar-lift")
+            val snackbarLift = animateDpAsState(if (jumpShown) DockedRowHeight + DockGap else 0.dp, tween(160), label = "snackbar-lift")
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -snackbarLift.value.roundToPx()) }) { data ->
                 Snackbar(snackbarData = data, containerColor = colors.elevated, contentColor = colors.textPrimary, shape = CursorTheme.shapes.lg)
             }
@@ -790,7 +776,6 @@ fun ConversationScreen(
         // Chat has its composer glide down from where that one stood.
         val sendMotion = LocalSendMotion.current
         val composerAnchor = remember(agentId) { ComposerAnchor() }
-        val composerExpansion = rememberComposerExpansion()
         val arrival = rememberArrivalGlide(agentId)
         // Extended mode keeps the queue on the account, where the desktop and the web keep theirs; otherwise on this device.
         val accountQueue = capabilities.accountQueue && !isDemo
@@ -830,93 +815,104 @@ fun ConversationScreen(
             // seam between the transcript they are about and the strips under them: the queue keeps its place on the
             // box it came from, as the desktop stacks its trays.
             val loadNotices by remember(presentedState, hiddenNotices) { derivedStateOf { LoadNotices.shown(presentedState.value.state, hiddenNotices) } }
-            for (notice in loadNotices) {
-                key(notice.identity) {
-                    LoadNoticeRow(
-                        notice = notice,
-                        onRetry = viewModel::reload,
-                        onShareDiagnostics = { scope.launch { panelActions.shareText(viewModel.loadDiagnosticsReport()) } },
-                        onDismiss = { viewModel.dismissNotice(notice) },
-                        modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
-                    )
-                }
-            }
             // The chat's goal, when it has one, stands over whatever is queued: the order the desktop stacks its
             // trays in above the composer. Each strip keeps the same width and the same gap to the next. Opened, the
             // goal and an expanded composer would each want the page: opening one lets the other back down.
             var goalOpen by rememberSaveable(agentId, goal?.objective.hashCode()) { mutableStateOf(false) }
             LaunchedEffect(composerExpansion.expanded) { if (composerExpansion.expanded) goalOpen = false }
+            // The jump button docks at the end of the strips' row, which give it their end edge as it comes: the
+            // notices with them, in the goal's slot over it, so with nothing else docked the button stands beside one.
             GoalDock(
                 open = goalOpen && goal != null,
-                goal = goal?.let { current ->
+                modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth),
+                asideShown = jumpShown,
+                aside = { DockedJumpButton(onClick = { scope.launch { transcriptScroll.jumpToBottom() } }, enabled = jumpShown) },
+                goal = if (goal == null && loadNotices.isEmpty()) null else {
                     {
-                        GoalStrip(
-                            goal = current,
-                            expanded = goalOpen,
-                            onExpandedChange = { open ->
-                                goalOpen = open
-                                if (open) composerExpansion.collapse()
-                            },
-                            modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
-                        )
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            for (notice in loadNotices) {
+                                key(notice.identity) {
+                                    LoadNoticeRow(
+                                        notice = notice,
+                                        onRetry = viewModel::reload,
+                                        onShareDiagnostics = { scope.launch { panelActions.shareText(viewModel.loadDiagnosticsReport()) } },
+                                        onDismiss = { viewModel.dismissNotice(notice) },
+                                        modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
+                                    )
+                                }
+                            }
+                            goal?.let { current ->
+                                GoalStrip(
+                                    goal = current,
+                                    expanded = goalOpen,
+                                    onExpandedChange = { open ->
+                                        goalOpen = open
+                                        if (open) composerExpansion.collapse()
+                                    },
+                                    modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).padding(bottom = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                },
+                cards = {
+                    // What is waiting to go out sits right above the box it came from, oldest first, one line each — the
+                    // device's and, in Extended mode, the account's in one stack, a deck once there are more than a couple.
+                    // Composed even when empty, so the last card to go folds away rather than blinking out; it is no height then.
+                    val queueKeys = remember(queue, accountRows) { queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" } }
+                    QueueStack(
+                        keys = queueKeys,
+                        stacked = queueStackedHere,
+                        onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
+                        modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth),
+                        gapBelow = 4.dp,
+                    ) { index, face ->
+                        if (index < queue.size) {
+                            QueuedFollowUpCard(
+                                item = queue[index],
+                                position = index + 1,
+                                count = queue.size,
+                                thumbnails = thumbnails,
+                                // A message on its way refuses all three (its card says why) and keeps its flight: the
+                                // run may yet take it, and its row then lifts off into the bubble like any delivered one.
+                                onEdit = { if (viewModel.editQueued(it.id)) queueFlights.dismiss(it.id) else haptics.perform(Haptic.Reject) },
+                                // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
+                                onSteer = { item ->
+                                    haptics.perform(if (viewModel.steerQueued(item.id, turnUnderWay = isActive)) Haptic.Confirm else Haptic.Reject)
+                                },
+                                onRemove = { if (viewModel.removeQueued(it.id)) queueFlights.dismiss(it.id) else haptics.perform(Haptic.Reject) },
+                                flights = queueFlights,
+                                face = face,
+                                steers = isActive,
+                                refused = refusedQueuedId == queue[index].id,
+                            )
+                        } else {
+                            val at = index - queue.size
+                            AccountQueueCard(
+                                item = accountRows[at],
+                                position = at + 1,
+                                count = accountRows.size,
+                                inFlightIds = controls.inFlightQueueIds,
+                                // The up arrow promotes the message into the turn under way as a steer; with none running, it is sent now.
+                                onSteer = { item ->
+                                    haptics.perform(Haptic.Confirm)
+                                    viewModel.queueSteer(item.id, turnUnderWay = isActive)
+                                },
+                                onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
+                                onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
+                                onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
+                                steers = isActive,
+                                onMove = { item, up -> viewModel.queueMove(item.id, up) },
+                                flights = queueFlights,
+                                face = face,
+                                // A row being steered refuses its glyphs, as a steering device card does: it says why, in place.
+                                refused = refusedQueuedId == accountRows[at].id,
+                                onRefused = { item -> haptics.perform(Haptic.Reject); viewModel.refuseSteering(item.id) },
+                            )
+                        }
                     }
                 },
             ) {
-                // What is waiting to go out sits right above the box it came from, oldest first, one line each — the
-                // device's and, in Extended mode, the account's in one stack, a deck once there are more than a couple.
-                // Composed even when empty, so the last card to go folds away rather than blinking out; it is no height then.
-                val queueKeys = remember(queue, accountRows) { queue.map { "device:${it.id}" } + accountRows.map { "account:${it.id}" } }
-                QueueStack(
-                    keys = queueKeys,
-                    stacked = queueStackedHere,
-                    onStackedChange = { stacked -> queueStackedHere = stacked; viewModel.setQueueStacked(stacked) },
-                    modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth),
-                    gapBelow = 4.dp,
-                ) { index, face ->
-                    if (index < queue.size) {
-                        QueuedFollowUpCard(
-                            item = queue[index],
-                            position = index + 1,
-                            count = queue.size,
-                            thumbnails = thumbnails,
-                            // A message on its way refuses all three (its card says why) and keeps its flight: the
-                            // run may yet take it, and its row then lifts off into the bubble like any delivered one.
-                            onEdit = { if (viewModel.editQueued(it.id)) queueFlights.dismiss(it.id) else haptics.perform(Haptic.Reject) },
-                            // The up arrow steers into the turn under way, which carries on; with none, the message goes next.
-                            onSteer = { item ->
-                                haptics.perform(if (viewModel.steerQueued(item.id, turnUnderWay = isActive)) Haptic.Confirm else Haptic.Reject)
-                            },
-                            onRemove = { if (viewModel.removeQueued(it.id)) queueFlights.dismiss(it.id) else haptics.perform(Haptic.Reject) },
-                            flights = queueFlights,
-                            face = face,
-                            steers = isActive,
-                            refused = refusedQueuedId == queue[index].id,
-                        )
-                    } else {
-                        val at = index - queue.size
-                        AccountQueueCard(
-                            item = accountRows[at],
-                            position = at + 1,
-                            count = accountRows.size,
-                            inFlightIds = controls.inFlightQueueIds,
-                            // The up arrow promotes the message into the turn under way as a steer; with none running, it is sent now.
-                            onSteer = { item ->
-                                haptics.perform(Haptic.Confirm)
-                                viewModel.queueSteer(item.id, turnUnderWay = isActive)
-                            },
-                            onRemove = { queueFlights.dismiss(it.id); viewModel.queueDelete(it.id) },
-                            onUpdate = { item, text -> viewModel.queueUpdate(item.id, text) },
-                            onEditing = { item, editing -> viewModel.queueMarkEditing(item.id, editing) },
-                            steers = isActive,
-                            onMove = { item, up -> viewModel.queueMove(item.id, up) },
-                            flights = queueFlights,
-                            face = face,
-                            // A row being steered refuses its glyphs, as a steering device card does: it says why, in place.
-                            refused = refusedQueuedId == accountRows[at].id,
-                            onRefused = { item -> haptics.perform(Haptic.Reject); viewModel.refuseSteering(item.id) },
-                        )
-                    }
-                }
                 // The draft is read here and nowhere else in the screen: typing recomposes the composer, never the transcript or
                 // the strips docked over the box.
                 val followUpComposer: @Composable () -> Unit = {
@@ -1069,9 +1065,6 @@ private val TranscriptBottomPadding = 12.dp
 
 /** The transcript list's padding at rest; the pull to catch up adds its reach under the rows (see catchUpPadding). */
 private val TranscriptPadding = PaddingValues(start = TranscriptGutter, end = TranscriptGutter, top = 6.dp, bottom = TranscriptBottomPadding)
-
-/** The jump button's lift off the transcript's bottom edge. */
-private val JumpButtonGap = 10.dp
 
 /**
  * A load that did not go through: the server's words, Retry, and "Share diagnostics" — the redacted load block

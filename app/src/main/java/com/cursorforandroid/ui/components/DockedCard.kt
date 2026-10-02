@@ -1,12 +1,17 @@
 package com.cursorforandroid.ui.components
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CornerBasedShape
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.cursorforandroid.ui.theme.CursorDimens
@@ -60,6 +65,35 @@ fun Modifier.dockedCard(
     val inset = composerDockInset(shape)
     return this.padding(start = inset.start, end = inset.end).then(surface).cursorSurface(fill, border, shape)
 }
+
+/**
+ * The scroll-to-latest button docked beside the cards over the composer: one of them, a [dockedCard] (the queue's and
+ * the goal's surface, stroke and corners, and their inset at its outer side) as tall as a queued follow-up's row and
+ * as wide, holding the down arrow. Laid out wider than it is drawn, by the card's inset at each side, so the dock
+ * stands it flush with the cards' end edge (see `GoalDock`). [enabled] off while it goes: on its way out it takes no
+ * tap and goes unnamed.
+ */
+@Composable
+fun DockedJumpButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    Box(
+        modifier
+            .dockedCard()
+            .size(DockedRowHeight)
+            .pressable(onClick, CursorTheme.shapes.xl, enabled = enabled)
+            .testTag(DOCKED_JUMP_BUTTON_TAG),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(CursorIcons.ArrowDown, if (enabled) "Scroll to latest" else null, tint = CursorTheme.colors.iconPrimary, modifier = Modifier.size(16.dp))
+    }
+}
+
+/** One line of composer text plus the composer's vertical padding: a queued follow-up's row, and the jump button. */
+val DockedRowHeight = 40.dp
+
+/** Between two cards docked over the composer, and between the lowest of them and the composer. */
+val DockGap = 4.dp
+
+const val DOCKED_JUMP_BUTTON_TAG = "docked-jump-button"
 
 /** A corner size in dp does not care what it is a corner of; a proportional one gets this to be a corner of. */
 private const val ReferenceShapeSize = 200f

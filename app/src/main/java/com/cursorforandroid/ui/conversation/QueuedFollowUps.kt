@@ -78,6 +78,7 @@ import com.cursorforandroid.ui.components.SpinnerRing
 import com.cursorforandroid.ui.components.TouchTarget
 import com.cursorforandroid.ui.components.commandTints
 import com.cursorforandroid.ui.components.cursorSurface
+import com.cursorforandroid.ui.components.DockedRowHeight
 import com.cursorforandroid.ui.components.dockedCard
 import com.cursorforandroid.ui.components.highlightSlashCommands
 import com.cursorforandroid.ui.components.icon
@@ -194,7 +195,7 @@ private fun QueuedFollowUpRow(
             // The description sits on the surface, so the row's node is the card as drawn.
             .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface(), face.contentAlpha, face.cover))
             .semantics { contentDescription = QueueCardWords.description(item, position, count) }
-            .heightIn(min = RowHeight)
+            .heightIn(min = DockedRowHeight)
             .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp)
             .faceOf(face),
         verticalAlignment = Alignment.CenterVertically,
@@ -497,7 +498,7 @@ private fun AccountQueueRow(
             .dockedCard(surface = Modifier.queueCard(motion, anchor, item.id, words, queueCardSurface(), face.contentAlpha, face.cover))
             .onContextClick(enabled = onMove != null && !editing && !inFlight && !onItsWay) { at -> menuAt = at; menuOpen = true }
             .testTag("account-queue-row")
-            .heightIn(min = RowHeight)
+            .heightIn(min = DockedRowHeight)
             .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 6.dp)
             .semantics { contentDescription = accountRowDescription(position, count, steer) }
             .faceOf(face),
@@ -735,8 +736,6 @@ private fun GlyphButton(icon: ImageVector, contentDescription: String, tint: Col
 private fun Modifier.faceOf(face: QueueCardFace): Modifier =
     if (face === QueueCardFace.Plain) this else graphicsLayer { alpha = face.contentAlpha() }
 
-/** One line of composer text plus the composer's vertical padding, so a row reads as a single-line composer. */
-private val RowHeight = 40.dp
 private val Tile = 18.dp
 private val Glyph = 14.dp
 /** A card's second line comes in, and one note on it fades into the next, over this long. */
