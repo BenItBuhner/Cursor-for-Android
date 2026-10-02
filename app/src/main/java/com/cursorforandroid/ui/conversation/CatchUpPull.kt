@@ -62,6 +62,7 @@ import com.cursorforandroid.ui.components.refreshDiscOutline
 import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -436,7 +437,9 @@ internal fun CatchUpIndicator(
                     if (exit) {
                         leaving = true
                         coroutineScope {
-                            launch { presence.settle(0f, animated(), ExitSpec) }
+                            val animating = animated()
+                            launch { presence.settle(0f, animating, ExitSpec) }
+                            if (animating && presence.value > 0f) delay(ExitLeadMillis)
                             pull.animateToHidden()
                         }
                         leaving = false
@@ -558,6 +561,12 @@ private const val ExitScale = 0.6f
 
 /** The answer's fade: a little quicker than the transcript's spring home, so the disc is gone before the gap closes. */
 internal const val CatchUpExitMillis = 220
+
+/**
+ * How long the gap stays held once the answer's fade has begun: the closing gap shrinks the disc to nothing about 150ms
+ * into its spring, so without the lead it, not the fade, would decide how quickly the disc goes.
+ */
+private const val ExitLeadMillis = 100L
 private val ExitSpec: AnimationSpec<Float> = tween(CatchUpExitMillis, easing = FastOutSlowInEasing)
 
 /** Taken back by the finger, or held again, mid-fade: back to whole at once, without a pop. */
