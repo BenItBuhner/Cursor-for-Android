@@ -1752,6 +1752,7 @@ class AgentRepository(
     /** Fetches by id in flight, so two passes asking for the same row share one read (see [loadDetail]). */
     private val inFlightById = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Result<Agent>>>()
     private val recordReadsById = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Result<AgentDto>>>()
+    private val runReadsById = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Result<RunDto>>>()
 
     /**
      * A pinned chat is always shown, whatever page it would have been on, whatever it runs on and whatever it was
@@ -2188,7 +2189,7 @@ class AgentRepository(
         val run: RunDto? = if (knownRun != null && (dto.latestRunId == null || dto.latestRunId == knownRun.id)) {
             knownRun
         } else {
-            dto.latestRunId?.let { runId -> runCatching { api.getRun(id, runId) }.getOrNull() }
+            dto.latestRunId?.let { runId -> runCatching { runById(id, runId, api) }.getOrNull() }
         }
         // Extended mode: the row lands with its account record, as every row of the desktop's list does, so it is
         // published placed rather than published bare and moved once the record has been read — unless the account
@@ -2697,7 +2698,7 @@ class AgentRepository(
         if (isDocumentedRunId(runId)) return runId
         namedRuns[runId]?.let { return it }
         val startedIn = token()
-        val latest = runCatching { session.current.api.getAgent(agentId).latestRunId }
+        val latest = runCatching { agentRecord(agentId).latestRunId }
             .getOrElse { t -> if (t is CancellationException) throw t; null }
             ?.takeIf(::isDocumentedRunId) ?: return null
         if (latest == namedRunsAfter[runId]) return null
@@ -2714,8 +2715,32 @@ class AgentRepository(
      */
     suspend fun runRecord(agentId: String, runId: String, api: CursorApi = session.current.api): RunDto {
         val wire = documentedRunId(agentId, runId) ?: throw IllegalStateException("The run is not listed under its documented id yet.")
-        val run = api.getRun(agentId, wire)
+        val run = runById(agentId, wire, api)
         return if (wire != runId && run.id == wire) run.copy(id = runId) else run
+    }
+
+    /**
+     * `GET /v1/agents/{id}/runs/{runId}` under the documented id, one read shared by every caller asking for the same
+     * run while it is out. At a turn's end the live hub's settle, the notification's tracking, the chat's look for the
+     * next run and the list's verify each want the same record within moments, and every run's read counts against
+     * the one limit Cursor sets the endpoint. A caller whose shared read was cancelled under it reads for itself.
+     */
+    suspend fun runById(agentId: String, wireRunId: String, api: CursorApi = session.current.api): RunDto {
+        val key = "${System.identityHashCode(api)}/$agentId/$wireRunId"
+        val deferred = kotlinx.coroutines.CompletableDeferred<Result<RunDto>>()
+        val prior = runReadsById.putIfAbsent(key, deferred)
+        if (prior != null) {
+            val theirs = prior.await()
+            return if (theirs.exceptionOrNull() !is CancellationException) theirs.getOrThrow() else api.getRun(agentId, wireRunId)
+        }
+        return try {
+            api.getRun(agentId, wireRunId).also { deferred.complete(Result.success(it)) }
+        } catch (t: Throwable) {
+            deferred.complete(Result.failure(t))
+            throw t
+        } finally {
+            runReadsById.remove(key, deferred)
+        }
     }
 
     /** [documentedRunId] for a run the account has just named, asked a few times while the record catches up with it. */
