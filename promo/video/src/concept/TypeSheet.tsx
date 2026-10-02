@@ -16,7 +16,7 @@ const Rung: React.FC<{ size: number; text: string }> = ({ size, text }) => (
   <div style={{ display: "flex", alignItems: "baseline", gap: 28 }}>
     <div style={{ width: 190, flex: "none" }}>
       <Caption>
-        {size} px · opsz {Math.min(144, size)}
+        {size} px · opsz {Math.max(8, Math.min(144, size))}
       </Caption>
     </div>
     <div style={{ color: INK, whiteSpace: "nowrap", ...typeStyle(ROLE.display, size) }}>{text}</div>
@@ -55,8 +55,8 @@ const Pulse: React.FC = () => {
 export const TypeSheet: React.FC = () => (
   <AbsoluteFill style={{ background: PAPER, padding: "84px 112px", display: "flex", flexDirection: "column", gap: 56 }}>
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-      <div style={{ color: INK, ...typeStyle(ROLE.display, 40) }}>Type system — Google Sans Flex</div>
-      <Caption>Display wght 620 · wdth 100 · tracking −0.035 em · Caption wght 450</Caption>
+      <div style={{ color: INK, ...typeStyle(ROLE.display, 40) }}>Type system — Roboto Flex</div>
+      <Caption>Display wght 600 · wdth 100 · tracking 0 → −0.012 em by size · Caption wght 450</Caption>
     </div>
     <div style={{ display: "flex", gap: 120 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
@@ -74,7 +74,7 @@ export const TypeSheet: React.FC = () => (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 40, marginTop: "auto" }}>
       {[
         ["One weight per role", "Weight never animates. No ramp through the mushy middle weights; a word is set, not grown."],
-        ["Size drives optics", "opsz = rendered px, clamped 6–144. Big type tightens and gains contrast; small type opens up."],
+        ["Size drives optics", "opsz = rendered px, clamped 8–144. Big type tightens and gains contrast; small type opens up."],
         ["Grade for touch", "A press adds GRAD 0→100→0 on the tap's spring. Weight without width, so nothing reflows."],
         ["Cut, don't wipe", "Words hard-cut in on the beat and hold 0.6–1.2 s. No per-glyph waves, blurs or tracking sweeps."],
       ].map(([head, body]) => (
