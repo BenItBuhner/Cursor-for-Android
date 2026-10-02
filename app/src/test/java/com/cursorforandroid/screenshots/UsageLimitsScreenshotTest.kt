@@ -72,7 +72,7 @@ import java.util.TimeZone
 class UsageLimitsScreenshotTest {
 
     @get:Rule
-    val compose = createAndroidComposeRule\u003cComponentActivity>()
+    val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val outDir = File(System.getProperty("user.dir"), "../screenshots").normalize()
     private lateinit var graph: AppGraph
@@ -82,7 +82,7 @@ class UsageLimitsScreenshotTest {
         TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
         Locale.setDefault(Locale.US)
         AppClock.nowMillis = { FIXED_NOW }
-        val context = ApplicationProvider.getApplicationContext\u003cContext>()
+        val context = ApplicationProvider.getApplicationContext<Context>()
         graph = AppGraph(context, SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, appVersion = SCREENSHOT_APP_VERSION)
     }
 
@@ -118,7 +118,7 @@ class UsageLimitsScreenshotTest {
 
     @Test
     fun resetNotification() {
-        val context = ApplicationProvider.getApplicationContext\u003cContext>()
+        val context = ApplicationProvider.getApplicationContext<Context>()
         val reset = UsageReset(included = true, api = false)
         assertThat(reset.any).isTrue()
         compose.setContent {
