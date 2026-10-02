@@ -102,6 +102,8 @@ object NewChatHomeCopy {
 object NewChatHomeTags {
     const val PAGE = "new_chat_page"
     const val COMPOSER = "new_chat_composer"
+    /** The line over the composer (see [NewChatGreeting]); inside [COMPOSER], which is the block it heads. */
+    const val GREETING = "new_chat_greeting"
     const val PROJECT_SHORTCUT = "new_chat_project_shortcut"
     const val RECENT_CHAT = "new_chat_recent_chat"
     const val WORKING = "new_chat_project_working"

@@ -1066,11 +1066,13 @@ class AppGraph(
      * Opens the key store, with the Android Keystore behind it — the slowest read of the session's restore — on a
      * background thread, for `Application.onCreate`: the restore the activity starts a moment later finds it open
      * instead of paying for it while the splash screen waits. The settings are left to the restore, which reads them
-     * in one snapshot beside it. The New Chat page's last picture is read beside it, so the first frame has it.
+     * in one snapshot beside it. The New Chat page's last picture and its greetings' history are read beside it, so the
+     * first frame has them.
      */
     fun warmUp() {
         startupScope.launch(Dispatchers.IO) { runCatching { keyStore.apiKey() } }
         caches.newChatPage.warm()
+        caches.greetings.warm()
     }
 
     private val sessionStartLock = Any()
@@ -1159,6 +1161,7 @@ class AppGraph(
             // flight can land after the wipe below re-creates the directories it deleted.
             caches.invalidate()
             caches.newChatPage.forget()
+            caches.greetings.forget()
             AttachmentImages.clear()
             share.clear()
             // Resetting is only ever about what is in memory, so a part this process never built has nothing to
