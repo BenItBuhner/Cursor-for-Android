@@ -5,7 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -20,6 +22,7 @@ import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.DeviceTarget
 import com.cursorforandroid.domain.ModelParam
 import com.cursorforandroid.domain.NewChatHome
+import com.cursorforandroid.ui.components.PickerTags
 import com.cursorforandroid.ui.navigation.AppShell
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
@@ -135,6 +138,8 @@ class NewChatDraftScreenshotTest {
         capture("187_new_chat_draft_reopened")
 
         compose.onNodeWithText("Claude Fable 5.1").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(PickerTags.List)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(hasText("Claude Fable 5.1") and hasAnyAncestor(hasTestTag(PickerTags.List))).performClick()
         waitForText("Effort")
         capture("188_new_chat_draft_reopened_picker")
     }

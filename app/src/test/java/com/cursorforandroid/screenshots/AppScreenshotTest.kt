@@ -45,12 +45,15 @@ import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.domain.ActivityGroup
 import com.cursorforandroid.domain.EnvironmentFilter
+import com.cursorforandroid.domain.FilterKind
 import com.cursorforandroid.domain.ListPreferences
 import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.domain.RunFooter
 import com.cursorforandroid.domain.SourceFilter
 import com.cursorforandroid.domain.StatusFilter
 import com.cursorforandroid.ui.CursorRoot
+import com.cursorforandroid.ui.components.PickerTags
+import com.cursorforandroid.ui.customize.filterTag
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.cursorforandroid.util.AppClock
@@ -236,11 +239,16 @@ class AppScreenshotTest {
         compose.waitForIdle()
         capture("02_home")
 
-        // Device picker: Cloud is the default; My machines and team pools sit under it. This phone is never a row.
+        // Device picker: Cloud is the default; Remote opens My machines and team pools. This phone is never a row.
         compose.onNodeWithText("Cloud").performClick()
+        waitForText("Remote")
+        compose.onNodeWithText("Remote").performClick()
         waitForText("My machines")
         waitForText("bennett")
         capture("24_device_picker")
+        // Back steps out of Remote, then closes the picker.
+        Espresso.pressBack()
+        compose.waitForIdle()
         Espresso.pressBack()
         compose.waitForIdle()
 
@@ -261,25 +269,25 @@ class AppScreenshotTest {
         waitForSidebarSections()
         capture("03_sidebar")
 
-        // Chats filter sheet from the header's filter icon. The root page is 04 (chatsFilterReadAll).
+        // The chats menu from the filter button. The root page is 04 (chatsFilterReadAll).
         compose.onNodeWithContentDescription("Filter and group chats").performClick()
-        waitForText("Grouping")
-        compose.onNodeWithText("Status").performClick()
+        waitForText("Group by")
+        compose.onNodeWithTag(filterTag(FilterKind.Status)).performClick()
         waitForText("Archived")
         capture("05_status_filter")
         Espresso.pressBack()
-        waitForText("Grouping")
+        waitForText("Group by")
         // Source: where each chat was started (the account's word), as on cursor.com/agents; Environment: where it runs.
-        compose.onNodeWithText("Source").performClick()
+        compose.onNodeWithTag(filterTag(FilterKind.Source)).performClick()
         waitForText("Grok Bot")
         capture("25_source_filter")
         Espresso.pressBack()
-        waitForText("Grouping")
-        compose.onNodeWithText("Environment").performClick()
+        waitForText("Group by")
+        compose.onNodeWithTag(filterTag(FilterKind.Environment)).performClick()
         waitForText("Team pool")
         capture("26_environment_filter")
         Espresso.pressBack()
-        waitForText("Grouping")
+        waitForText("Group by")
         // The Source filter at work: only the chats started from Slack, the CLI and Grok Bot are left among the
         // sidebar's own chats — the pinned ones stay whatever the filter says, the Editor-started machine chat among them.
         runBlocking { graph.prefs.updateListPreferences { it.copy(sources = setOf(SourceFilter.Slack, SourceFilter.Cli, SourceFilter.GrokBot)) } }
@@ -436,6 +444,8 @@ class AppScreenshotTest {
         enterDemo(graph, repoChip = "cursor-for-android")
 
         compose.onNodeWithText("Cloud").performClick()
+        waitForText("Remote")
+        compose.onNodeWithText("Remote").performClick()
         waitForText("My machines")
         compose.onNodeWithText("bennett").performClick()
         // The sheet closes and the repository chip follows the machine's checkout.
@@ -467,19 +477,19 @@ class AppScreenshotTest {
         compose.waitUntil(20_000) { compose.onAllNodes(hasContentDescription("New chat")).fetchSemanticsNodes().isNotEmpty() }
         waitForSidebarSections()
         compose.onNodeWithContentDescription("Filter and group chats").performClick()
-        // Read all sits in the sheet's header, live while anything is unread; the sheet itself opens on Grouping.
+        // Read all sits at the menu's foot, live while anything is unread; the menu itself opens on Group by.
         awaitReadAll(enabled = true)
         capture("04_chats_filter")
 
         readAllAndSettle()
-        // Nothing left to read: the action stays in the header, dimmed, so the sheet reads the same either way.
+        // Nothing left to read: the row stays, dimmed, so the menu reads the same either way.
         capture("58_chats_filter_all_read")
         Espresso.pressBack()
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("Grouping").fetchSemanticsNodes().isEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Group by").fetchSemanticsNodes().isEmpty() }
         compose.waitForIdle()
         capture("28_sidebar_all_read")
 
-        // A changed preference brings Reset in beside it: the header's two actions, the dimmed one on the left.
+        // A changed preference brings Reset in below the dimmed Read all, at the menu's foot.
         runBlocking { graph.prefs.updateListPreferences { it.copy(showRuntime = true) } }
         compose.onNodeWithContentDescription("Filter and group chats").performClick()
         waitForText("Reset")
@@ -487,7 +497,7 @@ class AppScreenshotTest {
         capture("905_chats_filter_all_read_reset")
     }
 
-    /** The Chats sheet in the light theme: Read all alone, then beside Reset, then with nothing left to read. */
+    /** The chats menu in the light theme: Read all alone, then above Reset, then with nothing left to read. */
     @Test
     fun chatsFilterReadAllLight() {
         val graph = launchApp { it.prefs.setThemeMode(ThemeMode.Light) }
@@ -508,7 +518,7 @@ class AppScreenshotTest {
         capture("902_chats_filter_light_all_read")
     }
 
-    /** The Chats sheet on a wide screen, with both header actions showing, before and after Read all. */
+    /** The Chats menu on a wide screen, scrolled to its foot where Read all and Reset sit, before and after Read all. */
     @Test
     @Config(sdk = [35], qualifiers = "w1000dp-h720dp-night-320dpi")
     fun chatsFilterReadAllWide() {
@@ -516,7 +526,8 @@ class AppScreenshotTest {
         enterDemo(graph)
         waitForSidebarSections()
         compose.onNodeWithContentDescription("Filter and group chats").performClick()
-        waitForText("Reset")
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(PickerTags.List)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag(PickerTags.List).performScrollToNode(hasText("Reset"))
         awaitReadAll(enabled = true)
         capture("903_chats_filter_wide")
 

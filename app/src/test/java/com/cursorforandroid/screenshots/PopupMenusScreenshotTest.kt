@@ -24,9 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -64,6 +62,7 @@ import com.cursorforandroid.domain.ProjectAppearance
 import com.cursorforandroid.domain.ProjectWorker
 import com.cursorforandroid.domain.PromptFile
 import com.cursorforandroid.domain.RunStatus
+import com.cursorforandroid.domain.SortOrder
 import com.cursorforandroid.domain.UserMessage
 import com.cursorforandroid.domain.WorkerMembership
 import com.cursorforandroid.domain.WorkerSpawnKind
@@ -81,7 +80,6 @@ import com.cursorforandroid.ui.conversation.LocalTranscriptControls
 import com.cursorforandroid.ui.conversation.TimelineItemView
 import com.cursorforandroid.ui.conversation.TranscriptControls
 import com.cursorforandroid.ui.customize.CustomizeSheet
-import com.cursorforandroid.ui.customize.READ_ALL
 import com.cursorforandroid.ui.projects.ProjectActions
 import com.cursorforandroid.ui.projects.projectSection
 import com.cursorforandroid.ui.theme.CursorDimens
@@ -476,13 +474,14 @@ class PopupMenusScreenshotTest {
         compose.setContent {
             Scene(mode) { CustomizeSheet(viewModel, onDismiss = {}) }
         }
-        // Read all is drawn enabled only once the unread chats have reached the sheet (see AppGraph.agentListDispatcher).
+        // The menu is whole only once the chats have reached it (see AppGraph.agentListDispatcher).
         compose.waitUntil(timeoutMillis = 10_000) {
             compose.onAllNodes(hasText("Group by")).fetchSemanticsNodes().isNotEmpty() &&
-                compose.onAllNodes(hasTestTag("sheet-header-action-$READ_ALL") and isEnabled()).fetchSemanticsNodes().isNotEmpty() &&
-                compose.runOnIdle { viewModel.uiState.value.repoSlugs.size == 2 }
+                compose.runOnIdle { viewModel.uiState.value.let { it.repoSlugs.size == 2 && it.unreadCount > 0 } }
         }
-        compose.onNodeWithText("Group by").performClick()
+        // Its sort order is a submenu: the menu's own picker.
+        compose.onNodeWithText("Sort by", substring = true).performClick()
+        compose.waitUntil(timeoutMillis = 10_000) { compose.onAllNodes(hasText(SortOrder.Name.label)).fetchSemanticsNodes().isNotEmpty() }
         capture(name)
     }
 
