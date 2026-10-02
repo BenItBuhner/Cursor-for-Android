@@ -4529,6 +4529,10 @@ class ConversationRepository(
         e.publish(mutate = { if (recordWindow === known) recordWindow = built; fetchedAt = AppClock.now(); pruneLocal() })
         persistRecord(e, built, known, session.current, cacheTokens())
         if (!refreshRuns) return true
+        // Steps added to the turn a live stream follows bring no run the list lacks; the stream says when that run
+        // ends, and the run list's endpoint is shared by every chat's reads.
+        val newTurn = built.turnCount != known.turnCount || built.turns.lastOrNull()?.stepIndex != known.turns.lastOrNull()?.stepIndex
+        if (!newTurn && synchronized(e) { e.isFollowingLive() }) return true
         // The turns the record grew by are the chat's newest runs, and the window pairs turns with runs by position
         // from the newest: the list's first page is read again so its newest end is the record's — a Project's
         // injected turns arrive by the dozen between two reads, and a list a dozen runs short paired every turn with
