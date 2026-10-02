@@ -45,7 +45,7 @@ internal fun DeviceSheet(
         onDismiss = onDismiss,
         anchor = anchor,
         title = "Device",
-        width = PickerWidths.Narrow,
+        width = PickerWidths.Default,
         presentation = presentation,
         testTag = DEVICE_PICKER_TAG,
         entries = { deviceEntries(devices, selected, loading, onSelect, onRefresh) },

@@ -40,6 +40,19 @@ class PickerGeometryTest {
     }
 
     @Test
+    fun `a picker that opened above stays above, its foot on the anchor, as a search shortens it`() {
+        val anchor = IntRect(100, 1200, 300, 1260)
+        val opened = PickerGeometry.place(anchor, IntSize(400, 1000), area, gap, ltr = true)
+        assertThat(opened.below).isFalse()
+
+        val filtered = PickerGeometry.place(anchor, IntSize(400, 120), area, gap, ltr = true, keepBelow = opened.below)
+        assertThat(filtered.below).isFalse()
+        assertThat(filtered.offset.y + 120).isEqualTo(1200 - gap)
+        // Left to itself, the short list would have dropped below the anchor.
+        assertThat(PickerGeometry.place(anchor, IntSize(400, 120), area, gap, ltr = true).below).isTrue()
+    }
+
+    @Test
     fun `an anchor near the end lines the picker up with its end instead`() {
         val anchor = IntRect(800, 200, 980, 260)
         val placed = PickerGeometry.place(anchor, IntSize(400, 600), area, gap, ltr = true)

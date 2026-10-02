@@ -384,6 +384,9 @@ internal class PickerState(
     var rootOrigin = TransformOrigin(0.5f, 0f)
     var below = true
 
+    /** The side of the anchor the picker opened on, kept while it is up so a search that shortens the list does not flip it. */
+    var side: Boolean? = null
+
     val rootEntries: List<PickerEntry> get() = entries(root.query.text)
 
     fun submenuOf(key: String?): PickerSubmenu? =
@@ -473,12 +476,13 @@ internal object PickerGeometry {
 
     /**
      * Below the anchor where it fits, else above where it fits, else on the roomier side; lined up with the anchor's
-     * start where that fits and its end where only that does, else clamped into [area].
+     * start where that fits and its end where only that does, else clamped into [area]. [keepBelow], once the picker
+     * has opened, holds it to the side it opened on.
      */
-    fun place(anchor: IntRect, size: IntSize, area: IntRect, gap: Int, ltr: Boolean): Placement {
+    fun place(anchor: IntRect, size: IntSize, area: IntRect, gap: Int, ltr: Boolean, keepBelow: Boolean? = null): Placement {
         val below = roomBelow(anchor, area, gap)
         val above = roomAbove(anchor, area, gap)
-        val placeBelow = size.height <= below || (size.height > above && below >= above)
+        val placeBelow = keepBelow ?: (size.height <= below || (size.height > above && below >= above))
         val y = (if (placeBelow) anchor.bottom + gap else anchor.top - gap - size.height)
             .coerceIn(area.top, max(area.top, area.bottom - size.height))
         val start = if (ltr) anchor.left else anchor.right - size.width
@@ -822,12 +826,17 @@ private fun AnchoredPicker(state: PickerState, anchor: IntRect, area: IntRect, w
             val anchorHere = local(anchor)
             val backdrop = measurables.first { it.layoutId == "backdrop" }.measure(full)
             val rootWidth = width.roundToPx().coerceAtMost(max(0, bounds.width))
-            val rootHeight = PickerGeometry.maxHeight(anchorHere, bounds, gap)
+            val rootHeight = when (state.side) {
+                null -> PickerGeometry.maxHeight(anchorHere, bounds, gap)
+                true -> PickerGeometry.roomBelow(anchorHere, bounds, gap)
+                false -> PickerGeometry.roomAbove(anchorHere, bounds, gap)
+            }
             val root = measurables.first { it.layoutId == "root" }.measure(Constraints(minWidth = rootWidth, maxWidth = rootWidth, maxHeight = max(0, rootHeight)))
-            val placement = PickerGeometry.place(anchorHere, IntSize(root.width, root.height), bounds, gap, ltr)
+            val placement = PickerGeometry.place(anchorHere, IntSize(root.width, root.height), bounds, gap, ltr, keepBelow = state.side)
             state.rootBounds = IntRect(placement.offset, IntSize(root.width, root.height))
             state.rootOrigin = placement.origin
             state.below = placement.below
+            if (root.height > 0) state.side = placement.below
 
             val subMeasurable = measurables.firstOrNull { it.layoutId == "submenu" }
             val subKey = state.submenu?.key
@@ -1031,11 +1040,7 @@ private fun PickerItemRow(
         }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(item.label, style = metrics.label, color = labelColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(2f, fill = false))
-                if (item.detail != null) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(item.detail, style = metrics.label, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                }
+                LabelAndDetail(item.label, item.detail, metrics.label, labelColor, Modifier.weight(1f, fill = false))
                 if (item.badge != null) {
                     Spacer(Modifier.width(6.dp))
                     PickerBadge(item.badge)
@@ -1068,6 +1073,45 @@ private fun PickerItemRow(
         }
     }
 }
+
+/**
+ * A row's label with its muted [detail] after it, as Cursor's rows run them: the label takes what it needs and the
+ * detail the rest, so the detail is what ellipsizes first, though never below [DetailShare] of the room while it
+ * needs that much.
+ */
+@Composable
+private fun LabelAndDetail(label: String, detail: String?, style: TextStyle, color: Color, modifier: Modifier = Modifier) {
+    if (detail == null) {
+        Text(label, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
+        return
+    }
+    val gap = 6.dp
+    Layout(
+        modifier = modifier,
+        content = {
+            Text(label, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(detail, style = style, color = CursorTheme.colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+    ) { (labelText, detailText), constraints ->
+        val room = constraints.maxWidth
+        val gapPx = gap.roundToPx()
+        val labelWants = labelText.maxIntrinsicWidth(constraints.maxHeight)
+        val detailWants = detailText.maxIntrinsicWidth(constraints.maxHeight) + gapPx
+        val detailKept = if (room == Constraints.Infinity) detailWants else minOf(detailWants, (room * DetailShare).roundToInt())
+        val labelMax = if (room == Constraints.Infinity) labelWants else max(0, minOf(labelWants, room - detailKept))
+        val labelPlaceable = labelText.measure(Constraints(maxWidth = labelMax))
+        val detailMax = if (room == Constraints.Infinity) detailWants - gapPx else max(0, room - labelPlaceable.width - gapPx)
+        val detailPlaceable = detailText.measure(Constraints(maxWidth = detailMax))
+        val width = (labelPlaceable.width + gapPx + detailPlaceable.width).coerceIn(constraints.minWidth, room)
+        val height = max(labelPlaceable.height, detailPlaceable.height).coerceAtLeast(constraints.minHeight)
+        layout(width, height) {
+            labelPlaceable.placeRelative(0, (height - labelPlaceable.height) / 2)
+            detailPlaceable.placeRelative(labelPlaceable.width + gapPx, (height - detailPlaceable.height) / 2)
+        }
+    }
+}
+
+private const val DetailShare = 0.35f
 
 @Composable
 private fun PickerBadge(text: String) {
@@ -1138,13 +1182,7 @@ private fun PickerActionRow(
             if (action.busy) SpinnerRing(size = 12.dp) else Icon(action.icon, null, tint = if (action.enabled) colors.iconSecondary else colors.iconQuaternary, modifier = Modifier.size(CursorDimens.menuIcon))
         }
         Spacer(Modifier.width(10.dp))
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            Text(action.label, style = metrics.label, color = tone, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(2f, fill = false))
-            if (action.detail != null) {
-                Spacer(Modifier.width(6.dp))
-                Text(action.detail, style = metrics.label, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-            }
-        }
+        LabelAndDetail(action.label, action.detail, metrics.label, tone, Modifier.weight(1f))
         if (action.selected) {
             Spacer(Modifier.width(8.dp))
             Icon(CursorIcons.Check, null, tint = colors.accent, modifier = Modifier.size(CursorDimens.menuIcon))
