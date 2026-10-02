@@ -184,8 +184,11 @@ class ChatRequestBudgetTest {
         rig.startMonitor()
         rig.awaitUntil(15_000) { server.requests(Route.Stream).size >= RunMonitor.MAX_TRACKED }
         val asked = window("eight followed agents talking, no chat open")
-        assertWithMessage("the list refreshed inside the window: $asked").that(asked[Route.ListAgents] ?: 0.0).isGreaterThan(0.0)
-        budget("the run records of followed agents whose streams deliver", asked[Route.GetRun] ?: 0.0, RECORD_PER_MINUTE_FLEET_TALKING)
+        val lists = asked[Route.ListAgents] ?: 0.0
+        assertWithMessage("the list refreshed inside the window: $asked").that(lists).isGreaterThan(0.0)
+        val perRefresh = (asked[Route.GetRun] ?: 0.0) / lists
+        assertWithMessage("budget exceeded, the run records of followed agents whose streams deliver: ${"%.2f".format(perRefresh)} per list refresh, over the budget of $RECORDS_PER_REFRESH_FLEET_TALKING")
+            .that(perRefresh).isAtMost(RECORDS_PER_REFRESH_FLEET_TALKING)
         budget("stream opens", asked[Route.Stream] ?: 0.0, 0.0)
         budget("everything", asked.total(), TOTAL_PER_MINUTE_FLEET)
     }
@@ -311,9 +314,9 @@ class ChatRequestBudgetTest {
         const val TOTAL_PER_MINUTE_FLEET = 12.0
         /**
          * Eight followed agents talking: their streams say each run goes on, so the list's refresh reads none of their
-         * records (measured 0.0; 8 a minute before, one per followed agent per refresh, as for the quiet fleet still).
+         * records (measured 0.0 per refresh; 8 before, one per followed agent, as for the quiet fleet still).
          */
-        const val RECORD_PER_MINUTE_FLEET_TALKING = 1.0
+        const val RECORDS_PER_REFRESH_FLEET_TALKING = 1.0
         /** Eight followed agents and one open chat (measured 16.3): the fleet's refresh and the chat's queue read. */
         const val TOTAL_PER_MINUTE_FLEET_AND_CHAT = 20.0
         /**
