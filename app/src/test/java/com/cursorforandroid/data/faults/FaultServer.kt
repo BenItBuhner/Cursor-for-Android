@@ -234,7 +234,16 @@ class FaultServer(
     private val resets = AtomicInteger()
 
     /** [Live] is `StreamConversation` asked with `purpose = LIVE` (an open chat's watch); [RecordState] the same method's state read. */
-    enum class Route { Me, ListAgents, ListAgentsV0, GetAgent, ListRuns, GetRun, CreateRun, CancelRun, Conversation, Stream, Auth, Record, RecordState, Live, Blob, QueueAdd, QueueList, QueueDelete, QueueUpdate, QueueReorder, QueueSendNow, QueueEditing, Steer, AccountList, Workers, Children, Pins, FleetWorkers, FleetPools, Other }
+    enum class Route { Me, ListAgents, ListAgentsV0, GetAgent, ListRuns, GetRun, CreateRun, CancelRun, Conversation, Stream, Auth, Record, RecordState, Live, Blob, QueueAdd, QueueList, QueueDelete, QueueUpdate, QueueReorder, QueueSendNow, QueueEditing, Steer, AccountList, Workers, Children, Pins, FleetWorkers, FleetPools, Repositories, StartComposer, Other }
+
+    /** `GET /v1/repositories`: the repositories the account's GitHub connection reaches, as URLs. */
+    val repositories = CopyOnWriteArrayList<String>()
+    /**
+     * `StartBackgroundComposerFromSnapshot`, as a Project's creation sends it: the chat started is listed by the
+     * account (running, a Project's root) and by the public API with no run, as a new Project is, and handed to this
+     * hook with its name, for a test to write the kickoff's record when it likes.
+     */
+    @Volatile var onStartComposer: ((bcId: String, name: String) -> Unit)? = null
 
     /**
      * One row of the account's own list (`ListBackgroundComposers`, Extended mode): the record the sidebar's rows
@@ -439,6 +448,8 @@ class FaultServer(
             segments.size == 2 && segments[0] == RECORD_SERVICE && segments[1] == "ListWorkersForManager" -> Route.Workers
             segments.size == 2 && segments[0] == RECORD_SERVICE && segments[1] == "ListBackgroundComposerChildren" -> Route.Children
             segments.size == 2 && segments[0] == RECORD_SERVICE && (segments[1] == "PinBackgroundComposers" || segments[1] == "UnpinBackgroundComposers") -> Route.Pins
+            segments.size == 2 && segments[0] == RECORD_SERVICE && segments[1] == "StartBackgroundComposerFromSnapshot" -> Route.StartComposer
+            segments.size == 2 && segments[0] == "v1" && segments[1] == "repositories" -> Route.Repositories
             else -> Route.Other
         }
     }
@@ -522,6 +533,8 @@ class FaultServer(
                 json(200, encode(ListWorkersResponseDto.serializer(), ListWorkersResponseDto(workers = fleetWorkers.filter { (it.scope == "team_pool") == teamPool })))
             }
             Route.FleetPools -> json(200, encode(ListPoolsResponseDto.serializer(), ListPoolsResponseDto(pools = fleetPools)))
+            Route.Repositories -> json(200, """{"items":[${repositories.joinToString(",") { url -> """{"url":${quote(url)}}""" }}]}""")
+            Route.StartComposer -> startComposer(request)
             Route.Other -> json(404, error("not_found", "No such route in the fault server: ${request.method} ${url.encodedPath}"))
         }
         answer.getBody()?.size?.let { size -> bytesByRoute.merge(route, size, Long::plus) }
@@ -585,7 +598,22 @@ class FaultServer(
         CursorJson.parseToJsonElement(String(body, 5, length, Charsets.UTF_8)).jsonObject["purpose"]?.jsonPrimitive?.contentOrNull == "STREAM_CONVERSATION_PURPOSE_LIVE"
     }.getOrDefault(false)
 
-    private val Route.isAccount: Boolean get() = this == Route.Record || this == Route.RecordState || this == Route.Live || this == Route.Blob || this == Route.QueueAdd || this == Route.QueueList || this == Route.QueueDelete || this == Route.QueueUpdate || this == Route.QueueReorder || this == Route.QueueSendNow || this == Route.QueueEditing || this == Route.Steer || this == Route.AccountList || this == Route.Workers || this == Route.Children || this == Route.Pins
+    private fun startComposer(request: RecordedRequest): MockResponse {
+        val body = CursorJson.parseToJsonElement(request.body.readUtf8()).jsonObject
+        val id = body["bcId"]?.jsonPrimitive?.contentOrNull ?: return json(400, connectError("invalid_argument", "bcId is required"))
+        val name = body["name"]?.jsonPrimitive?.contentOrNull ?: "New Project"
+        val at = clock()
+        val composer = Composer(id, name, activityMs = at, running = true, project = true)
+        composers[id] = composer
+        rootProjects += id
+        val iso = Instant.ofEpochMilli(at).toString()
+        agents[id] = AgentDto(id = id, name = name, status = "ACTIVE", createdAt = iso, updatedAt = iso, latestRunId = null, url = "https://cursor.com/agents/$id")
+        v0[id] = V0AgentDto(id = id, name = name, status = "RUNNING")
+        onStartComposer?.invoke(id, name)
+        return json(200, """{"composer":${composer.json()}}""")
+    }
+
+    private val Route.isAccount: Boolean get() = this == Route.Record || this == Route.RecordState || this == Route.Live || this == Route.Blob || this == Route.QueueAdd || this == Route.QueueList || this == Route.QueueDelete || this == Route.QueueUpdate || this == Route.QueueReorder || this == Route.QueueSendNow || this == Route.QueueEditing || this == Route.Steer || this == Route.AccountList || this == Route.Workers || this == Route.Children || this == Route.Pins || this == Route.StartComposer
 
     // ---- the account's list ----------------------------------------------------------------------------------------
 
