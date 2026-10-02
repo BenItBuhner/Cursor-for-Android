@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasContentDescription
@@ -281,6 +282,32 @@ class ModelSheetTest {
         show(listOf(composer, sonnet), loading = true)
         compose.onNodeWithText("Refresh models").assertIsNotEnabled()
         compose.onNodeWithText("Claude 4.6 Sonnet").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a refresh started while the picker is up turns its row off, and finishing turns it back on`() {
+        var loading by mutableStateOf(false)
+        compose.setContent {
+            CursorTheme(mode = ThemeMode.Dark) {
+                ModelSheet(
+                    models = listOf(composer, sonnet),
+                    selectedModel = composer,
+                    selectedVariant = composer.defaultVariant,
+                    loading = loading,
+                    unavailable = false,
+                    onRefresh = {},
+                    onSelect = { _, _ -> },
+                    onDismiss = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Refresh models").assertIsEnabled()
+        loading = true
+        compose.waitForIdle()
+        compose.onNodeWithText("Refresh models").assertIsNotEnabled()
+        loading = false
+        compose.waitForIdle()
+        compose.onNodeWithText("Refresh models").assertIsEnabled()
     }
 
     @Test
