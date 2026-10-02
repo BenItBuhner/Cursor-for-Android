@@ -88,6 +88,13 @@ object NewChatHomePickerTags {
 }
 
 /**
+ * The layouts as the picker offers them, first to last: left to right, and so as TalkBack, Tab and the D-pad go
+ * through them. Not [NewChatHome.entries]' order, which is the preference's own and stays put.
+ */
+internal val NewChatHomePickerOrder: List<NewChatHome> =
+    listOf(NewChatHome.COMPOSER, NewChatHome.PROJECTS, NewChatHome.RECENT, NewChatHome.PROJECTS_RECENT)
+
+/**
  * Settings › New chat page, as the light/dark appearance pickers of iOS and One UI lay a choice out: each layout of
  * the New Chat pane in miniature — the pane's own composables, drawn from the live list and scaled down
  * ([NewChatPageMiniature]) — its name under it, and the chosen one ringed and checked, the four abreast in one row
@@ -119,7 +126,7 @@ internal fun NewChatHomeCard(
     val chips = rememberComposerChips(graph)
     SettingsCard {
         OptionRow(pageSize, Modifier.fillMaxWidth().selectableGroup().padding(horizontal = RowInset, vertical = 12.dp)) { size ->
-            NewChatHome.entries.forEach { option ->
+            NewChatHomePickerOrder.forEach { option ->
                 PickerOption(
                     label = NewChatHomePickerCopy.label(option),
                     selected = chosen == option,
@@ -160,7 +167,7 @@ internal fun NewChatHomeCard(
 @Composable
 private fun OptionRow(pageSize: DpSize, modifier: Modifier = Modifier, options: @Composable RowScope.(miniature: DpSize) -> Unit) {
     BoxWithConstraints(modifier) {
-        val count = NewChatHome.entries.size
+        val count = NewChatHomePickerOrder.size
         val size = miniatureSize(pageSize, (maxWidth - OptionGap * (count - 1)) / count - RingInset * 2)
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(OptionGap)) {
             options(size)
