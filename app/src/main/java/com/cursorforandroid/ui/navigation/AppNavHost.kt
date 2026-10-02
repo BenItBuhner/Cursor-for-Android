@@ -570,6 +570,7 @@ private fun AppShell(
                         onArrangeProjects = pane.onArrangeProjects,
                         focusComposer = pane.composerFocus == screen,
                         onComposerFocused = pane.onComposerFocused,
+                        user = pane.user,
                     )
                     Screen.Settings -> SettingsScreen(
                         graph = graph,
