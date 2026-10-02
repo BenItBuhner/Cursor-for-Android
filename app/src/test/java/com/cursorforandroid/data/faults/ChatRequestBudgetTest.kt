@@ -121,7 +121,10 @@ class ChatRequestBudgetTest {
     private fun Map<Route, Double>.total() = values.sum()
 
     private fun budget(what: String, perMinute: Double, max: Double) =
-        assertWithMessage("$what: ${"%.2f".format(perMinute)} requests a minute, over the budget of $max").that(perMinute).isAtMost(max)
+        assertWithMessage("budget exceeded, $what: ${"%.2f".format(perMinute)} requests a minute, over the budget of $max").that(perMinute).isAtMost(max)
+
+    private fun budgetCount(what: String, asked: List<FaultServer.Seen>, max: Int) =
+        assertWithMessage("budget exceeded, $what: ${asked.size} requests, over the budget of $max: $asked").that(asked.size).isAtMost(max)
 
     @Test
     fun `one open chat inside a long tool call`() = runBlocking<Unit> {
@@ -193,15 +196,20 @@ class ChatRequestBudgetTest {
         val recordsBefore = server.requests(Route.GetRun).size
         rig.openChat()
         rig.awaitUntil(15_000) { server.requests(Route.Stream).size > streamsBefore }
+        val verified = server.requests(Route.Stream).drop(streamsBefore).first()
+        // What the open costs is counted by the server's clock up to half a stall window past the verify's stream:
+        // the open's own requests come at once, and the stall watch's next resume — a stream and a record read a
+        // window after the verify, the quiet budget's business — cannot fall inside it however late it is noticed.
+        val openedBy = verified.atMillis + STALL_MS / 2
         delay(STALL_MS)
         // Opening cost one stream, taken up from the last event the held connection had, and one record read for the
         // verify — beside the chat's own reads of its record (the list refresh the open does, which reads every
         // running agent's, and the chat's load; a list refresh of the monitor's under way may add one).
-        val resumed = server.requests(Route.Stream).drop(streamsBefore)
-        assertWithMessage("streams opened by the chat: $resumed").that(resumed).hasSize(1)
-        assertWithMessage("taken up from the last event: $resumed").that(resumed.single().lastEventId).isNotNull()
-        val records = server.requests(Route.GetRun).drop(recordsBefore).count { it.path.contains("/runs/$run") }
-        assertWithMessage("reads of the chat's record opening it").that(records).isAtMost(4)
+        val resumed = server.requests(Route.Stream).drop(streamsBefore).filter { it.atMillis < openedBy }
+        budgetCount("stream opens arriving on the held run (the verify)", resumed, 1)
+        assertWithMessage("the verify's stream is taken up from the last event held: $resumed").that(verified.lastEventId).isNotNull()
+        val records = server.requests(Route.GetRun).drop(recordsBefore).filter { it.path.contains("/runs/$run") && it.atMillis < openedBy }
+        budgetCount("reads of the chat's run record opening it", records, 4)
         // Then the chat rides the one connection: the quiet budget, the open's cost spent.
         val asked = window("chat opened on a followed run, then quiet")
         budget("stream opens", asked[Route.Stream] ?: 0.0, STREAM_OPENS_PER_MINUTE_QUIET)

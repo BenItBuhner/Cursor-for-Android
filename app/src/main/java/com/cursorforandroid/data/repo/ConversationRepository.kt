@@ -205,6 +205,9 @@ data class RecordFallback(
 ) {
     /** The one line that settles what was asked and what came back: `POST /…/StreamConversation → HTTP 404 unimplemented`. */
     val asked: String? get() = path?.let { p -> "POST $p" + (httpCode?.let { h -> " → HTTP $h" + (code?.let { c -> " $c" } ?: "") } ?: "") }
+
+    /** Refused by Cursor's rate limit (as `ConnectRpcException.isRateLimited` reads it): the record is asked again once its pause has passed. */
+    val rateLimited: Boolean get() = httpCode == 429 || code == "resource_exhausted"
 }
 
 /**
@@ -691,6 +694,8 @@ class ConversationRepository(
         var quietFailures = 0
         /** Loads refused by Cursor's rate limit in a row, nothing of the chat read since (see [holdRateLimited]); zero once one answers. */
         var rateLimitHolds = 0
+        /** The words a failed catch-up put under the transcript (see [catchUp]): taken down by the next one that answers. */
+        var pullFailure: String? = null
         /** The quiet re-read waiting its pause (see [quietRefreshFailure], [holdRateLimited]). */
         var quietJob: Job? = null
         /** [quietJob] is the wait that confirms an offline reading before it is said (see [confirmOffline]). */
@@ -2914,12 +2919,24 @@ class ConversationRepository(
         // As with [reload]: after the server's own failure the record is asked at once, so the chat is read as a load
         // reads it; a refusal keeps its pause.
         val retryRecord = synchronized(e) { (before.recordFallback?.serverError == true).also { if (it) e.recordRefusedUntil = 0L } }
+        // The run list is one endpoint for every chat (see `HostPause.endpoint`), its minute spent as often by the
+        // other chats' reads as by this one's: its first page refused leaves the chat as it stands — the record's
+        // delta, the live stream — and is read again after the wait, not said over a chat that is on screen.
+        var limited: Throwable? = null
+        suspend fun firstRunPage(api: CursorApi): ListRunsResponseDto? = try {
+            net(agentId, "runs")
+            api.listRuns(agentId, limit = FIRST_RUN_PAGE)
+        } catch (t: Throwable) {
+            if (t is CancellationException || !t.isRateLimitRefusal()) throw t
+            limited = t
+            null
+        }
         val failure = runCatching {
             val backend = session.current
             val recordOn = record != null && !backend.isDemo && capabilities().accountTranscript && synchronized(e) { e.recordWindow != null }
             if (recordOn) {
                 coroutineScope {
-                    val runs = async { net(agentId, "runs"); backend.api.listRuns(agentId, limit = FIRST_RUN_PAGE) }
+                    val runs = async { firstRunPage(backend.api) }
                     when (readRecordGrowth(e, strict = true, refreshRuns = false)) {
                         // No delta to read from what is in hand: the chat is read as a load reads it.
                         null -> {
@@ -2927,17 +2944,20 @@ class ConversationRepository(
                             loadAsJob(e) { load(e, agentId, asked = true) }
                         }
                         else -> {
-                            refreshNewestRuns(e, handed = runs.await())
+                            runs.await()?.let { refreshNewestRuns(e, handed = it) }
                             loadTraces(e, agentId, e.shownRuns())
                         }
                     }
                 }
             } else {
-                net(agentId, "runs")
-                val page = backend.api.listRuns(agentId, limit = FIRST_RUN_PAGE)
+                val page = firstRunPage(backend.api)
                 val held = synchronized(e) { if (!retryRecord && e.fetched && e.messages.isNotEmpty() && e.recordWindow == null) e.runs.associateBy { it.id } to e.local.isEmpty() else null }
-                if (held != null && runsUnchanged(page, held.first, noLocal = held.second)) refreshNewestRuns(e, handed = page)
-                else loadAsJob(e) { load(e, agentId, force = true, handed = page, asked = true) }
+                when {
+                    // Nothing on screen to stand: read as a load reads it, which says the refusal if it lasts.
+                    page == null -> if (!e.showsChat()) loadAsJob(e) { load(e, agentId, force = true, asked = true) }
+                    held != null && runsUnchanged(page, held.first, noLocal = held.second) -> refreshNewestRuns(e, handed = page)
+                    else -> loadAsJob(e) { load(e, agentId, force = true, handed = page, asked = true) }
+                }
             }
             // The run under way, as the account now has it: followed when it is not, and the chat kept running while
             // the account says so with no run to stream yet (see [keepFollowing]).
@@ -2949,10 +2969,22 @@ class ConversationRepository(
             }
         }.exceptionOrNull()
         if (failure is CancellationException) throw failure
-        // A load swallows its failure onto the screen; the pull says it too, in the same words.
+        // A rate limit's refusal with the chat on screen — the run list's, or the record's own — is the chat's to read
+        // again after the wait, quietly (see [holdRateLimited]); the pull is answered with what it did read.
+        val refused = (failure ?: limited)?.takeIf { it.isRateLimitRefusal() && e.showsChat() }
+        if (refused != null) e.holdRateLimited(refused, asked = true, secondary = true)
+        val unsaid = failure?.takeIf { it !== refused }
+        // A load swallows its failure onto the screen; the pull says it too, in the same words. One the load did not
+        // put there goes under the transcript as a load's would, with its Retry: never a word that slides up and away.
+        val said = unsaid?.userMessage()
+        if (said != null && e.showsChat()) e.publish(mutate = { pullFailure = said }, transform = { copy(transcriptError = transcriptError ?: said) })
+        else if (unsaid == null) {
+            val stale = synchronized(e) { e.pullFailure.also { e.pullFailure = null } }
+            if (stale != null) e.publish(transform = { if (transcriptError == stale) copy(transcriptError = null) else this })
+        }
         val after = e.state.value
         val shown = (after.error ?: after.transcriptError).takeIf { it != (before.error ?: before.transcriptError) }
-        val error = failure?.userMessage() ?: shown
+        val error = said ?: shown
         // The live stream asked again from where the reader's copy now stands, its backoff forgotten; the list
         // entry's word taken afresh.
         synchronized(e) {
@@ -3497,8 +3529,8 @@ class ConversationRepository(
                     else -> null
                 }
                 // A rate limit's refusal is read again by itself once its wait has passed, and said only once it has
-                // lasted (see [holdRateLimited]): the turns the other endpoint gave stand meanwhile.
-                val issueHeld = fetched && issueCause != null && e.holdRateLimited(issueCause, asked)
+                // lasted (see [holdRateLimited]): the turns the other endpoint gave stand meanwhile, so it is never said.
+                val issueHeld = fetched && issueCause != null && e.holdRateLimited(issueCause, asked, secondary = true)
                 val transcriptIssue = when {
                     issueHeld -> null
                     transcriptFailed -> convResult.exceptionOrNull()?.userMessage() ?: "The transcript could not be read."
@@ -3557,7 +3589,8 @@ class ConversationRepository(
                     // Nothing read: a rate limit's refusal by either endpoint holds the chat loading until it is read
                     // again after the wait (a new chat's `/v0` transcript may not know it yet, a `404` beside it).
                     val limited = listOfNotNull(runResult.exceptionOrNull(), convResult.exceptionOrNull()).firstOrNull { it.rateLimitWaitMs() != null }
-                    if (limited != null && e.holdRateLimited(limited, asked)) e.publish(transform = { copy(isLoading = true, error = null) })
+                    val onScreen = e.showsChat()
+                    if (limited != null && e.holdRateLimited(limited, asked, secondary = onScreen)) e.publish(transform = { copy(isLoading = !onScreen, error = null) })
                     else e.reportLoadFailure(limited ?: convResult.exceptionOrNull() ?: runResult.exceptionOrNull())
                 }
                 // The latest run is the row's execution state (a turn that ended in an error is only visible here),
@@ -3595,7 +3628,8 @@ class ConversationRepository(
             }
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            if (e.holdRateLimited(t, asked)) e.publish(transform = { copy(isLoading = true, error = null) }) else e.reportLoadFailure(t)
+            val onScreen = e.showsChat()
+            if (e.holdRateLimited(t, asked, secondary = onScreen)) e.publish(transform = { copy(isLoading = !onScreen, error = null) }) else e.reportLoadFailure(t)
         }
         // The read failed: what it held back is drawn, as it stands — no prompt is on its way to place it.
         if (synchronized(e) { e.promptsAwaited }) e.publish(mutate = { promptsAwaited = false })
@@ -3928,13 +3962,13 @@ class ConversationRepository(
                 recordError = message
                 recordWindow = null
                 extending = false
-                again = serverError && serverErrorRereads < MAX_SERVER_ERROR_REREADS && attached > 0
+                again = (serverError || fallback.rateLimited) && serverErrorRereads < MAX_SERVER_ERROR_REREADS && attached > 0
                 if (again) serverErrorRereads++
             },
             transform = { copy(recordFallback = fallback, isLoadingOlder = e.loadingOlder) },
         )
-        // The server's failure passes: the record is asked again by itself once the pause is over, a couple of
-        // times while the chat is on screen, so the reader need not tap Retry for a blip.
+        // The server's failure passes, and so does a rate limit's minute: the record is asked again by itself once the
+        // pause is over, a couple of times while the chat is on screen, so the reader need not tap Retry for a blip.
         if (again) e.scope.launch {
             delay(pause)
             if (synchronized(e) { e.attached > 0 && e.state.value.recordFallback === fallback }) load(e, e.agentId, force = true)
@@ -4495,6 +4529,10 @@ class ConversationRepository(
         e.publish(mutate = { if (recordWindow === known) recordWindow = built; fetchedAt = AppClock.now(); pruneLocal() })
         persistRecord(e, built, known, session.current, cacheTokens())
         if (!refreshRuns) return true
+        // Steps added to the turn a live stream follows bring no run the list lacks; the stream says when that run
+        // ends, and the run list's endpoint is shared by every chat's reads.
+        val newTurn = built.turnCount != known.turnCount || built.turns.lastOrNull()?.stepIndex != known.turns.lastOrNull()?.stepIndex
+        if (!newTurn && synchronized(e) { e.isFollowingLive() }) return true
         // The turns the record grew by are the chat's newest runs, and the window pairs turns with runs by position
         // from the newest: the list's first page is read again so its newest end is the record's — a Project's
         // injected turns arrive by the dozen between two reads, and a list a dozen runs short paired every turn with
@@ -4913,8 +4951,13 @@ class ConversationRepository(
      * is lasting, and said; the chat is still read again, each wait double the last (never less than the one named,
      * at most a minute past it), so the notice goes soon after Cursor answers without a lasting limit read into
      * again at its own pace. Any other failure is not this function's: false, nothing scheduled.
+     *
+     * [secondary]: the chat is on screen without what was refused — the transcript stands, or its turn is streaming —
+     * so the refusal is never said, however long it lasts or whoever asked: there is nothing the reader could do
+     * about it but wait, and a running chat under "Rate limited by Cursor" read as the agent stopping (v0.4.31, a pull
+     * to catch up while the run list's minute was spent).
      */
-    private fun Entry.holdRateLimited(failure: Throwable?, asked: Boolean): Boolean {
+    private fun Entry.holdRateLimited(failure: Throwable?, asked: Boolean, secondary: Boolean = false): Boolean {
         val named = failure.rateLimitWaitMs() ?: return false
         val entry = this
         return synchronized(this) {
@@ -4927,9 +4970,14 @@ class ConversationRepository(
                 delay(wait)
                 if (synchronized(entry) { entry.attached > 0 && !entry.paused }) revalidateNow(entry, force = true)
             }
-            !asked && holds <= RATE_LIMIT_QUIET_HOLDS
+            secondary || (!asked && holds <= RATE_LIMIT_QUIET_HOLDS)
         }
     }
+
+    /** Whether the chat has anything on screen — rows, or its turn being streamed — that a refused read would leave standing. */
+    private fun Entry.showsChat(): Boolean = state.value.items.isNotEmpty() || isFollowingLive()
+
+    private fun Throwable?.isRateLimitRefusal(): Boolean = rateLimitWaitMs() != null
 
     /**
      * How long to wait before asking again after [this] rate limit's refusal: the wait it named, bounded, a moment
@@ -4954,6 +5002,11 @@ class ConversationRepository(
      * as the agent failing.
      */
     private fun Entry.recordRefreshFailed(failure: Throwable?, message: String, asked: Boolean) {
+        // The window stands: a rate limit's refusal is waited out and the record read again, never said over it.
+        if (failure.isRateLimitRefusal() && holdRateLimited(failure, asked, secondary = true)) {
+            publish(transform = { copy(isLoading = false) })
+            return
+        }
         if (!asked && quietRefreshFailure(failure)) {
             publish(transform = { copy(isLoading = false) })
             return

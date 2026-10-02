@@ -396,6 +396,8 @@ tasks.withType<Test>().configureEach {
     inputs.dir(robolectricSdkDir).withPropertyName("robolectricSdkDir").withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("robolectric.offline", "true")
     systemProperty("robolectric.dependency.dir", robolectricSdkDir.get().asFile.absolutePath)
+    // A failure's own words in the console, not only its class: CI's log is often all there is to read a flake by.
+    testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

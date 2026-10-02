@@ -36,7 +36,8 @@ class NoticeDismissalsTest {
     private lateinit var server: FaultServer
     private var rig: FaultRig? = null
     private val agentId = LongProject.AGENT_ID
-    private val rateLimited = FaultServer.Fault.Status(429, "resource_exhausted", "Too many requests", retryAfter = "2")
+    // A refusal the reader is told of: a rate limit is not one (it is waited out and read again, see `LoadNotices.recordFallback`).
+    private val refused = FaultServer.Fault.Status(500, "internal", "The record could not be read")
 
     @Before
     fun setUp() {
@@ -53,7 +54,7 @@ class NoticeDismissalsTest {
         server.transcripts[agentId] = LongProject.v0Transcript(turns)
         server.records[agentId] = turns.flatMap { it.record }
         server.outage(FaultServer.Route.Stream, FaultServer.Fault.StreamCut(events = newest.log.size), path = "/${newest.runId}/")
-        server.outage(FaultServer.Route.RecordState, rateLimited)
+        server.outage(FaultServer.Route.RecordState, refused)
     }
 
     @After
@@ -77,7 +78,7 @@ class NoticeDismissalsTest {
         conversations.attach(agentId)
         rig.awaitSettled { it.recordFallback != null }
         val notice = recordNotice()
-        assertThat(notice.title).contains("Too many requests")
+        assertThat(notice.title).contains("The record could not be read")
         // Nothing closed yet, once the device's record has been read: the notice shows.
         rig.awaitUntil { dismissals.hidden.value != null }
         assertThat(LoadNotices.shown(state(), dismissals.hidden.value)).containsExactly(notice)
@@ -88,7 +89,7 @@ class NoticeDismissalsTest {
         rig.awaitUntil { rig.prefs.dismissedNotices.first()[agentId] == setOf(notice.identity) }
         // The diagnostics still carry the refusal: closing the card changes what is shown, not what is known.
         val record = conversations.loadDiagnostics(agentId)!!.record!!
-        assertThat(record.error).contains("Too many requests")
+        assertThat(record.error).contains("The record could not be read")
         assertThat(record.fallback!!.text).startsWith("fallback=runs")
         assertThat(state().recordFallback).isNotNull()
 

@@ -37,6 +37,17 @@ class LoadNoticesTest {
     }
 
     @Test
+    fun `the record refused by a rate limit is no notice - the documented endpoints carry the chat and the record is asked again`() {
+        val path = "/aiserver.v1.BackgroundComposerService/StreamConversation"
+        val limited = ConversationState("bc-1", items = items, isLoading = false, recordFallback = fallback.copy(path = path, httpCode = 429, code = "resource_exhausted"))
+        assertThat(LoadNotices.of(limited)).isEmpty()
+        assertThat(LoadNotices.of(limited.copy(recordFallback = limited.recordFallback!!.copy(httpCode = 200)))).isEmpty()
+        // A refusal the reader can do something about still says so.
+        val removed = limited.copy(recordFallback = fallback.copy(reason = "FetchBackgroundComposer has been removed", path = path, httpCode = 404, code = "unimplemented"))
+        assertThat(LoadNotices.of(removed).map { it.kind }).containsExactly(LoadNotice.Kind.RecordFallback)
+    }
+
+    @Test
     fun `a notice's identity is its words alone`() {
         val a = LoadNotices.recordFallback(fallback)
         // The same refusal read again, later and slower, is the same notice.

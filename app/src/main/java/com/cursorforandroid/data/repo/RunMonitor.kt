@@ -129,8 +129,11 @@ class RunMonitor(
                 delay(refreshIntervalMs)
                 tick++
                 // The newest page is where agents started elsewhere show up; a full pass every few ticks still
-                // catches follow-ups on old agents without paging through everything each minute.
-                agents.refresh(silent = true, depth = if (tick % FULL_REFRESH_EVERY == 0) RefreshDepth.Full else RefreshDepth.Quick)
+                // catches follow-ups on old agents without paging through everything each minute. A quick tick is
+                // skipped when the sidebar's own poll read the list within half an interval: the list endpoints and
+                // the run records each refresh reads are budgeted per minute across the whole app.
+                if (tick % FULL_REFRESH_EVERY == 0) agents.refresh(silent = true, depth = RefreshDepth.Full)
+                else agents.refreshIfStale(refreshIntervalMs / 2, depth = RefreshDepth.Quick)
             }
         }
     }

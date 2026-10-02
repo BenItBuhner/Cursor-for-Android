@@ -979,13 +979,14 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         }
     }
 
-    /** The pull's indicator went home over [shown]: a failure is the reader's now, once (see [CatchUpStatus.word]), and put away. */
+    /**
+     * The pull's indicator went home over [shown]: a failure is put away with it. Its words are under the transcript
+     * already, with the Retry (see `ConversationRepository.catchUp`); a rate limit the chat waits out is said nowhere.
+     */
     fun catchUpSettled(shown: CatchUpStatus) {
-        if (catchUpState.value != shown) return
-        val word = shown.word() ?: return
+        if (catchUpState.value != shown || shown.word() == null) return
         catchUpJob?.cancel()
         catchUpState.value = CatchUpStatus.Idle
-        toast.value = word
     }
 
     fun cancelRun() = viewModelScope.launch {
