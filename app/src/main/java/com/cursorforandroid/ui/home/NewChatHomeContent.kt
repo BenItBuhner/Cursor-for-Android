@@ -97,6 +97,7 @@ object NewChatHomeCopy {
 }
 
 object NewChatHomeTags {
+    const val PAGE = "new_chat_page"
     const val COMPOSER = "new_chat_composer"
     const val PROJECT_SHORTCUT = "new_chat_project_shortcut"
     const val RECENT_CHAT = "new_chat_recent_chat"
@@ -106,6 +107,9 @@ object NewChatHomeTags {
     const val HIDDEN_LINE = "new_chat_projects_hidden_line"
     const val HIDDEN_DROP_TARGET = "new_chat_projects_hidden_drop_target"
     const val ALL_HIDDEN = "new_chat_projects_all_hidden"
+
+    /** What the page lists under its composer, while the keyboard has the page given over to the composer. */
+    const val LISTED_HIDDEN = "new_chat_listed_hidden"
 }
 
 /** What a Projects note says instead of the shortcuts: the mode that has them is off, or there are none yet. */

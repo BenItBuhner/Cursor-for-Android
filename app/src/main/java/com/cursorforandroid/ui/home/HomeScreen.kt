@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -201,7 +202,13 @@ fun HomeScreen(
         graph.share.consume(draft.generation)
     }
 
-    Column(modifier.fillMaxSize().background(colors.canvas).endsArrangingOnTap(projectGrid)) {
+    // With the composer focused, an on-screen keyboard gives the page over to it (see KeyboardFocus).
+    var composerFocused by remember { mutableStateOf(false) }
+    var paneHeight by remember { mutableIntStateOf(0) }
+    val keyboardFocus = rememberKeyboardFocus(composerFocused, paneHeight = { paneHeight })
+    val givenOver by keyboardFocus.engaged
+
+    Column(modifier.fillMaxSize().background(colors.canvas).onSizeChanged { paneHeight = it.height }.endsArrangingOnTap(projectGrid)) {
         if (onOpenSidebar != null) {
             CursorHeader(leading = { FlatIconButton(CursorIcons.Sidebar, "Open sidebar", onClick = onOpenSidebar) })
         }
@@ -215,7 +222,10 @@ fun HomeScreen(
         // While the shortcuts are being arranged the page stands still, so the "Hidden" section opens below them
         // rather than lifting the shortcut under the finger away with the rest.
         centring.held = { projectGrid.arranging }
+        centring.alone = { keyboardFocus.fraction }
         LaunchedEffect(recentState) { centring.follow(recentState) }
+        // The composer stands alone from the top of the page, wherever the list had been scrolled to when it was focused.
+        LaunchedEffect(givenOver) { if (givenOver) recentState.animateScrollToItem(0) }
         var composerFocusRequests by remember { mutableIntStateOf(0) }
         val sendMotion = LocalSendMotion.current
         val composerAnchor = remember { ComposerAnchor() }
@@ -241,22 +251,33 @@ fun HomeScreen(
         val footUnderBar = { (barInsets.getBottom(density) - imeInsets.getBottom(density)).coerceAtLeast(0) }
         LaunchedEffect(expansion.expanded) { if (expansion.expanded) recentState.animateScrollToItem(0) }
         projectGrid.page = recentState
+        val topPadding = pageTopPadding(withHeader = onOpenSidebar != null)
+        val topPaddingPx = with(density) { topPadding.roundToPx() }
         LazyColumn(
             Modifier
                 .fillMaxSize()
                 .imePadding()
+                .then(with(centring) { Modifier.measuringRoom(topPaddingPx) })
                 .onSizeChanged { pageHeight = it.height }
                 .onGloballyPositioned { page -> projectGrid.pageBounds = page.boundsInWindow().let { it.copy(bottom = it.bottom - footUnderBar()) } }
-                .scrollEdgeFade(recentState, surface = colors.canvas),
+                .scrollEdgeFade(recentState, surface = colors.canvas)
+                .testTag(NewChatHomeTags.PAGE),
             state = recentState,
-            userScrollEnabled = !expansion.expanded,
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = pageTopPadding(withHeader = onOpenSidebar != null), bottom = PageBottomPadding + navigationBar),
+            userScrollEnabled = !expansion.expanded && !givenOver,
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = topPadding, bottom = PageBottomPadding + navigationBar),
             verticalArrangement = centring.arrangement,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             item(PageCentring.LEAD_KEY) { centring.Lead() }
             item(PageCentring.COMPOSER_KEY) {
-                Column(Modifier.widthIn(max = CursorDimens.composerMaxWidth).fillMaxWidth().testTag(NewChatHomeTags.COMPOSER)) {
+                Column(
+                    Modifier
+                        .widthIn(max = CursorDimens.composerMaxWidth)
+                        .fillMaxWidth()
+                        .onFocusChanged { composerFocused = it.hasFocus }
+                        .onSizeChanged { centring.composerLaidOut(it.height) }
+                        .testTag(NewChatHomeTags.COMPOSER),
+                ) {
                     NewChatSelectors(state, onRepo = { repoSheet = true }, onBranch = { branchSheet = true }, onDevice = { deviceSheet = true })
                     ComposerBox(
                         value = state.prompt,
@@ -307,7 +328,9 @@ fun HomeScreen(
                 }
             }
             if (blocks.isNotEmpty()) item("gap") { Spacer(Modifier.height(ComposerGap)) }
-            items(blocks, key = { it.key }) { block -> HomeBlockView(block, nowMillis = listState.nowMillis, actions = blockActions) }
+            items(blocks, key = { it.key }) { block ->
+                Box(Modifier.listedUnder(keyboardFocus)) { HomeBlockView(block, nowMillis = listState.nowMillis, actions = blockActions) }
+            }
         }
     }
 
