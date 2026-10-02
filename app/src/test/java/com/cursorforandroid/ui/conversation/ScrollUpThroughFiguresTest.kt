@@ -260,11 +260,12 @@ class ScrollUpThroughFiguresTest {
         return Pass(moves, landedAcrossTop, placeholderHeights, figureHeights)
     }
 
-    /** A fling only slows: a frame moving the text further than the frame before is a jump. (Slack for rounding.) */
+    /** A fling only slows, and slowly: a frame moving the text further than the frame before, or much less (a jump back up), is a jump. */
     private fun assertNoJump(pass: Pass, what: String) {
         assertWithMessage("$what: the fling ran on; moves ${pass.moves}").that(pass.moves.size).isGreaterThan(8)
         pass.moves.zipWithNext().forEachIndexed { i, (before, after) ->
             assertWithMessage("$what: frame ${i + 2} moved $after px after $before px; moves: ${pass.moves}").that(after).isAtMost(before + 2f)
+            assertWithMessage("$what: frame ${i + 2} moved $after px after $before px; moves: ${pass.moves}").that(after).isAtLeast(before - 10f)
         }
     }
 

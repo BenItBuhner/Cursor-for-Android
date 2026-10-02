@@ -169,9 +169,10 @@ class TranscriptRowGrowthTest {
         }
         assertWithMessage("a row grew while the fling ran").that(grew).isTrue()
         assertWithMessage("the fling ran on").that(moves.size).isGreaterThan(8)
-        // A fling only slows: a frame moving the rows further than the one before is a jump. (Slack for rounding.)
+        // A fling only slows, and slowly: a frame moving the rows further than the one before, or much less, is a jump.
         moves.zipWithNext().forEachIndexed { i, (before, after) ->
             assertWithMessage("frame ${i + 2} moved $after px after $before px; moves: $moves").that(after).isAtMost(before + 2f)
+            assertWithMessage("frame ${i + 2} moved $after px after $before px; moves: $moves").that(after).isAtLeast(before - 10f)
         }
     }
 

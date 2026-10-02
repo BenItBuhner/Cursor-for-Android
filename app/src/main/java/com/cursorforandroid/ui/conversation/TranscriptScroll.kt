@@ -31,7 +31,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.node.LayoutModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateMeasurement
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.ScrollAxisRange
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -40,6 +45,7 @@ import androidx.compose.ui.semantics.indexForKey
 import androidx.compose.ui.semantics.scrollToIndex
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.verticalScrollAxisRange
+import androidx.compose.ui.unit.Constraints
 import com.cursorforandroid.domain.TranscriptRow
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -284,12 +290,13 @@ internal class TranscriptScroll(val list: LazyListState, private val followingSt
         return held.height
     }
 
-    /** As the row with [held] is placed: the anchor moved up by its noted shift, once per shift. */
-    fun anchorHigher(held: RowGrowth) {
-        if (held.shift == 0 || held.anchored) return
+    /** As the row with [held] is placed: the anchor moved up by its noted shift, once per shift; whether it was this time. */
+    fun anchorHigher(held: RowGrowth): Boolean {
+        if (held.shift == 0 || held.anchored) return false
         held.anchored = true
         // A shrink past the row's hidden part asks for a negative offset, which the list fills from the rows above.
         list.requestScrollToItem(list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset + held.shift)
+        return true
     }
 
     /** Pinned, whether [key]'s row is the first on screen and crosses the top edge, by the list's last layout. */
@@ -468,12 +475,30 @@ internal class RowGrowth {
  * [TranscriptScroll.absorbingHeight]): laid out at the height the list last had for it on the frame it changes, its
  * content placed so that its lower edge stays, the list re-anchored as it is placed.
  */
-internal fun Modifier.absorbingGrowth(scroll: TranscriptScroll, key: Any, held: RowGrowth): Modifier = layout { measurable, constraints ->
-    val placeable = measurable.measure(constraints)
-    val height = scroll.absorbingHeight(key, held, placeable.height)
-    layout(placeable.width, height) {
-        placeable.place(0, -held.shift)
-        scroll.anchorHigher(held)
+internal fun Modifier.absorbingGrowth(scroll: TranscriptScroll, key: Any, held: RowGrowth): Modifier = this then AbsorbingGrowthElement(scroll, key, held)
+
+private data class AbsorbingGrowthElement(val scroll: TranscriptScroll, val key: Any, val held: RowGrowth) : ModifierNodeElement<AbsorbingGrowthNode>() {
+    override fun create() = AbsorbingGrowthNode(scroll, key, held)
+
+    override fun update(node: AbsorbingGrowthNode) {
+        node.scroll = scroll
+        node.key = key
+        node.held = held
+    }
+}
+
+private class AbsorbingGrowthNode(var scroll: TranscriptScroll, var key: Any, var held: RowGrowth) : LayoutModifierNode, Modifier.Node() {
+    override fun MeasureScope.measure(measurable: Measurable, constraints: Constraints): MeasureResult {
+        val placeable = measurable.measure(constraints)
+        val height = scroll.absorbingHeight(key, held, placeable.height)
+        return layout(placeable.width, height) {
+            placeable.place(0, -held.shift)
+            // The row was measured on its own (its figure landing re-laid it out, at the height the list has for it,
+            // so the list saw no change): the list's measure for the new anchor would take that height as it is, and
+            // the rows below would move up by the whole shift. Asked to measure again, the row is its real height in
+            // that measure.
+            if (scroll.anchorHigher(held)) invalidateMeasurement()
+        }
     }
 }
 
