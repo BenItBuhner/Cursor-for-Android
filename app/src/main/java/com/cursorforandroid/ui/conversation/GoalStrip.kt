@@ -2,6 +2,7 @@ package com.cursorforandroid.ui.conversation
 
 import android.animation.ValueAnimator
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloatAsState
@@ -35,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -43,11 +45,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
 import com.cursorforandroid.domain.Goal
 import com.cursorforandroid.domain.GoalStatus
 import com.cursorforandroid.ui.components.CursorIcons
+import com.cursorforandroid.ui.components.DockGap
+import com.cursorforandroid.ui.components.DockedRowHeight
 import com.cursorforandroid.ui.components.ExpandedTopGap
 import com.cursorforandroid.ui.components.HairlineDivider
+import com.cursorforandroid.ui.components.composerDockInset
 import com.cursorforandroid.ui.components.dockedCard
 import com.cursorforandroid.ui.components.fadingVerticalScroll
 import com.cursorforandroid.ui.components.pressable
@@ -56,6 +62,7 @@ import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.util.AppClock
 import com.cursorforandroid.util.TimeFormat
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 /** [GoalStrip] holding its own open state, saved with the screen per objective. */
 @Composable
@@ -130,7 +137,7 @@ fun GoalStrip(
         Row(
             Modifier
                 .fillMaxWidth()
-                .heightIn(min = RowHeight)
+                .heightIn(min = DockedRowHeight)
                 .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = CursorDimens.composerPadding - 2.dp)
                 .padding(vertical = 6.dp),
             // Opened, the glyphs stay on the label's line rather than centring on an objective of any length.
@@ -171,45 +178,105 @@ fun GoalStrip(
 }
 
 /**
- * The goal strip over what docks under it — the queue and the composer, in [below] — measured bottom first, so an opened
- * goal takes the height left over rather than pushing the composer off the page. [below] is measured with all the height
- * but the goal's collapsed one, which is what the composer expanding measured before; the goal then gets what [below]
- * left, less [ExpandedTopGap] while [open], the gap an expanded composer keeps under the header. Both are read while
- * laying out, so the goal follows the keyboard and the composer frame by frame. The goal's slot is always composed,
- * empty without a goal, so the composer below keeps its place in the tree (and its text) as a goal comes and goes.
+ * The goal strip over what docks under it — the queue's [cards], then the composer in [below] — measured bottom first,
+ * so an opened goal takes the height left over rather than pushing the composer off the page. [cards] and [below] are
+ * measured with all the height but the goal's collapsed one, which is what the composer expanding measured before; the
+ * goal then gets what they left, less [ExpandedTopGap] while [open], the gap an expanded composer keeps under the header.
+ * All of it is read while laying out, so the goal follows the keyboard and the composer frame by frame. The goal's slot
+ * is always composed, empty without a goal, so the composer below keeps its place in the tree (and its text) as a goal
+ * comes and goes.
+ *
+ * [aside] — the jump button — docks at the end of the cards' row while [asideShown]: flush with the cards' end edge, as
+ * far over the composer as the lowest card ([DockGap]), with the same [DockGap] between it and the cards, which give
+ * their end edges up to it as it comes and take them back as it goes. With no card beside it, it stands where the
+ * lowest one would, over the transcript's bottom edge, and the dock asks no more height for it: the transcript is
+ * never resized by a scroll. One spring carries the cards' edge and the button's fade and scale: the cards make the
+ * room first and the button fades and grows into it, never drawn over a card, and going it fades before the cards take
+ * the room back. Under reduced motion ([animate] off) both snap. The button stays composed until it has faded.
  */
 @Composable
 fun GoalDock(
     open: Boolean,
     goal: (@Composable () -> Unit)?,
     modifier: Modifier = Modifier,
+    cards: (@Composable ColumnScope.() -> Unit)? = null,
+    aside: (@Composable () -> Unit)? = null,
+    asideShown: Boolean = false,
+    animate: () -> Boolean = ValueAnimator::areAnimatorsEnabled,
     below: @Composable ColumnScope.() -> Unit,
 ) {
     val collapsedGoalPx = remember { mutableIntStateOf(0) }
     val currentOpen by rememberUpdatedState(open)
+    val showing = asideShown && aside != null
+    val presence = remember { Animatable(if (showing) 1f else 0f) }
+    // Composed from the frame it is shown, and kept through the fade once it is not.
+    var lingering by remember { mutableStateOf(false) }
+    val animated by rememberUpdatedState(animate)
+    LaunchedEffect(showing) {
+        if (showing) lingering = true
+        val target = if (showing) 1f else 0f
+        if (animated()) presence.animateTo(target, AsideSpring) else presence.snapTo(target)
+        if (!showing) lingering = false
+    }
+    val asidePresent = showing || lingering
+    val inset = composerDockInset(CursorTheme.shapes.xl)
     Layout(
         content = {
-            Box(contentAlignment = Alignment.TopCenter) { goal?.invoke() }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, content = below)
+            Box(Modifier.layoutId(DockSlot.Goal), contentAlignment = Alignment.TopCenter) { goal?.invoke() }
+            if (cards != null) Column(Modifier.layoutId(DockSlot.Cards), horizontalAlignment = Alignment.CenterHorizontally, content = cards)
+            Column(Modifier.layoutId(DockSlot.Below), horizontalAlignment = Alignment.CenterHorizontally, content = below)
+            if (asidePresent && aside != null) Box(Modifier.layoutId(DockSlot.Aside)) { aside() }
         },
         modifier = modifier,
     ) { measurables, constraints ->
         val width = constraints.maxWidth
         val bounded = constraints.hasBoundedHeight
+        val asidePlaceable = measurables.firstOrNull { it.layoutId == DockSlot.Aside }?.measure(Constraints())
+        val shown = presence.value.coerceIn(0f, 1f)
+        // The cards make room over the first part of the way, easing to a stop, and the button shows in the room
+        // they have made over the last: it is never drawn over a card. Going, the reverse.
+        val room = (shown / RoomShare).coerceAtMost(1f).let { 1f - (1f - it) * (1f - it) }
+        val seen = ((shown - SeenFrom) / (1f - SeenFrom)).coerceIn(0f, 1f)
+        // What the cards' end edge gives up: the button's drawn width and the gap before it, the button standing in
+        // the cards' own end inset.
+        val shift = asidePlaceable?.let { ((it.width - inset.start.roundToPx() - inset.end.roundToPx() + DockGap.roundToPx()) * room).roundToInt() } ?: 0
         val full = Constraints(minWidth = width, maxWidth = width)
-        val belowMax = if (bounded) (constraints.maxHeight - collapsedGoalPx.intValue).coerceAtLeast(0) else Constraints.Infinity
-        val below = measurables[1].measure(full.copy(maxHeight = belowMax))
+        val beside = Constraints(minWidth = width - shift, maxWidth = width - shift)
+        var left = if (bounded) (constraints.maxHeight - collapsedGoalPx.intValue).coerceAtLeast(0) else Constraints.Infinity
+        val cardsPlaceable = measurables.firstOrNull { it.layoutId == DockSlot.Cards }?.measure(beside.copy(maxHeight = left))
+        if (bounded && cardsPlaceable != null) left = (left - cardsPlaceable.height).coerceAtLeast(0)
+        val below = measurables.first { it.layoutId == DockSlot.Below }.measure(full.copy(maxHeight = left))
+        val cardsHeight = cardsPlaceable?.height ?: 0
         val gap = if (currentOpen) ExpandedTopGap.roundToPx() else 0
-        val goalMax = if (bounded) (constraints.maxHeight - below.height - gap).coerceAtLeast(0) else Constraints.Infinity
-        val goalPlaceable = measurables[0].measure(full.copy(maxHeight = goalMax))
+        val goalMax = if (bounded) (constraints.maxHeight - cardsHeight - below.height - gap).coerceAtLeast(0) else Constraints.Infinity
+        val goalPlaceable = measurables.first { it.layoutId == DockSlot.Goal }.measure(beside.copy(maxHeight = goalMax))
         if (!currentOpen && collapsedGoalPx.intValue != goalPlaceable.height) collapsedGoalPx.intValue = goalPlaceable.height
-        val height = (goalPlaceable.height + below.height).coerceIn(constraints.minHeight, if (bounded) constraints.maxHeight else Int.MAX_VALUE)
+        val composerTop = goalPlaceable.height + cardsHeight
+        val height = (composerTop + below.height).coerceIn(constraints.minHeight, if (bounded) constraints.maxHeight else Int.MAX_VALUE)
         layout(width, height) {
-            goalPlaceable.place(0, 0)
-            below.place(0, goalPlaceable.height)
+            goalPlaceable.placeRelative(0, 0)
+            cardsPlaceable?.placeRelative(0, goalPlaceable.height)
+            below.placeRelative(0, composerTop)
+            asidePlaceable?.placeRelativeWithLayer(width - asidePlaceable.width, composerTop - DockGap.roundToPx() - asidePlaceable.height) {
+                alpha = seen
+                scaleX = lerp(AsideEnterScale, 1f, seen)
+                scaleY = scaleX
+            }
         }
     }
 }
+
+private enum class DockSlot { Goal, Cards, Below, Aside }
+
+/** The jump button coming and going beside the cards, and their end edge with it: settling with no bounce past either end. */
+private val AsideSpring = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessLow, visibilityThreshold = 0.002f)
+
+/** The share of itself the jump button grows from as it fades in, and shrinks to as it fades out. */
+private const val AsideEnterScale = 0.8f
+
+/** How far along the spring the cards have made all their room, and from where the button shows in it. */
+private const val RoomShare = 0.65f
+private const val SeenFrom = 0.5f
 
 /** The strip's height opening and closing: the queue stack's spring, so the two move as one family. */
 private val GoalSizeSpring = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow, visibilityThreshold = IntSize.VisibilityThreshold)
@@ -236,6 +303,4 @@ internal fun details(goal: Goal, elapsed: String?): List<String> = buildList {
     )
 }
 
-/** One line of composer text plus the composer's vertical padding: the queue's rows are this tall, and this one is two lines of it. */
-private val RowHeight = 40.dp
 private const val TICK_MS = 1_000L

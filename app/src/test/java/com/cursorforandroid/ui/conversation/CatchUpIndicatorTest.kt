@@ -232,8 +232,11 @@ class CatchUpIndicatorTest {
         assertThat(settled).isEmpty()
 
         status.value = CatchUpStatus.Done(newMessages = 2, changed = true)
+        // The fade leads: for its first frames the gap is still held, so it is not the closing gap that shrinks the disc away.
+        repeat(4) { frame() }
+        assertThat(pull.lift).isWithin(0.5f).of(pull.heldPx)
         // On the way home the indicator stays in the middle of the closing gap.
-        repeat(6) { frame() }
+        repeat(8) { frame() }
         val going = shot().line()
         assertThat(pull.lift).isLessThan(pull.heldPx - px(4f))
         going.discCentre?.let { centre -> assertThat(edge - centre).isWithin(1.5f).of((px(EdgeGap.value) + pull.lift) / 2f) }
