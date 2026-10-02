@@ -177,8 +177,10 @@ class AccountUsageMonitorTest {
         },
     ) : AccountUsageApi {
         private val queue = ArrayDeque(periods.toList())
+        private val lastQueued = periods.lastOrNull()
+            ?: PeriodUsage(autoPercentUsed = 0.0, apiPercentUsed = 0.0, billingCycleEndMs = null)
         var period: suspend () -> PeriodUsage = {
-            queue.removeFirstOrNull() ?: PeriodUsage(autoPercentUsed = 0.0, apiPercentUsed = 0.0, billingCycleEndMs = null)
+            queue.removeFirstOrNull() ?: lastQueued
         }
         var periodCalls = 0
         var grantCalls = 0
