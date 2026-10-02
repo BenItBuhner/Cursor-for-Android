@@ -7,7 +7,7 @@ import { COLOR } from "../theme";
 import { Device, deviceMargin, screenHeight } from "./Device";
 import { Headline } from "./Headline";
 import { Screen } from "./Screen";
-import { sweepAt } from "./Stage";
+import { GRAIN, lightAt } from "./Stage";
 
 type Slot = { device: DeviceId; take: TakeId; x: number; y: number; width: number };
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -147,8 +147,8 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
   const orbit = ORBIT[framing];
   const p = progress(f, AT.lineup, AT.end);
   const origin = `${width / 2}px ${height / 2}px`;
-  const sheen = sweepAt(f);
-  const dim = easeSmooth(progress(f, AT.end - DIP, AT.end));
+  const light = lightAt(f, width, height);
+  const dim = easeSmooth(progress(f, AT.end - DIP - 1, AT.end - 1));
   return (
     <>
       <div style={{ position: "absolute", inset: 0 }}>
@@ -179,8 +179,8 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
                     transformOrigin: `${x + w / 2}px ${y + screenHeight(slot.take, w)}px`,
                   }}
                 >
-                  <Device take={slot.take} x={x} y={y} width={w} sheen={sheen}>
-                    <Screen take={slot.take} frame={takeFrame(lineupReel(slot.take), Math.max(f, AT.lineup))} width={w} />
+                  <Device take={slot.take} x={x} y={y} width={w} light={light}>
+                    <Screen take={slot.take} frame={takeFrame(lineupReel(slot.take), f)} width={w} />
                   </Device>
                 </div>
               );
@@ -198,7 +198,13 @@ export const Lineup: React.FC<{ framing: Framing; theme: Theme; f: number; width
           wordAt={LINEUP.map((_, i) => landAt(i))}
         />
       </div>
-      {dim > 0 ? <div style={{ position: "absolute", inset: 0, background: COLOR.stage, opacity: dim }} /> : null}
+      {dim > 0 ? (
+        <div style={{ position: "absolute", inset: 0, opacity: dim }}>
+          <div style={{ position: "absolute", inset: 0, background: COLOR.stage }} />
+          {/* The stage's grain over the stage it closes to, so the fall to near-black dithers instead of banding. */}
+          <div style={{ position: "absolute", inset: 0, backgroundImage: GRAIN, opacity: 0.045, mixBlendMode: "screen" }} />
+        </div>
+      ) : null}
     </>
   );
 };

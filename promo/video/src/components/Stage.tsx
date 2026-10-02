@@ -39,6 +39,16 @@ export function beamAt(f: number, width: number): number | null {
   return beam === null ? null : beam * width;
 }
 
+/** How far the beam leans off the upright, its top to the right, in degrees; and how far right per pixel up the frame. */
+export const LEAN_DEG = -SKEW;
+export const LEAN = Math.tan((LEAN_DEG * Math.PI) / 180);
+
+/** A point on the beam at [f], in the pixels of a [width] by [height] frame: where it crosses the frame's middle row. */
+export function lightAt(f: number, width: number, height: number): { x: number; y: number } | null {
+  const x = beamAt(f, width);
+  return x === null ? null : { x, y: height / 2 };
+}
+
 /**
  * The wipe the light carries at [f]: masks for the layer going out and the layer coming in, in the frame of a wrapper
  * skewed like the band (see [Wiped]), so the seam runs down the beam. The one going out stands solid until the beam
@@ -73,7 +83,7 @@ export const Wiped: React.FC<{ mask: string | undefined; children: React.ReactNo
   );
 
 /** A tile of fine, fixed grain, so the stage's gradients read as a surface rather than a fill. */
-const GRAIN = `url("data:image/svg+xml;utf8,${encodeURIComponent(
+export const GRAIN = `url("data:image/svg+xml;utf8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><filter id="g"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" seed="7"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 0.97  0 0 0 0 0.92  0 0 0 0.9 0"/></filter><rect width="240" height="240" filter="url(#g)"/></svg>`,
 )}")`;
 

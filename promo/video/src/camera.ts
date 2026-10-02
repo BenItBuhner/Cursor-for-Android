@@ -175,14 +175,32 @@ function pathOf(shots: Shot[]): Path {
 
 /** The camera at frame [f] of [path]. */
 export function cameraAt(path: Path, f: number): Camera {
+  return cameraOn(path, f, f);
+}
+
+/** Frames the pace a shot runs past its ends at takes to die away (see [cameraOn]). */
+const COAST = 12;
+
+/**
+ * The camera at frame [f] on the shot of [path] that holds frame [on], run on past the shot's ends rather than held:
+ * after it, going on at the pace it leaves at, and before it, coming at the pace it enters at, the pace dying away
+ * over [COAST] frames either way; so a shot a light carries out, or in, never stops dead on the cut.
+ */
+export function cameraOn(path: Path, on: number, f: number): Camera {
   let shot = path[0]!;
-  for (const s of path) if (s.from <= f) shot = s;
-  const i = Math.min(shot.until - shot.from - 1, Math.max(0, f - shot.from));
-  const j = Math.min(shot.until - shot.from - 2, Math.floor(i));
+  for (const s of path) if (s.from <= on) shot = s;
+  const last = shot.until - shot.from - 1;
+  const i = f - shot.from;
   const cam = {} as Camera;
   for (const ch of CHANNELS) {
     const ys = shot.values[ch];
-    cam[ch] = ys[j]! + (i - j) * (ys[j + 1]! - ys[j]!);
+    const coast = (over: number) => COAST * (1 - Math.exp(-over / COAST));
+    if (i > last) cam[ch] = ys[last]! + (ys[last]! - ys[last - 1]!) * coast(i - last);
+    else if (i < 0) cam[ch] = ys[0]! - (ys[1]! - ys[0]!) * coast(-i);
+    else {
+      const j = Math.min(last - 1, Math.floor(i));
+      cam[ch] = ys[j]! + (i - j) * (ys[j + 1]! - ys[j]!);
+    }
   }
   cam.zoom = Math.exp(cam.zoom);
   return cam;

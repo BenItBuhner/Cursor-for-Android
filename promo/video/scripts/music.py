@@ -522,11 +522,14 @@ def score(cues: dict) -> np.ndarray:
     wet = Pedalboard([Reverb(room_size=0.74, damping=0.4, wet_level=1.0, dry_level=0.0, width=1.0)])(mix.send.astype(np.float32), SR)
     wet = filt(wet, "highpass", 220)
     out = mix.dry + mix.pumped * gain + 0.55 * wet
-    # The dip into the end card: the score falls away with the picture, 10 dB, and the last hit comes back up on the cut.
-    a, b = int((end - cues["dip"] / fps) * SR), int(end * SR)
-    u = np.linspace(0, 1, b - a)
+    # The dip into the end card: the score falls away with the picture, 19 dB and all the way down six frames before the
+    # cut, so the last hit comes back up out of a held hush rather than out of the bottom of a fade.
+    a, c, b = int((end - cues["dip"] / fps) * SR), int((end - 6 / fps) * SR), int(end * SR)
+    u = np.linspace(0, 1, c - a)
     duck = np.ones(out.shape[1])
-    duck[a:b] = 1 - (1 - 10 ** (-10 / 20)) * u * u * u * (10 + u * (6 * u - 15))
+    floor = 10 ** (-19 / 20)
+    duck[a:c] = 1 - (1 - floor) * u * u * u * (10 + u * (6 * u - 15))
+    duck[c:b] = floor
     release = int(0.002 * SR)
     duck[b - release : b] = np.linspace(duck[b - release], 1, release)
     return out * duck

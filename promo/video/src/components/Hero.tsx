@@ -1,11 +1,11 @@
 import type React from "react";
-import { cameraAt, HERO_PATHS, LENS, screenOf, TALL_TOP, type Framing } from "../camera";
-import { HEROES, MOMENTS, shadeAt, takeFrame } from "../edit";
+import { cameraOn, HERO_PATHS, LENS, screenOf, TALL_TOP, type Framing } from "../camera";
+import { HEROES, heroShade, MOMENTS, takeFrame } from "../edit";
 import type { Theme } from "../takes";
 import { Device } from "./Device";
 import { Headline, LEADING } from "./Headline";
 import { Screen } from "./Screen";
-import { sweepAt } from "./Stage";
+import { lightAt } from "./Stage";
 
 /**
  * Where the hero's headline goes in each framing, and its size. A wide frame sets it at [left], centred down the frame
@@ -38,19 +38,20 @@ export const HeroHeadlines: React.FC<{ framing: Framing; f: number; height: numb
 );
 
 /**
- * The hero's phone at frame [f], the camera where it stands at frame [cam]: a shot held a few frames past its cut, or
- * the next held at its first, while a light carries the cut across the frame. Its headlines are [HeroHeadlines].
+ * The hero's phone at frame [f], as the shot that holds frame [shot] has it: while a light carries a cut across the
+ * frame, the shot going out runs on a few frames past it, and the one coming in a few frames before it, each with its
+ * camera coasting on past its end ([cameraOn]). Its headlines are [HeroHeadlines].
  */
-export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; cam?: number; width: number; height: number }> = ({
+export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; shot?: number; width: number; height: number }> = ({
   framing,
   theme,
   f,
-  cam: camFrame = f,
+  shot = f,
   width,
   height,
 }) => {
   const reel = HEROES[theme];
-  const cam = cameraAt(HERO_PATHS[theme][framing], camFrame);
+  const cam = cameraOn(HERO_PATHS[theme][framing], shot, f);
   const screen = screenOf(framing, reel.take, cam);
   const origin = `${cam.x * width}px ${cam.y * height}px`;
   return (
@@ -64,8 +65,8 @@ export const Hero: React.FC<{ framing: Framing; theme: Theme; f: number; cam?: n
             transform: `rotateX(${cam.tilt}deg) rotateY(${cam.turn}deg) rotateZ(${cam.roll}deg)`,
           }}
         >
-          <Device take={reel.take} x={screen.left} y={screen.top} width={screen.width} sheen={sweepAt(f)}>
-            <Screen take={reel.take} frame={takeFrame(reel, f)} width={screen.width} shade={shadeAt(f)} />
+          <Device take={reel.take} x={screen.left} y={screen.top} width={screen.width} light={lightAt(f, width, height)}>
+            <Screen take={reel.take} frame={takeFrame(reel, f, shot)} width={screen.width} shade={heroShade(shot, f)} />
           </Device>
         </div>
       </div>

@@ -26,8 +26,8 @@ function taps(reel: Reel, from: number, until: number): number[] {
   return out;
 }
 
-/** The notification shade's finger, coming down to pull it and to fling it (edit.ts shadeAt). */
-const swipes = [SHADE.pull.at, SHADE.fling.at - 4];
+/** The notification shade's finger, coming down to pull it (edit.ts shadeAt). */
+const swipes = [SHADE.pull.at];
 
 const video = join(dirname(fileURLToPath(import.meta.url)), "..");
 const hero = HEROES[THEME];

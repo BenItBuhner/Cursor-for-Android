@@ -1,7 +1,7 @@
 import type React from "react";
 import { Freeze, OffthreadVideo, staticFile } from "remotion";
 import type { Shade } from "../edit";
-import { clamp01, easeOut, progress } from "../math";
+import { clamp01, easeOut } from "../math";
 import { liveAt, pxPerDp, takes, type TakeId } from "../takes";
 import { COLOR, SYSTEM } from "../theme";
 
@@ -158,129 +158,130 @@ const NotificationShade: React.FC<{ take: TakeId; f: number; open: number }> = (
   const cardW = t.width - dp(24);
   const barW = cardW - dp(60 + 16);
   const segment = 0.36;
-  /** The app dims and blurs first, and the shade's content comes down into it once it has. */
+  /** The app dims and blurs as the shade's content slides down out from under the status bar, opaque the whole way. */
   const dimmed = clamp01(open * 1.5);
-  const shown = easeOut(progress(open, 0.3, 0.9));
+  const drop = dp(44 + 140 + 24);
   return (
     <>
       <div style={{ position: "absolute", inset: 0, background: look.scrim, opacity: dimmed, backdropFilter: `blur(${dp(9) * dimmed}px)` }} />
-      <div
-        style={{
-          position: "absolute",
-          left: 0,
-          top: 0,
-          width: t.width,
-          fontFamily: SYSTEM,
-          opacity: shown,
-          transform: `translateY(${-(1 - shown) * dp(40)}px)`,
-        }}
-      >
-        <div style={{ position: "absolute", left: dp(24), top: status + dp(10), fontSize: dp(15), fontWeight: 500, color: look.primary }}>{DATE}</div>
-        {step ? (
-          <div
-            style={{
-              position: "absolute",
-              left: dp(12),
-              top: status + dp(44),
-              width: cardW,
-              height: dp(140),
-              borderRadius: dp(24),
-              background: look.card,
-            }}
-          >
-            <div style={{ position: "absolute", left: dp(16), top: dp(16), width: dp(32), height: dp(32), borderRadius: "50%", background: ACCENT }}>
-              <svg width={dp(32)} height={dp(32)} viewBox="-4 -4 32 32" style={{ display: "block" }}>
-                <g transform="translate(3.2284 2) scale(0.037588)">
-                  <path
-                    fill="#FFFFFF"
-                    d="M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z"
+      <div style={{ position: "absolute", left: 0, right: 0, top: status, bottom: 0, overflow: "hidden" }}>
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: -status,
+            width: t.width,
+            fontFamily: SYSTEM,
+            transform: `translateY(${-(1 - easeOut(open)) * drop}px)`,
+          }}
+        >
+          <div style={{ position: "absolute", left: dp(24), top: status + dp(10), fontSize: dp(15), fontWeight: 500, color: look.primary }}>{DATE}</div>
+          {step ? (
+            <div
+              style={{
+                position: "absolute",
+                left: dp(12),
+                top: status + dp(44),
+                width: cardW,
+                height: dp(140),
+                borderRadius: dp(24),
+                background: look.card,
+              }}
+            >
+              <div style={{ position: "absolute", left: dp(16), top: dp(16), width: dp(32), height: dp(32), borderRadius: "50%", background: ACCENT }}>
+                <svg width={dp(32)} height={dp(32)} viewBox="-4 -4 32 32" style={{ display: "block" }}>
+                  <g transform="translate(3.2284 2) scale(0.037588)">
+                    <path
+                      fill="#FFFFFF"
+                      d="M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z"
+                    />
+                  </g>
+                </svg>
+              </div>
+              <div
+                style={{
+                  position: "absolute",
+                  left: dp(60),
+                  top: dp(15),
+                  right: dp(52),
+                  fontSize: dp(12.5),
+                  lineHeight: `${dp(16)}px`,
+                  color: look.secondary,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {t.live.app} • {step.sub} • <span style={{ fontVariantNumeric: "tabular-nums" }}>{chronometer}</span>
+              </div>
+              <Chevron x={cardW - dp(16 + 28)} y={dp(14)} w={dp(28)} h={dp(20)} color={look.secondary} track={look.track} />
+              <div
+                style={{
+                  position: "absolute",
+                  left: dp(60),
+                  top: dp(34),
+                  right: dp(16),
+                  fontSize: dp(16),
+                  lineHeight: `${dp(22)}px`,
+                  fontWeight: 500,
+                  color: look.primary,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {t.live.title}
+              </div>
+              <div
+                style={{
+                  position: "absolute",
+                  left: dp(60),
+                  top: dp(56),
+                  right: dp(16),
+                  fontSize: dp(14),
+                  lineHeight: `${dp(20)}px`,
+                  color: look.secondary,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {step.text}
+              </div>
+              <div
+                style={{
+                  position: "absolute",
+                  left: dp(60),
+                  top: dp(86),
+                  width: barW,
+                  height: dp(6),
+                  borderRadius: dp(3),
+                  background: look.track,
+                  overflow: "hidden",
+                }}
+              >
+                {step.indeterminate ? (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      height: "100%",
+                      width: barW * segment,
+                      left: (sweep * (1 + segment) - segment) * barW,
+                      borderRadius: dp(3),
+                      background: look.bar,
+                    }}
                   />
-                </g>
-              </svg>
+                ) : null}
+              </div>
+              <div style={{ position: "absolute", left: dp(60), top: dp(106), display: "flex", gap: dp(24) }}>
+                {step.actions.map((action) => (
+                  <span key={action} style={{ fontSize: dp(14), lineHeight: `${dp(20)}px`, fontWeight: 500, color: look.action }}>
+                    {action}
+                  </span>
+                ))}
+              </div>
             </div>
-            <div
-              style={{
-                position: "absolute",
-                left: dp(60),
-                top: dp(15),
-                right: dp(52),
-                fontSize: dp(12.5),
-                lineHeight: `${dp(16)}px`,
-                color: look.secondary,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {t.live.app} • {step.sub} • <span style={{ fontVariantNumeric: "tabular-nums" }}>{chronometer}</span>
-            </div>
-            <Chevron x={cardW - dp(16 + 28)} y={dp(14)} w={dp(28)} h={dp(20)} color={look.secondary} track={look.track} />
-            <div
-              style={{
-                position: "absolute",
-                left: dp(60),
-                top: dp(34),
-                right: dp(16),
-                fontSize: dp(16),
-                lineHeight: `${dp(22)}px`,
-                fontWeight: 500,
-                color: look.primary,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {t.live.title}
-            </div>
-            <div
-              style={{
-                position: "absolute",
-                left: dp(60),
-                top: dp(56),
-                right: dp(16),
-                fontSize: dp(14),
-                lineHeight: `${dp(20)}px`,
-                color: look.secondary,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {step.text}
-            </div>
-            <div
-              style={{
-                position: "absolute",
-                left: dp(60),
-                top: dp(86),
-                width: barW,
-                height: dp(6),
-                borderRadius: dp(3),
-                background: look.track,
-                overflow: "hidden",
-              }}
-            >
-              {step.indeterminate ? (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    height: "100%",
-                    width: barW * segment,
-                    left: (sweep * (1 + segment) - segment) * barW,
-                    borderRadius: dp(3),
-                    background: look.bar,
-                  }}
-                />
-              ) : null}
-            </div>
-            <div style={{ position: "absolute", left: dp(60), top: dp(106), display: "flex", gap: dp(24) }}>
-              {step.actions.map((action) => (
-                <span key={action} style={{ fontSize: dp(14), lineHeight: `${dp(20)}px`, fontWeight: 500, color: look.action }}>
-                  {action}
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </>
   );

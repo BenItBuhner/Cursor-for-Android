@@ -34,8 +34,8 @@ export const Launch: React.FC<LaunchProps> = ({ framing, music, theme, probe = f
       </AbsoluteFill>
     );
   }
-  // A light crossing the stage carries each cut: the shot going out, its camera held past the cut, burns out under its
-  // beam, and the one coming in, its camera held at its first frame until the cut, comes up in its wake.
+  // A light crossing the stage carries each cut: the shot going out, run on past the cut, burns out under its beam, and
+  // the one coming in, run on from before it, comes up in its wake.
   const wipe = wipeAt(f, width);
   const intoLineup = wipe?.at === AT.lineup;
   return (
@@ -44,12 +44,12 @@ export const Launch: React.FC<LaunchProps> = ({ framing, music, theme, probe = f
       {f < AT.android + OPEN ? <TitleCard {...scene} /> : null}
       {f >= CLOSE.from && (f < AT.lineup || intoLineup) ? (
         <Wiped mask={wipe?.out}>
-          <Hero {...scene} theme={theme} cam={wipe ? Math.min(f, wipe.at - 1) : f} />
+          <Hero {...scene} theme={theme} shot={wipe ? wipe.at - 1 : f} />
         </Wiped>
       ) : null}
       {wipe && !intoLineup ? (
         <Wiped mask={wipe.in}>
-          <Hero {...scene} theme={theme} cam={Math.max(f, wipe.at)} />
+          <Hero {...scene} theme={theme} shot={wipe.at} />
         </Wiped>
       ) : null}
       {f >= CLOSE.from && f < AT.lineup ? <HeroHeadlines framing={framing} f={f} height={height} /> : null}

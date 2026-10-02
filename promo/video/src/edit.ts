@@ -44,11 +44,15 @@ export const MOMENTS = [
 export type Cut = { at: number; take: number; speed?: number };
 export type Reel = { take: TakeId; cuts: Cut[]; until: number };
 
-/** The take's frame on screen at frame [f] of the video. */
-export function takeFrame(reel: Reel, f: number): number {
+/**
+ * The take's frame on screen at frame [f] of the video, as the cut that holds frame [on] plays it: run on past the
+ * cut's ends when [on] is not [f], as a shot a light carries out, or in, is.
+ */
+export function takeFrame(reel: Reel, f: number, on = f): number {
   let cut = reel.cuts[0]!;
-  for (const c of reel.cuts) if (c.at <= f) cut = c;
-  return Math.min(takes[reel.take].frames - 1, Math.round(cut.take + (f - cut.at) * (cut.speed ?? 1)));
+  for (const c of reel.cuts) if (c.at <= on) cut = c;
+  const frame = Math.round(cut.take + (f - cut.at) * (cut.speed ?? 1));
+  return Math.max(0, Math.min(takes[reel.take].frames - 1, frame));
 }
 
 /** The first frame of the video to show the reel's take at or past frame [take]. */
@@ -94,11 +98,14 @@ function cuts(parts: Part[]): Cut[] {
 /** A pull of the notification shade down, and a fling of it back up if it goes back, from frame [at] for [frames]. */
 export type ShadeMoves = { pull: { at: number; frames: number }; fling?: { at: number; frames: number } };
 
-/** The notification shade's pull down over the run and its fling back up, in frames of the video. */
-export const SHADE: Required<ShadeMoves> = {
-  pull: { at: AT.live + 10, frames: 24 },
-  fling: { at: AT.ship - 16, frames: 16 },
-};
+/**
+ * The notification shade's pull down over the run, in frames of the video. It never goes back up: it stays down until
+ * the light carrying "Ship it." in burns it out with the rest of the shot ([heroShade]).
+ */
+export const SHADE: ShadeMoves = { pull: { at: AT.live + 10, frames: 24 } };
+
+/** The hero's shade at frame [f] of the shot that holds frame [on]: down over "Follow it live." alone. */
+export const heroShade = (on: number, f: number): Shade | undefined => (on >= AT.live && on < AT.ship ? shadeAt(f) : undefined);
 
 /** Frames a finger takes to come down before a swipe, and to fade after it lifts. */
 const TOUCH = 3;
@@ -140,8 +147,8 @@ const READ = 45;
  * on as they do) and sent; the chat opens and the run writes its first edit, opened as it is written so its diff lands
  * in view, folded away again, and the follow-up field tapped; a follow-up is typed as the run writes the rest of its
  * edits, queued, steered (the wait for the steer to be taken at three times the pace) and answered, the answer left up
- * to be read; the notification shade pulled down over the run as it tests and opens its pull request, the run's wait on
- * its checks cut out under the shade as it flies back up; and the answer, with the pull request's section of the
+ * to be read; the notification shade pulled down over the run as it tests and opens its pull request, the light carrying
+ * it out while it waits on its checks; and the answer, with the pull request's section of the
  * details. Everything the run streams plays as the capture filmed it, and the cuts leave out whole stretches of the run
  * rather than any of what it says.
  */
@@ -187,7 +194,7 @@ export function hero(take: TakeId): Reel {
       {
         at: AT.live,
         until: AT.ship,
-        pieces: [{ from: shaded, frames: SHADE.fling.at + 5 - AT.live }, { to: answering }],
+        pieces: [{ from: shaded }],
       },
       {
         at: AT.ship,

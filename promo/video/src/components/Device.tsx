@@ -1,5 +1,6 @@
 import type React from "react";
 import { takes, type DeviceId, type TakeId } from "../takes";
+import { LEAN, LEAN_DEG } from "./Stage";
 
 /** A device's glass around its screen, as fractions of the screen's shorter side. */
 const GLASS: Record<DeviceId, { bezel: number; radius: number }> = {
@@ -30,10 +31,10 @@ export const Device: React.FC<{
   x: number;
   y: number;
   width: number;
-  /** How far across the device the stage's light is ([sweepAt]), 0 off its left to 1 off its right, or null. */
-  sheen?: number | null;
+  /** A point on the stage's beam of light ([lightAt]) in the parent's pixels, or null when there is none. */
+  light?: { x: number; y: number } | null;
   children: React.ReactNode;
-}> = ({ take, x, y, width, sheen = null, children }) => {
+}> = ({ take, x, y, width, light = null, children }) => {
   const device = takes[take].device;
   const height = screenHeight(take, width);
   const short = Math.min(width, height);
@@ -42,19 +43,20 @@ export const Device: React.FC<{
   const rim = rimOf(short);
   const edge = bezel + rim;
   const outer = width + 2 * edge;
-  const sheenAt = sheen === null ? null : -outer * 1.2 + outer * 3.4 * sheen;
-  const light = (alpha: number, blur: number) =>
-    `linear-gradient(104deg, rgba(255,246,232,0) 0%, rgba(255,246,232,${alpha * 0.45}) ${50 - blur}%, rgba(255,246,232,${alpha}) 50%, rgba(255,246,232,${alpha * 0.45}) ${50 + blur}%, rgba(255,246,232,0) 100%)`;
-  const glint = (alpha: number, blur: number) =>
-    sheenAt === null ? null : (
+  // Where the beam crosses the device's middle row, from the device's left edge: the glint rides the beam itself.
+  const beam = light === null ? null : light.x + LEAN * (light.y - (y + height / 2)) - (x - edge);
+  const band = (alpha: number, blur: number) =>
+    `linear-gradient(${90 + LEAN_DEG}deg, rgba(255,246,232,0) 0%, rgba(255,246,232,${alpha * 0.45}) ${50 - blur}%, rgba(255,246,232,${alpha}) 50%, rgba(255,246,232,${alpha * 0.45}) ${50 + blur}%, rgba(255,246,232,0) 100%)`;
+  const glint = (alpha: number, blur: number, inset: number) =>
+    beam === null ? null : (
       <div
         style={{
           position: "absolute",
           top: -outer * 0.3,
           bottom: -outer * 0.3,
           width: outer * 1.2,
-          left: sheenAt,
-          background: light(alpha, blur),
+          left: beam - inset - outer * 0.6,
+          background: band(alpha, blur),
           pointerEvents: "none",
         }}
       />
@@ -74,7 +76,7 @@ export const Device: React.FC<{
         boxShadow: `0 0 0 1px rgba(255,246,232,0.09), 0 ${short * 0.1}px ${short * 0.26}px -${short * 0.04}px rgba(0,0,0,0.7), 0 ${short * 0.02}px ${short * 0.05}px rgba(0,0,0,0.5), 0 0 ${short * 0.5}px rgba(255,236,210,0.06)`,
       }}
     >
-      <div style={{ position: "absolute", inset: 0, borderRadius: radius + edge, overflow: "hidden" }}>{glint(0.85, 22)}</div>
+      <div style={{ position: "absolute", inset: 0, borderRadius: radius + edge, overflow: "hidden" }}>{glint(0.85, 22, 0)}</div>
       {device === "phone" ? <PhoneButtons width={width} height={height} edge={edge} rim={rim} /> : null}
       <div style={{ position: "absolute", inset: rim, borderRadius: radius + bezel, background: "#050506" }} />
       <div style={{ position: "absolute", left: edge, top: edge, width, height, borderRadius: radius, overflow: "hidden", isolation: "isolate" }}>
@@ -90,7 +92,7 @@ export const Device: React.FC<{
             pointerEvents: "none",
           }}
         />
-        {glint(0.1, 30)}
+        {glint(0.1, 30, edge)}
       </div>
       {device === "tablet" ? (
         <div

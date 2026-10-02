@@ -3,10 +3,10 @@
 //
 //   npx tsx scripts/render.ts [--only=wide,tall,stills,compare] [--dest=DIR] [--concurrency=3]
 //
-// Needs the takes (promo/capture/run.sh for each device, dark and light, then `npm run footage`), and python3 with
-// scripts/requirements.txt for the score.
+// Needs the takes (promo/capture/run.sh for each device, dark and light, then `npm run footage`), python3 with
+// scripts/requirements.txt for the score, and ffmpeg to lay the score under the picture.
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +36,7 @@ function run(command: string, argv: string[]) {
 if (!existsSync(join(video, "public", "footage", "takes.json"))) run("node", ["scripts/footage.mjs"]);
 // The edit reads the takes, so it is loaded only once they are there.
 const { STILLS } = await import("../src/camera");
-const { THEME } = await import("../src/edit");
+const { DURATION, FPS, THEME } = await import("../src/edit");
 const { COMPARE } = await import("../src/components/Compare");
 
 mkdirSync(out, { recursive: true });
@@ -48,8 +48,17 @@ if (only.has("wide") || only.has("tall")) {
 for (const cut of CUTS) {
   if (!only.has(cut.key)) continue;
   const file = join(out, cut.file);
-  const props = JSON.stringify({ framing: cut.framing, music: true, theme: THEME });
-  run("npx", ["remotion", "render", cut.composition, file, `--props=${props}`, `--concurrency=${concurrency}`]);
+  const picture = join(out, `.${cut.file}`);
+  const props = JSON.stringify({ framing: cut.framing, music: false, theme: THEME });
+  run("npx", ["remotion", "render", cut.composition, picture, `--props=${props}`, `--concurrency=${concurrency}`]);
+  // Remotion's AAC leaves the encoder's 2048 priming samples in the stream, so the score would land 2.5 frames late;
+  // ffmpeg's encoder writes them into the edit list, which players skip.
+  run("ffmpeg", [
+    "-v", "error", "-y", "-i", picture, "-i", "public/audio/score.wav",
+    "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k",
+    "-t", String(DURATION / FPS), "-movflags", "+faststart", file,
+  ]);
+  rmSync(picture);
   made.push(file);
 }
 if (only.has("stills")) {
