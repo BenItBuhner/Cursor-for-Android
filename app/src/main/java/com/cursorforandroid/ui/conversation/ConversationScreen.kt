@@ -597,12 +597,14 @@ fun ConversationScreen(
                 // itself; taking the list there at once would cut it short, so this waits for it.
                 // A queued card that handed its message over in the frame these rows came in is folding: the list glides
                 // to the bubble on the fold's clock instead, the card's room and the new rows changing hands without a
-                // jump. The count is read as the rows compose, before that frame's delivery adds to it.
+                // jump. The count is read as the rows compose, before that frame's delivery adds to it. Rows a catch-up
+                // brought in while its pull is let go but not home yet glide in the same way, under the indicator.
                 val handoversBefore = queueFlights.handovers
                 LaunchedEffect(listedRows.size, listedRows.lastOrNull()?.key, showWorking) {
                     snapshotFlow { transcriptScroll.isJumping }.first { !it }
                     if (!transcriptScroll.following) return@LaunchedEffect
-                    if (queueFlights.handovers != handoversBefore) transcriptScroll.settleToNewest(scope) else listState.requestScrollToItem(0)
+                    val glide = queueFlights.handovers != handoversBefore || (catchUpPull.out && !catchUpPull.holding)
+                    if (glide) transcriptScroll.settleToNewest(scope) else listState.requestScrollToItem(0)
                 }
                 // The chat opens on its newest turns; the ones before them are paged in by what the list draws — until a
                 // reply is shown and a screen and a half lies above the viewport, at rest as the chat opens and ahead of
@@ -720,9 +722,9 @@ fun ConversationScreen(
                             .holdingHeight(openStretches, topDown = !following)
                             .scrollEdgeFade(listState, reverseLayout = listReversed, surface = colors.canvas)
                             .readerScrolling(readerScroll)
-                            .catchUpLift(catchUpPull)
+                            .catchUpLift(catchUpPull, reach = TranscriptPadding)
                             .testTag("transcript"),
-                        contentPadding = PaddingValues(start = TranscriptGutter, end = TranscriptGutter, top = 6.dp, bottom = TranscriptBottomPadding),
+                        contentPadding = catchUpPadding(catchUpPull, TranscriptPadding),
                         verticalArrangement = Arrangement.spacedBy(TranscriptItemSpacing),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -1064,6 +1066,9 @@ private val TranscriptGutter = 16.dp
 
 /** The room under the newest row, above the composer's stack: the gap the pull to catch up widens. */
 private val TranscriptBottomPadding = 12.dp
+
+/** The transcript list's padding at rest; the pull to catch up adds its reach under the rows (see catchUpPadding). */
+private val TranscriptPadding = PaddingValues(start = TranscriptGutter, end = TranscriptGutter, top = 6.dp, bottom = TranscriptBottomPadding)
 
 /** The jump button's lift off the transcript's bottom edge. */
 private val JumpButtonGap = 10.dp

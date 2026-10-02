@@ -1,13 +1,20 @@
 package com.cursorforandroid.ui.conversation
 
+import android.animation.ValueAnimator
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.OverscrollEffect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -17,10 +24,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -31,11 +40,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cursorforandroid.ui.components.Haptic
 import com.cursorforandroid.ui.components.PullRefreshHaptics
@@ -45,11 +61,13 @@ import com.cursorforandroid.ui.components.RefreshIndicatorSize
 import com.cursorforandroid.ui.components.refreshDiscOutline
 import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.util.AppClock
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
 
 /** Where the reader's pull to catch up stands, from the pull to its answer (see [ConversationViewModel.catchUp]). */
 sealed interface CatchUpStatus {
@@ -127,6 +145,14 @@ class CatchUpPull(val thresholdPx: Float, val liftPx: Float, val heldPx: Float) 
         }
 
     override val distanceFraction: Float get() = lift / liftPx
+
+    private val outState = derivedStateOf { holding || awaiting || held || lift > OutEpsilonPx }
+
+    /**
+     * The transcript is off the composer or about to be: from the pull's first pixel until it is home again. Read
+     * through a derived state, so a frame of the pull invalidates nothing that reads it; only its turning does.
+     */
+    val out: Boolean get() = outState.value
 
     /**
      * Anything but the finger moves the transcript once it is let go — sprung, held, at rest — so [PullRefreshHaptics]
@@ -284,12 +310,46 @@ internal class CatchUpOverscroll(
  * nothing is recomposed or measured again for a frame of it, and clipped to its own top and bottom edges, so what
  * rises past the top goes under the edge's fade rather than over the header. Placed inside the reader's scroll: the
  * drag's own coordinates must not move with the rows it moves.
+ *
+ * With [reach], a lazy list under it is laid out [CatchUpReach] past its bottom edge while the pull is [out]
+ * (the list's own bottom padding grows by as much, see [catchUpPadding]), so the gap the lift opens shows whatever
+ * lies below the rows on screen — a turn the answer brought in, a reply still growing — passing under the indicator,
+ * rather than the list's own edge cut flat across it. The scroll's range does not change: the extra room is padding.
  */
-internal fun Modifier.catchUpLift(pull: CatchUpPull): Modifier = this
+internal fun Modifier.catchUpLift(pull: CatchUpPull, reach: PaddingValues? = null): Modifier = this
     .drawWithContent {
         clipRect(left = -Float.MAX_VALUE, right = Float.MAX_VALUE) { this@drawWithContent.drawContent() }
     }
     .graphicsLayer { translationY = -pull.lift }
+    .then(if (reach == null) Modifier else Modifier.layout { measurable, constraints -> catchUpReachLayout(pull, reach, measurable, constraints) })
+
+/** The px [catchUpPadding] adds under the rows of [base] while [pull] is out, rounded as the list rounds its padding. */
+private fun Density.catchUpReachPx(pull: CatchUpPull, base: PaddingValues): Int {
+    if (!pull.out) return 0
+    val bottom = base.calculateBottomPadding()
+    return (bottom + CatchUpReach).roundToPx() - bottom.roundToPx()
+}
+
+private fun MeasureScope.catchUpReachLayout(pull: CatchUpPull, base: PaddingValues, measurable: Measurable, constraints: Constraints): MeasureResult {
+    val reach = catchUpReachPx(pull, base)
+    if (reach == 0 || !constraints.hasBoundedHeight) {
+        val placeable = measurable.measure(constraints)
+        return layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+    val placeable = measurable.measure(constraints.copy(minHeight = constraints.minHeight + reach, maxHeight = constraints.maxHeight + reach))
+    return layout(placeable.width, (placeable.height - reach).coerceAtLeast(constraints.minHeight)) { placeable.place(0, 0) }
+}
+
+/**
+ * The transcript's [base] content padding with [CatchUpReach] more under the rows while [pull] is out: what
+ * [catchUpLift]'s reach lays out past the bottom edge. Read as the list measures, so it turns without recomposing.
+ */
+internal fun catchUpPadding(pull: CatchUpPull, base: PaddingValues): PaddingValues = object : PaddingValues {
+    override fun calculateLeftPadding(layoutDirection: LayoutDirection): Dp = base.calculateLeftPadding(layoutDirection)
+    override fun calculateTopPadding(): Dp = base.calculateTopPadding()
+    override fun calculateRightPadding(layoutDirection: LayoutDirection): Dp = base.calculateRightPadding(layoutDirection)
+    override fun calculateBottomPadding(): Dp = base.calculateBottomPadding() + if (pull.out) CatchUpReach else 0.dp
+}
 
 /** Where the indicator is sprung once the finger is off it. */
 private sealed interface CatchUpRest {
@@ -308,8 +368,12 @@ private sealed interface CatchUpRest {
  * is the whole gap's. It grows into the gap rather than covering either side of it, and it is drawn whole once the gap
  * has room for it. With the finger it follows [pull]; let go armed, the transcript is sprung to the held gap and the
  * indicator spins there until [status] answers (through any pause the server asked for), then both go home, and only
- * once home is a failure told ([onSettled]), so the word never lands on the indicator. As it starts to rise, [onRise]:
- * whatever word is up gives way to it. Every frame of all this is the indicator's layer; nothing is recomposed for it.
+ * once home is a failure told ([onSettled]), so the word never lands on the indicator. Going home with an answer the
+ * disc fades and shrinks out, still spinning, a little ahead of the closing gap; let go short it fades with the gap
+ * it grew into; under reduced motion ([animate] off) an answered disc is gone at once. It is drawn over the transcript,
+ * never cutting into it: the rows lifted past it are the list's own, laid out under the gap (see [catchUpLift]). As it
+ * starts to rise, [onRise]: whatever word is up gives way to it. Every frame of all this is the indicator's layer;
+ * nothing is recomposed for it.
  *
  * The finger feels it as it does the sidebar's ([PullRefreshHaptics], so only as Settings › Haptic feedback
  * allows), and more: a confirm as an armed pull is let go, the lightest tick for the answer, a reject for a failure —
@@ -324,17 +388,24 @@ internal fun CatchUpIndicator(
     modifier: Modifier = Modifier,
     edgeGap: Dp = 0.dp,
     onRise: () -> Unit = {},
+    animate: () -> Boolean = ValueAnimator::areAnimatorsEnabled,
 ) {
     val answer = status.collectAsStateWithLifecycle()
+    // Fading out on an answer, the disc keeps spinning: the arrow coming back for its last frames would read as a new pull.
+    var leaving by remember(pull) { mutableStateOf(false) }
     val refreshing = pull.awaiting || answer.value.underWay()
+    val presence = remember(pull) { Animatable(1f) }
     PullRefreshHaptics(pull, refreshing)
     CatchUpHapticCues(pull, answer)
     val settled by rememberUpdatedState(onSettled)
     val rise by rememberUpdatedState(onRise)
+    val animated by rememberUpdatedState(animate)
     LaunchedEffect(pull) {
         snapshotFlow { answer.value }.collect { if (it !is CatchUpStatus.Idle) pull.awaiting = false }
     }
     LaunchedEffect(pull) {
+        // Whether the indicator is going home from the held gap, with an answer, rather than from a pull let go short.
+        var answering = false
         snapshotFlow {
             val shown = answer.value
             when {
@@ -344,14 +415,35 @@ internal fun CatchUpIndicator(
             }
         }.distinctUntilChanged().collectLatest { rest ->
             when (rest) {
-                null -> Unit
+                null -> {
+                    leaving = false
+                    presence.settle(1f, animated(), ReturnSpec)
+                }
                 CatchUpRest.Threshold -> {
+                    answering = true
+                    leaving = false
                     pull.held = true
-                    pull.animateToThreshold()
+                    coroutineScope {
+                        launch { presence.settle(1f, animated(), ReturnSpec) }
+                        pull.animateToThreshold()
+                    }
                 }
                 is CatchUpRest.Home -> {
                     pull.held = false
-                    pull.animateToHidden()
+                    // An exit cut short by the status moving on again (an answer turning idle) carries on from where it is.
+                    val exit = answering || leaving
+                    answering = false
+                    if (exit) {
+                        leaving = true
+                        coroutineScope {
+                            launch { presence.settle(0f, animated(), ExitSpec) }
+                            pull.animateToHidden()
+                        }
+                        leaving = false
+                        presence.snapTo(1f)
+                    } else {
+                        pull.animateToHidden()
+                    }
                     if (rest.told.word() != null) settled(rest.told)
                 }
             }
@@ -363,14 +455,17 @@ internal fun CatchUpIndicator(
     Box(
         modifier
             .size(RefreshIndicatorSize)
+            // Moved in a layer of its own: faded, the disc is drawn offscreen in its own box, which goes with it.
+            .graphicsLayer { translationY = (size.height - edgeGap.toPx() - pull.lift) / 2f }
             .graphicsLayer {
                 val gap = edgeGap.toPx() + pull.lift
-                val scale = catchUpIndicatorScale(gap, size.height, CatchUpIndicatorMargin.toPx())
-                translationY = (size.height - gap) / 2f
+                val room = catchUpIndicatorScale(gap, size.height, CatchUpIndicatorMargin.toPx())
+                val shown = presence.value
+                val scale = room * lerp(ExitScale, 1f, shown)
                 // The half turn as two scales, the way the pull goes: the arrow comes round from below.
                 scaleX = -scale
                 scaleY = -scale
-                alpha = if (scale > 0f) 1f else 0f
+                alpha = catchUpIndicatorAlpha(room) * shown
                 shape = CircleShape
                 clip = true
             }
@@ -379,9 +474,19 @@ internal fun CatchUpIndicator(
             .testTag(CATCH_UP_TEST_TAG),
         contentAlignment = Alignment.Center,
     ) {
-        RefreshIndicatorContent(refreshing, progress = { pull.distanceFraction })
+        RefreshIndicatorContent(refreshing || leaving, progress = { pull.distanceFraction })
     }
 }
+
+private suspend fun Animatable<Float, AnimationVector1D>.settle(target: Float, animated: Boolean, spec: AnimationSpec<Float>) {
+    if (animated) animateTo(target, spec) else snapTo(target)
+}
+
+/**
+ * How opaque the indicator is at [room] (its [catchUpIndicatorScale]): fading in over the first half of its growth, so it
+ * comes out of the gap rather than popping in as a speck, and fading out the same way as the gap closes on it.
+ */
+internal fun catchUpIndicatorAlpha(room: Float): Float = (room / FadeInRoom).coerceIn(0f, 1f)
 
 /**
  * How large the indicator is drawn in a [gap] of that many px: nothing until the gap has [margin] of room on each
@@ -444,5 +549,27 @@ private val HeldSpring: SpringSpec<Float> = spring(dampingRatio = 0.75f, stiffne
 
 /** The least room kept between the indicator and the transcript or the composer while it grows into the gap. */
 private val CatchUpIndicatorMargin = 8.dp
+
+/** The share of its growth over which the indicator fades in (see [catchUpIndicatorAlpha]). */
+private const val FadeInRoom = 0.5f
+
+/** Answered, the indicator fades out as it shrinks to this share of itself, while the transcript goes home under it. */
+private const val ExitScale = 0.6f
+
+/** The answer's fade: a little quicker than the transcript's spring home, so the disc is gone before the gap closes. */
+internal const val CatchUpExitMillis = 220
+private val ExitSpec: AnimationSpec<Float> = tween(CatchUpExitMillis, easing = FastOutSlowInEasing)
+
+/** Taken back by the finger, or held again, mid-fade: back to whole at once, without a pop. */
+private val ReturnSpec: AnimationSpec<Float> = tween(120, easing = LinearOutSlowInEasing)
+
+/**
+ * How far below its bottom edge the transcript is laid out while the pull is out (see [catchUpLift]): the reach the rubber
+ * band tends to and never gets to ([CatchUpPull.reachPx], from the pull's own measures), so no lift shows the list's edge.
+ */
+internal val CatchUpReach: Dp = CatchUpPullLift * (CatchUpGive * CatchUpPullThreshold.value / (CatchUpGive * CatchUpPullThreshold.value - CatchUpPullLift.value))
+
+/** Under half a pixel off the composer, the transcript is home: a spring's last creep is not a pull still out. */
+private const val OutEpsilonPx = 0.5f
 
 internal const val CATCH_UP_TEST_TAG = "catch-up-indicator"
