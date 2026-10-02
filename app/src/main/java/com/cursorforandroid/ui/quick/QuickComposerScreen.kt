@@ -44,6 +44,7 @@ import com.cursorforandroid.share.ShareTarget
 import com.cursorforandroid.ui.components.AttachmentCounts
 import com.cursorforandroid.ui.components.ComposerBox
 import com.cursorforandroid.ui.components.ComposerMenuActions
+import com.cursorforandroid.ui.components.ComposerPickerAnchors
 import com.cursorforandroid.ui.components.CursorButton
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.ModePills
@@ -56,6 +57,7 @@ import com.cursorforandroid.ui.components.keyboardInsetPadding
 import com.cursorforandroid.ui.components.VoiceInput
 import com.cursorforandroid.ui.components.pressable
 import com.cursorforandroid.ui.components.rememberFilePicker
+import com.cursorforandroid.ui.components.rememberComposerPickerAnchors
 import com.cursorforandroid.ui.components.rememberMediaPicker
 import com.cursorforandroid.ui.compose.LaunchRefusedHaptic
 import com.cursorforandroid.ui.compose.NewAgentUiState
@@ -131,6 +133,7 @@ private fun QuickComposer(
     var branchSheet by rememberSaveable { mutableStateOf(false) }
     var deviceSheet by rememberSaveable { mutableStateOf(false) }
     var modelSheet by rememberSaveable { mutableStateOf(false) }
+    val pickerAnchors = rememberComposerPickerAnchors()
     // The context line opens into the pane's three chips on a tap and stays open: whoever opened it is choosing.
     var contextExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -178,6 +181,7 @@ private fun QuickComposer(
         onDevice = { deviceSheet = true },
         onModel = { modelSheet = true },
         voice = voice,
+        anchors = pickerAnchors,
     )
 
     if (repoSheet) {
@@ -193,6 +197,7 @@ private fun QuickComposer(
             onDismiss = { repoSheet = false },
             device = state.selectedDevice.takeUnless { it.isCloud },
             deviceRepo = state.deviceRepository,
+            anchor = pickerAnchors.repository,
         )
     }
     if (branchSheet) {
@@ -204,10 +209,11 @@ private fun QuickComposer(
             listedByAccount = state.branchesListedByAccount,
             onSelect = viewModel::setRef,
             onDismiss = { branchSheet = false },
+            anchor = pickerAnchors.branch,
         )
     }
     if (deviceSheet) {
-        DeviceSheet(devices = state.devices, selected = state.selectedDevice, loading = state.isLoadingDevices, onSelect = viewModel::selectDevice, onRefresh = viewModel::refreshDevices, onDismiss = { deviceSheet = false })
+        DeviceSheet(devices = state.devices, selected = state.selectedDevice, loading = state.isLoadingDevices, onSelect = viewModel::selectDevice, onRefresh = viewModel::refreshDevices, onDismiss = { deviceSheet = false }, anchor = pickerAnchors.device)
     }
     if (modelSheet) {
         ModelSheet(
@@ -221,6 +227,7 @@ private fun QuickComposer(
             onDismiss = { modelSheet = false },
             pinnedIds = state.pinnedModelIds,
             onTogglePin = viewModel::togglePinnedModel,
+            anchor = pickerAnchors.model,
         )
     }
 }
@@ -257,14 +264,15 @@ fun QuickComposerSheet(
     onDevice: () -> Unit = {},
     onModel: () -> Unit = {},
     voice: VoiceInput? = null,
+    anchors: ComposerPickerAnchors? = null,
 ) {
     SheetFrame(onDismiss) {
         SheetTitle(onCancel = onCancel)
         if (contextExpanded) {
             SelectorRow {
-                SelectorChip(state.repoLabel, onClick = onRepo, icon = if (state.noRepo) CursorIcons.Cloud else CursorIcons.Repo, modifier = Modifier.weight(1f, fill = false))
-                if (!state.noRepo) SelectorChip(state.branchLabel, onClick = onBranch, icon = CursorIcons.GitBranch)
-                SelectorChip(state.deviceLabel, onClick = onDevice, icon = deviceIcon(state.selectedDevice))
+                SelectorChip(state.repoLabel, onClick = onRepo, icon = if (state.noRepo) CursorIcons.Cloud else CursorIcons.Repo, modifier = Modifier.weight(1f, fill = false), anchor = anchors?.repository)
+                if (!state.noRepo) SelectorChip(state.branchLabel, onClick = onBranch, icon = CursorIcons.GitBranch, anchor = anchors?.branch)
+                SelectorChip(state.deviceLabel, onClick = onDevice, icon = deviceIcon(state.selectedDevice), anchor = anchors?.device)
             }
         } else {
             // One chip for the three: what the chat will run against, as the last launch left it, until it is opened.
@@ -304,6 +312,7 @@ fun QuickComposerSheet(
             onPickModel = onPickModel,
             focusOnOpen = true,
             voice = voice,
+            modelAnchor = anchors?.model,
         )
         state.error?.let { ComposerErrorLine(it, state.errorAsked, onDismissError) }
     }

@@ -215,6 +215,8 @@ fun ComposerBox(
     media: MediaLoader? = null,
     modelLabel: String? = null,
     onModel: (() -> Unit)? = null,
+    /** What the model picker opens from: the model chip. */
+    modelAnchor: PopoverAnchor? = null,
     /**
      * The mode the owner holds — Plan, or with [extendedModes] Ask or Debug — worn as a pill; [onModePill] puts one on
      * from its `/command` and takes it off (null) from the pill's cross. Null leaves the mode commands as text.
@@ -703,6 +705,7 @@ fun ComposerBox(
                 sendHint = sendHint,
                 modelLabel = modelLabel,
                 onModel = onModel,
+                modelAnchor = modelAnchor,
                 chipEnd = chipEnd,
                 modifier = Modifier.weight(1f),
             )
@@ -860,6 +863,7 @@ private fun ComposerFooterMiddle(
     sendHint: String?,
     modelLabel: String?,
     onModel: (() -> Unit)?,
+    modelAnchor: PopoverAnchor?,
     chipEnd: Dp,
     modifier: Modifier = Modifier,
 ) {
@@ -902,6 +906,7 @@ private fun ComposerFooterMiddle(
                         onClick = onModel ?: {},
                         enabled = onModel != null,
                         showChevron = onModel != null,
+                        anchor = modelAnchor,
                         endPadding = chipEnd,
                     )
                 }
@@ -1239,12 +1244,15 @@ fun SelectorChip(
     enabled: Boolean = true,
     showChevron: Boolean = enabled,
     endPadding: Dp = FooterSpacing.ChipEndPadding,
+    /** What a picker the chip opens is anchored to. */
+    anchor: PopoverAnchor? = null,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
     Row(
         modifier
-            .pressable(onClick, CursorTheme.shapes.base, enabled = enabled)
+            .popoverAnchor(anchor)
+            .pressable(onClick, CursorTheme.shapes.base, enabled = enabled, role = if (showChevron) Role.DropdownList else Role.Button)
             // The composer footer's height: a fair tap height for a chip that paints nothing until pressed.
             .heightIn(min = CursorDimens.composerFooter)
             .padding(start = 7.dp, end = endPadding),

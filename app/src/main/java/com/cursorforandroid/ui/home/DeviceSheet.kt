@@ -1,19 +1,6 @@
 package com.cursorforandroid.ui.home
 
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.cursorforandroid.domain.DeviceOption
@@ -22,21 +9,27 @@ import com.cursorforandroid.domain.DeviceTarget
 import com.cursorforandroid.domain.EnvType
 import com.cursorforandroid.domain.KnownDevices
 import com.cursorforandroid.ui.components.CursorIcons
-import com.cursorforandroid.ui.components.CursorSheet
-import com.cursorforandroid.ui.components.FadingLazyColumn
-import com.cursorforandroid.ui.components.FlatIconButton
-import com.cursorforandroid.ui.components.HairlineDivider
-import com.cursorforandroid.ui.components.SheetHeader
-import com.cursorforandroid.ui.components.SpinnerRing
-import com.cursorforandroid.ui.theme.CursorTheme
+import com.cursorforandroid.ui.components.CursorPicker
+import com.cursorforandroid.ui.components.PickerAction
+import com.cursorforandroid.ui.components.PickerDismiss
+import com.cursorforandroid.ui.components.PickerDivider
+import com.cursorforandroid.ui.components.PickerEntry
+import com.cursorforandroid.ui.components.PickerItem
+import com.cursorforandroid.ui.components.PickerNote
+import com.cursorforandroid.ui.components.PickerPresentation
+import com.cursorforandroid.ui.components.PickerSection
+import com.cursorforandroid.ui.components.PickerSubmenu
+import com.cursorforandroid.ui.components.PickerWidths
+import com.cursorforandroid.ui.components.PopoverAnchor
+import com.cursorforandroid.ui.components.pickerMatches
 
 /**
- * The composer's device picker: Cloud (always, and the default), then My Machines that are online or that past
- * chats ran on, then team pools. There is no "this device" row — an Android client cannot host the agent.
- * A name typed into the field that matches none of the rows is offered as a machine and as a pool, the way the
- * branch picker offers an unseen branch.
+ * The composer's device picker, on Cursor's Cloud / Remote dropdown: Cloud (always, and the default), and Remote,
+ * which opens the machines and team pools — My machines that are online or that past chats ran on, then the pools,
+ * an offline machine dimmed — with a search of their own. There is no "this device" row: an Android client cannot
+ * host the agent. A name typed into that search that matches none of the rows is offered as a machine and as a pool,
+ * the way the branch picker offers an unseen branch.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun DeviceSheet(
     devices: List<DeviceOption>,
@@ -45,120 +38,92 @@ internal fun DeviceSheet(
     onSelect: (DeviceTarget) -> Unit,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
+    anchor: PopoverAnchor? = null,
+    presentation: PickerPresentation? = null,
 ) {
-    val colors = CursorTheme.colors
-    val type = CursorTheme.typography
-    var query by rememberSaveable { mutableStateOf("") }
-    CursorSheet(onDismiss = onDismiss) { dismiss ->
-        fun pick(device: DeviceTarget) {
-            onSelect(device)
-            dismiss()
-        }
-        SheetHeader("Device") {
-            if (loading) SpinnerRing(modifier = Modifier.padding(end = 8.dp)) else FlatIconButton(CursorIcons.Refresh, "Refresh devices", onClick = onRefresh)
-        }
-        SheetSearchField(value = query, onValueChange = { query = it }, placeholder = "Filter devices")
-        Spacer(Modifier.height(6.dp))
-        val typed = query.trim()
-        fun matches(option: DeviceOption) = typed.isEmpty() ||
-            option.target.label.contains(typed, ignoreCase = true) ||
-            option.subtitle.orEmpty().contains(typed, ignoreCase = true)
-        val visible = devices.filter(::matches)
-        val selectedKey = DeviceOption.keyOf(selected)
-        val listedKeys = devices.map { it.key }.toSet()
-        val currentUnlisted = !selected.isCloud && selectedKey !in listedKeys &&
-            (typed.isEmpty() || selected.label.contains(typed, ignoreCase = true))
-        val typedAsNew = typed.isNotEmpty() &&
-            visible.none { it.target.apiName.equals(typed, ignoreCase = true) } &&
-            !selected.apiName.equals(typed, ignoreCase = true)
-        val machines = visible.filter { it.section == DeviceSection.Machines }
-        val pools = visible.filter { it.section == DeviceSection.Pools }
-        val cloudVisible = visible.any { it.section == DeviceSection.Cloud } || (typed.isEmpty() && devices.none { it.section == DeviceSection.Cloud })
-        val nothingToShow = typed.isNotEmpty() && visible.isEmpty() && !currentUnlisted && !typedAsNew
-        FadingLazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false), contentPadding = PaddingValues(bottom = 12.dp)) {
-            if (cloudVisible || typed.isEmpty()) {
-                item("cloud") {
-                    val cloud = devices.firstOrNull { it.section == DeviceSection.Cloud } ?: KnownDevices.cloud
-                    SheetRow(
-                        title = cloud.target.label,
-                        subtitle = cloud.subtitle,
-                        checked = selected.isCloud,
-                        icon = CursorIcons.Cloud,
-                    ) { pick(DeviceTarget.Cloud) }
-                    HairlineDivider(Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-                }
-            }
-            if (currentUnlisted) {
-                item("current") {
-                    SheetRow(
-                        title = selected.label,
-                        subtitle = null,
-                        checked = true,
-                        icon = deviceIcon(selected),
-                    ) { pick(selected) }
-                }
-            }
-            if (machines.isNotEmpty()) {
-                item("machines-label") { SheetSectionLabel("My machines") }
-                items(machines, key = { it.key }) { option ->
-                    SheetRow(
-                        title = option.target.label,
-                        subtitle = option.subtitle,
-                        checked = option.key == selectedKey,
-                        icon = CursorIcons.Desktop,
-                    ) { pick(option.target) }
-                }
-            }
-            if (pools.isNotEmpty()) {
-                item("pools-label") { SheetSectionLabel("Team pools") }
-                items(pools, key = { it.key }) { option ->
-                    SheetRow(
-                        title = option.target.label,
-                        subtitle = option.subtitle,
-                        checked = option.key == selectedKey,
-                        icon = CursorIcons.Layers,
-                    ) { pick(option.target) }
-                }
-            }
-            if (typedAsNew) {
-                item("typed-machine") {
-                    SheetRow(
-                        title = typed,
-                        subtitle = "Use as a machine",
-                        checked = false,
-                        icon = CursorIcons.Plus,
-                    ) { pick(DeviceTarget.machine(typed)) }
-                }
-                item("typed-pool") {
-                    SheetRow(
-                        title = typed,
-                        subtitle = "Use as a team pool",
-                        checked = false,
-                        icon = CursorIcons.Plus,
-                    ) { pick(DeviceTarget.pool(typed)) }
-                }
-            }
-            if (nothingToShow) {
-                item("no-match") {
-                    Text(
-                        "No devices match \"$typed\"",
-                        style = type.small,
-                        color = colors.textQuaternary,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                    )
-                }
-            }
-            if (typed.isEmpty()) {
-                item("note") {
-                    Text(
-                        "This phone can't run an agent itself. Cloud is Cursor's hosted VM; a machine or team pool is one you've left online.",
-                        style = type.small,
-                        color = colors.textQuaternary,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                    )
-                }
-            }
-        }
+    CursorPicker(
+        onDismiss = onDismiss,
+        anchor = anchor,
+        title = "Device",
+        width = PickerWidths.Narrow,
+        presentation = presentation,
+        testTag = DEVICE_PICKER_TAG,
+        entries = { deviceEntries(devices, selected, loading, onSelect, onRefresh) },
+    )
+}
+
+internal const val DEVICE_PICKER_TAG = "device-picker"
+
+/** The Remote row's label and its submenu's title. */
+internal const val REMOTE = "Remote"
+
+private fun deviceEntries(
+    devices: List<DeviceOption>,
+    selected: DeviceTarget,
+    loading: Boolean,
+    onSelect: (DeviceTarget) -> Unit,
+    onRefresh: () -> Unit,
+): List<PickerEntry> = buildList {
+    val cloud = devices.firstOrNull { it.section == DeviceSection.Cloud } ?: KnownDevices.cloud
+    add(PickerItem("cloud", cloud.target.label, detail = cloud.subtitle, icon = CursorIcons.Cloud, selected = selected.isCloud, onPick = { onSelect(DeviceTarget.Cloud) }))
+    add(
+        PickerItem(
+            key = "remote",
+            label = REMOTE,
+            detail = selected.takeUnless { it.isCloud }?.label,
+            icon = if (selected.isCloud) CursorIcons.Desktop else deviceIcon(selected),
+            selected = !selected.isCloud,
+            submenu = PickerSubmenu(REMOTE, searchPlaceholder = "Search remote machines\u2026", width = 280.dp) { query ->
+                remoteEntries(query, devices, selected, onSelect)
+            },
+        ),
+    )
+    add(PickerDivider("refresh-divider"))
+    add(PickerAction("refresh", "Refresh devices", onClick = onRefresh, icon = CursorIcons.Refresh, busy = loading))
+    add(PickerNote("note", "This phone can't run an agent itself. Cloud is Cursor's hosted VM; a machine or team pool is one you've left online."))
+}
+
+private fun remoteEntries(query: String, devices: List<DeviceOption>, selected: DeviceTarget, onSelect: (DeviceTarget) -> Unit): List<PickerEntry> = buildList {
+    val typed = query.trim()
+    fun matches(option: DeviceOption) = pickerMatches(typed, option.target.label, option.subtitle)
+    val remote = devices.filter { it.section != DeviceSection.Cloud }
+    val visible = remote.filter(::matches)
+    val selectedKey = DeviceOption.keyOf(selected)
+    val listedKeys = devices.map { it.key }.toSet()
+    val currentUnlisted = !selected.isCloud && selectedKey !in listedKeys && pickerMatches(typed, selected.label)
+    val typedAsNew = typed.isNotEmpty() &&
+        devices.none { it.target.apiName.equals(typed, ignoreCase = true) } &&
+        !selected.apiName.equals(typed, ignoreCase = true)
+    val machines = visible.filter { it.section == DeviceSection.Machines }
+    val pools = visible.filter { it.section == DeviceSection.Pools }
+    fun row(option: DeviceOption, icon: ImageVector) = PickerItem(
+        key = "device:${option.key}",
+        label = option.target.label,
+        subtitle = option.subtitle,
+        icon = if (option.online) icon else CursorIcons.Plug,
+        dimmed = !option.online,
+        selected = option.key == selectedKey,
+        onPick = { onSelect(option.target) },
+    )
+    if (currentUnlisted) add(PickerItem("current", selected.label, icon = deviceIcon(selected), selected = true, onPick = { onSelect(selected) }))
+    if (machines.isNotEmpty()) {
+        add(PickerSection("machines", "My machines"))
+        machines.forEach { add(row(it, CursorIcons.Desktop)) }
+    }
+    if (pools.isNotEmpty()) {
+        if (machines.isNotEmpty()) add(PickerDivider("pools-divider"))
+        add(PickerSection("pools", "Team pools"))
+        pools.forEach { add(row(it, CursorIcons.Layers)) }
+    }
+    if (typedAsNew) {
+        if (isNotEmpty()) add(PickerDivider("typed-divider"))
+        add(PickerAction("typed-machine", "Use \u201C$typed\u201D as a machine", onClick = { onSelect(DeviceTarget.machine(typed)) }, dismiss = PickerDismiss.All))
+        add(PickerAction("typed-pool", "Use \u201C$typed\u201D as a team pool", onClick = { onSelect(DeviceTarget.pool(typed)) }, dismiss = PickerDismiss.All))
+    }
+    when {
+        typed.isNotEmpty() && visible.isEmpty() && !currentUnlisted && !typedAsNew -> add(PickerNote("no-match", "No devices match \"$typed\""))
+        typed.isEmpty() && remote.isEmpty() && !currentUnlisted ->
+            add(PickerNote("empty", "No machines or team pools yet. Type a name to use one that hasn't connected."))
     }
 }
 
