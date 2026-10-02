@@ -545,6 +545,8 @@ class AgentRepository(
      * first page without waiting for the account, until a read of the list gets through again.
      */
     @Volatile private var accountListUnread = false
+    /** When the account's list last answered whole (see [accountListAnswered]); 0 before it has. */
+    @Volatile private var accountListReadAt = 0L
 
     /**
      * Agents a refresh brought that the list did not hold, whose account record has not been read, by id, with when
@@ -694,6 +696,7 @@ class AgentRepository(
         placements.clear()
         recordUnresolved.clear()
         accountListUnread = false
+        accountListReadAt = 0L
         holdUntilPlaced.clear()
         aliveConfirmedAt.clear()
         retractMisses.clear()
@@ -1431,6 +1434,7 @@ class AgentRepository(
      * refused or unanswered are asked for their records by id again (see [accountListUnread]).
      */
     fun accountListAnswered() {
+        accountListReadAt = AppClock.now()
         if (!accountListUnread) return
         accountListUnread = false
         followWithRecords(token())
@@ -1501,12 +1505,13 @@ class AgentRepository(
             var windowFloor = Long.MAX_VALUE
             val seen = HashSet<String>()
             val pages = pagesToFetch(depth)
+            val scanPages = maxOf(pages, if (depth == RefreshDepth.Quick && accountNamesRunning()) 1 else runningScanPages)
             var legacyRead = LegacyRead()
             val pagesStartedAt = AppClock.now()
             coroutineScope {
                 // The legacy list is read further than the window: its pages carry the one execution status per agent
                 // the documented API has, so the pass over them is also the running scan (see [RunningScan]).
-                val legacy = async { pending.track("status scan (v0 pages)") { stats.timed("status scan (v0 pages)", calls = { r: LegacyRead -> r.pagesRead }, note = { r -> "${r.running.size} running" + if (r.complete) ", end reached" else "" }) { fetchLegacy(api, windowPages = pages, scanPages = maxOf(pages, runningScanPages)) } } }
+                val legacy = async { pending.track("status scan (v0 pages)") { stats.timed("status scan (v0 pages)", calls = { r: LegacyRead -> r.pagesRead }, note = { r -> "${r.running.size} running" + if (r.complete) ", end reached" else "" }) { fetchLegacy(api, windowPages = pages, scanPages = scanPages) } } }
                 var cursor: String? = null
                 do {
                     val page = pending.track("list page ${pagesRead + 1}") { api.listAgents(limit = PAGE_SIZE, cursor = cursor, includeArchived = true) }
@@ -1532,9 +1537,7 @@ class AgentRepository(
                         // by id — settles underneath the tail's one row (see [PendingWork.show]).
                         legacyRead = legacy.await()
                         if (legacyRead.rows.isNotEmpty()) publish { it.withLegacy(legacyRead.rows) }
-                        if (legacyRead.pagesRead > 0) {
-                            _runningScan.update { it.copy(ids = legacyRead.running, scannedAtMillis = AppClock.now(), pagesRead = legacyRead.pagesRead, complete = legacyRead.complete) }
-                        }
+                        if (legacyRead.pagesRead > 0) _runningScan.update { it.scanned(legacyRead) }
                         val more = page.nextCursor?.isNotBlank() == true && pagesRead < pages
                         // Whether this fetch showed the indicator or a pull joined it and did: it is let go here, and
                         // the tail's row stands for the rest of the work. A silent fetch nobody pulled on shows neither.
@@ -1557,9 +1560,7 @@ class AgentRepository(
             }
             stats.stage("v1 pages", pagesRead, pagesStartedAt, note = "${seen.size} rows" + if (truncated) ", more behind" else "")
             pending.track("run records (verify)") { stats.timed("run records (verify)", calls = { n: Int -> n }) { verifyRunStatuses(backend, startedIn, before, startedAt) } }
-            if (legacyRead.pagesRead > 0) {
-                _runningScan.update { it.copy(ids = legacyRead.running, scannedAtMillis = AppClock.now(), pagesRead = legacyRead.pagesRead, complete = legacyRead.complete) }
-            }
+            if (legacyRead.pagesRead > 0) _runningScan.update { it.scanned(legacyRead) }
             // Pinned rows outlive the listing window, as they do in the desktop sidebar; the pin sync fetches the
             // ones the window never returned, and this keeps the next listing from dropping them again.
             val pinned = prefs.localAgentState.first().pinnedIds
@@ -1641,6 +1642,30 @@ class AgentRepository(
         val pagesRead: Int = 0,
         val complete: Boolean = false,
     )
+
+    /**
+     * The account's own list answered whole a moment ago, its statuses and all (Extended mode, see
+     * [RunningScan.accountIds]): an old chat with a follow-up started elsewhere is named running there, at any depth of
+     * the legacy list, so a poll's running scan need not page the legacy list past its first page to find it. Without
+     * that word the legacy pages are the only place such a chat shows, and every refresh reads them as deep as before.
+     */
+    private suspend fun accountNamesRunning(): Boolean =
+        !session.isDemo && capabilities().accountSession && !accountListUnread && !accountPaused() &&
+            accountListReadAt > 0L && AppClock.now() - accountListReadAt <= ACCOUNT_LIST_FRESH_MS
+
+    /**
+     * [read] taken as the running scan. A read that stopped short of the last one's depth (a poll's one page, a pass
+     * that failed part-way) speaks for the pages it read only: what the last scan found running beyond them stands
+     * until a read as deep comes again, rather than the running set flapping with each poll. A row's own word still
+     * outranks the scan's (see `LiveRunning`), so a chat that finished meanwhile is not counted by this.
+     */
+    private fun RunningScan.scanned(read: LegacyRead): RunningScan {
+        val now = AppClock.now()
+        if (read.complete || read.pagesRead >= pagesRead) {
+            return copy(ids = read.running, scannedAtMillis = now, pagesRead = read.pagesRead, complete = read.complete)
+        }
+        return copy(ids = read.running + (ids - read.rows.keys), scannedAtMillis = now)
+    }
 
     /**
      * The v0 list is best effort: it enriches rows but never gates them, and its failure is not the list's failure.
@@ -1727,6 +1752,7 @@ class AgentRepository(
     /** Fetches by id in flight, so two passes asking for the same row share one read (see [loadDetail]). */
     private val inFlightById = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Result<Agent>>>()
     private val recordReadsById = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Result<AgentDto>>>()
+    private val runReadsById = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Result<RunDto>>>()
 
     /**
      * A pinned chat is always shown, whatever page it would have been on, whatever it runs on and whatever it was
@@ -1875,6 +1901,14 @@ class AgentRepository(
     }
 
     /**
+     * Whether a run's events reach this device now (set by the live hub, see `LiveRunHub.followsLive`): a run whose
+     * stream delivered an event moments ago needs no look at its record, which [verifyRunStatuses] would otherwise
+     * read on every refresh. A quiet stream — a long tool call, a held connection the run may have left — says
+     * nothing, and its record is read as before: that is how a run followed for the notification learns of its end.
+     */
+    @Volatile var followedLive: (agentId: String, runId: String) -> Boolean = { _, _ -> false }
+
+    /**
      * Settles the execution state the lists could not. The v1 list has no run state at all (its `status` is a
      * lifecycle that reads `ACTIVE` for finished agents too), the legacy list is one status per agent and best effort,
      * so once both have landed the runs still in question are read from their records — the one source that is
@@ -1899,9 +1933,12 @@ class AgentRepository(
         fun recent(agent: Agent) = agent.updatedAtMillis >= startedAt - VERIFY_RECENT_WINDOW_MS
         fun justActive(agent: Agent) = agent.updatedAtMillis >= startedAt - VERIFY_JUST_ACTIVE_WINDOW_MS
         fun newTurn(agent: Agent) = before[agent.id]?.latestRunId.let { it != null && it != agent.latestRunId }
+        val follows = followedLive
         val candidates = _state.value.agents.asSequence()
             .filter { it.latestRunId != null && !it.isArchived && it.id !in pendingLaunches }
             .filter { (newTurn(it) && recent(it)) || it.isRunning || justActive(it) || (it.runStatusUnknown && recent(it)) }
+            // A running row whose run's own stream is delivering it now: the record would say what the stream says.
+            .filterNot { it.isRunning && !newTurn(it) && follows(it.id, it.latestRunId!!) }
             .sortedWith(compareByDescending<Agent> { newTurn(it) }.thenByDescending { it.isRunning }.thenByDescending { it.updatedAtMillis })
             .take(MAX_VERIFIED_RUNS)
             .toList()
@@ -2152,7 +2189,7 @@ class AgentRepository(
         val run: RunDto? = if (knownRun != null && (dto.latestRunId == null || dto.latestRunId == knownRun.id)) {
             knownRun
         } else {
-            dto.latestRunId?.let { runId -> runCatching { api.getRun(id, runId) }.getOrNull() }
+            dto.latestRunId?.let { runId -> runCatching { runById(id, runId, api) }.getOrNull() }
         }
         // Extended mode: the row lands with its account record, as every row of the desktop's list does, so it is
         // published placed rather than published bare and moved once the record has been read — unless the account
@@ -2661,7 +2698,7 @@ class AgentRepository(
         if (isDocumentedRunId(runId)) return runId
         namedRuns[runId]?.let { return it }
         val startedIn = token()
-        val latest = runCatching { session.current.api.getAgent(agentId).latestRunId }
+        val latest = runCatching { agentRecord(agentId).latestRunId }
             .getOrElse { t -> if (t is CancellationException) throw t; null }
             ?.takeIf(::isDocumentedRunId) ?: return null
         if (latest == namedRunsAfter[runId]) return null
@@ -2678,8 +2715,32 @@ class AgentRepository(
      */
     suspend fun runRecord(agentId: String, runId: String, api: CursorApi = session.current.api): RunDto {
         val wire = documentedRunId(agentId, runId) ?: throw IllegalStateException("The run is not listed under its documented id yet.")
-        val run = api.getRun(agentId, wire)
+        val run = runById(agentId, wire, api)
         return if (wire != runId && run.id == wire) run.copy(id = runId) else run
+    }
+
+    /**
+     * `GET /v1/agents/{id}/runs/{runId}` under the documented id, one read shared by every caller asking for the same
+     * run while it is out. At a turn's end the live hub's settle, the notification's tracking, the chat's look for the
+     * next run and the list's verify each want the same record within moments, and every run's read counts against
+     * the one limit Cursor sets the endpoint. A caller whose shared read was cancelled under it reads for itself.
+     */
+    suspend fun runById(agentId: String, wireRunId: String, api: CursorApi = session.current.api): RunDto {
+        val key = "${System.identityHashCode(api)}/$agentId/$wireRunId"
+        val deferred = kotlinx.coroutines.CompletableDeferred<Result<RunDto>>()
+        val prior = runReadsById.putIfAbsent(key, deferred)
+        if (prior != null) {
+            val theirs = prior.await()
+            return if (theirs.exceptionOrNull() !is CancellationException) theirs.getOrThrow() else api.getRun(agentId, wireRunId)
+        }
+        return try {
+            api.getRun(agentId, wireRunId).also { deferred.complete(Result.success(it)) }
+        } catch (t: Throwable) {
+            deferred.complete(Result.failure(t))
+            throw t
+        } finally {
+            runReadsById.remove(key, deferred)
+        }
     }
 
     /** [documentedRunId] for a run the account has just named, asked a few times while the record catches up with it. */
@@ -3072,6 +3133,11 @@ class AgentRepository(
         private const val PAGE_SIZE = 100
         /** `/v0/agents` pages the running scan reads on a refresh: the newest five hundred agents by the list's order. */
         const val RUNNING_SCAN_PAGES = 5
+        /**
+         * How recently the account's list must have answered for a poll to read one legacy page (see
+         * [accountNamesRunning]): a few of the sidebar's polls, so one missed round does not deepen every poll after it.
+         */
+        const val ACCOUNT_LIST_FRESH_MS = 3 * 60_000L
         /** Agents the running scan named that no page holds, fetched by id per pass. */
         private const val MAX_MATERIALIZED_RUNNING = 12
         /** A pinned chat that could not be fetched is tried again after this long; one the server called gone, after [PINNED_GONE_RETRY_MS]. */

@@ -2133,6 +2133,32 @@ class ConversationRepository(
     private var pruneEvictedAt = MIN_EVICTED_PRUNE
     /** agentId -> the `agentUpdatedAtMillis` of its entry on disk ([ABSENT] when known to be missing). */
     private val diskIndex = ConcurrentHashMap<String, Long>()
+    private val firstRunPages = ConcurrentHashMap<String, kotlinx.coroutines.CompletableDeferred<Result<ListRunsResponseDto>>>()
+
+    /**
+     * The agent's newest runs (`GET /v1/agents/{id}/runs`, the first [FIRST_RUN_PAGE]), one read shared by every
+     * caller asking for the same agent's while it is out. A turn's end has the chat's look for the next run, its
+     * record's growth and a pull each ask within moments, and every agent's read counts against the one limit Cursor
+     * sets the endpoint (see `HostPause.endpoint`). A caller that joins takes the answer to a read sent moments before
+     * its own ask, never one kept from earlier; one whose shared read was cancelled under it reads for itself.
+     */
+    private suspend fun firstRunPage(api: CursorApi, agentId: String): ListRunsResponseDto {
+        val key = "${System.identityHashCode(api)}/$agentId"
+        val deferred = kotlinx.coroutines.CompletableDeferred<Result<ListRunsResponseDto>>()
+        val prior = firstRunPages.putIfAbsent(key, deferred)
+        if (prior != null) {
+            val theirs = prior.await()
+            return if (theirs.exceptionOrNull() !is CancellationException) theirs.getOrThrow() else api.listRuns(agentId, limit = FIRST_RUN_PAGE)
+        }
+        return try {
+            api.listRuns(agentId, limit = FIRST_RUN_PAGE).also { deferred.complete(Result.success(it)) }
+        } catch (t: Throwable) {
+            deferred.complete(Result.failure(t))
+            throw t
+        } finally {
+            firstRunPages.remove(key, deferred)
+        }
+    }
     private var prefetchJob: Job? = null
     private var pendingPrefetch: List<Agent>? = null
 
@@ -2923,9 +2949,9 @@ class ConversationRepository(
         // other chats' reads as by this one's: its first page refused leaves the chat as it stands — the record's
         // delta, the live stream — and is read again after the wait, not said over a chat that is on screen.
         var limited: Throwable? = null
-        suspend fun firstRunPage(api: CursorApi): ListRunsResponseDto? = try {
+        suspend fun newestRuns(api: CursorApi): ListRunsResponseDto? = try {
             net(agentId, "runs")
-            api.listRuns(agentId, limit = FIRST_RUN_PAGE)
+            firstRunPage(api, agentId)
         } catch (t: Throwable) {
             if (t is CancellationException || !t.isRateLimitRefusal()) throw t
             limited = t
@@ -2936,7 +2962,7 @@ class ConversationRepository(
             val recordOn = record != null && !backend.isDemo && capabilities().accountTranscript && synchronized(e) { e.recordWindow != null }
             if (recordOn) {
                 coroutineScope {
-                    val runs = async { firstRunPage(backend.api) }
+                    val runs = async { newestRuns(backend.api) }
                     when (readRecordGrowth(e, strict = true, refreshRuns = false)) {
                         // No delta to read from what is in hand: the chat is read as a load reads it.
                         null -> {
@@ -2950,7 +2976,7 @@ class ConversationRepository(
                     }
                 }
             } else {
-                val page = firstRunPage(backend.api)
+                val page = newestRuns(backend.api)
                 val held = synchronized(e) { if (!retryRecord && e.fetched && e.messages.isNotEmpty() && e.recordWindow == null) e.runs.associateBy { it.id } to e.local.isEmpty() else null }
                 when {
                     // Nothing on screen to stand: read as a load reads it, which says the refusal if it lasts.
@@ -3459,7 +3485,7 @@ class ConversationRepository(
             coroutineScope {
                 // The newest runs, one page: enough to render the window; the rest of the records follow behind the
                 // cursor (see [pageOlderRuns]) rather than holding the first frame up.
-                val runPage = async { handedRuns ?: run { net(agentId, "runs"); runCatching { api.listRuns(agentId, limit = FIRST_RUN_PAGE) } } }
+                val runPage = async { handedRuns ?: run { net(agentId, "runs"); runCatching { firstRunPage(api, agentId) } } }
                 // The `/v0` transcript is the whole chat in one answer, megabytes for a long one. A chat read before
                 // is asked for it again only when the newest runs say something changed — a run started or ended
                 // since — every turn of the transcript being a run: with nothing new in the run list there is
@@ -3750,7 +3776,7 @@ class ConversationRepository(
                 }
             }
         }
-        val runPage = async { net(agentId, "runs"); runCatching { cursorApi.listRuns(agentId, limit = FIRST_RUN_PAGE) } }
+        val runPage = async { net(agentId, "runs"); runCatching { firstRunPage(cursorApi, agentId) } }
         val stored = async { runCatching { attachments.forAgent(agentId) }.getOrDefault(emptyMap()) }
         val raw = tail.await()
         val onDevice = stored.await()
@@ -4552,7 +4578,7 @@ class ConversationRepository(
     private suspend fun refreshNewestRuns(e: Entry, handed: ListRunsResponseDto? = null) {
         val api = session.current.api
         val agentId = e.agentId
-        val first = handed ?: runCatching { net(agentId, "runs"); api.listRuns(agentId, limit = FIRST_RUN_PAGE) }.getOrElse { t -> if (t is CancellationException) throw t; return }
+        val first = handed ?: runCatching { net(agentId, "runs"); firstRunPage(api, agentId) }.getOrElse { t -> if (t is CancellationException) throw t; return }
         val latestId = agents.agent(agentId)?.latestRunId?.takeUnless { it.startsWith(LOCAL_RUN_PREFIX) }
         val (knownRuns, knownComplete) = synchronized(e) { e.runs to e.runsComplete }
         val newest = newestRuns(api, agentId, first, latestId, knownRuns, knownComplete)
@@ -5920,7 +5946,7 @@ class ConversationRepository(
         val api = session.current.api
         coroutineScope {
             val conversation = async { api.conversationV0(agentId) }
-            val runs = async { api.listRuns(agentId, limit = FIRST_RUN_PAGE) }
+            val runs = async { firstRunPage(api, agentId) }
             val newest = conversation.await().messages.lastOrNull { it.type == USER_MESSAGE }?.text?.trim()
             val newestRun = runs.await().items.maxByOrNull { parseIsoMillis(it.createdAt) }
             newestRun?.takeIf { newest == text.trim() && parseIsoMillis(it.createdAt) >= sinceMillis - CLOCK_SKEW_ALLOWANCE_MS }
@@ -6266,7 +6292,7 @@ class ConversationRepository(
         if (due.isEmpty()) return
         val api = session.current.api
         val (page, transcript) = coroutineScope {
-            val runs = async { runCatching { net(agentId, "runs"); api.listRuns(agentId, limit = FIRST_RUN_PAGE) }.getOrNull() }
+            val runs = async { runCatching { net(agentId, "runs"); firstRunPage(api, agentId) }.getOrNull() }
             val conversation = async { runCatching { net(agentId, "transcript"); api.conversationV0(agentId).messages }.getOrNull() }
             runs.await() to conversation.await()
         }
@@ -6900,7 +6926,7 @@ class ConversationRepository(
                 coroutineScope {
                     val conversation = async { api.conversationV0(agent.id) }
                     // The newest page alone: it is what the chat opens on, and the rest of the records follow when it does.
-                    val runs = async { api.listRuns(agent.id, limit = FIRST_RUN_PAGE) }
+                    val runs = async { firstRunPage(api, agent.id) }
                     val transcript = conversation.await().messages
                     val page = runs.await()
                     val latest = page.items.maxByOrNull { parseIsoMillis(it.createdAt) }
