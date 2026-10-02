@@ -80,6 +80,7 @@ class ScrollUpThroughFiguresTest {
     /** Each figure's PNG, by turn; (width, height) in source pixels, one per dp when laid out, so each row grows differently. */
     private val figures = (1..TURNS).associateWith { n -> png(FIGURE_SIZES[(n - 1) % FIGURE_SIZES.size], n) }
     private val gates = ConcurrentHashMap<Int, CountDownLatch>()
+    private val served: MutableSet<Int> = ConcurrentHashMap.newKeySet()
 
     @Volatile
     private var holding = true
@@ -106,6 +107,19 @@ class ScrollUpThroughFiguresTest {
     /** Figure [n] is let through onto the wire. */
     private fun release(n: Int) = gate(n).countDown()
 
+    /**
+     * Figure [n], let through, is fetched and decoded off the main thread in wall-clock time, which the frame clock
+     * knows nothing of: waits for the bytes to have gone over the wire and the decoded answer to be queued for the
+     * main thread, so the next frame delivers it.
+     */
+    private fun awaitDecoded(n: Int) {
+        val deadline = System.nanoTime() + 10_000_000_000L
+        while (n !in served && System.nanoTime() < deadline) Thread.sleep(5)
+        val looper = shadowOf(Looper.getMainLooper())
+        while (looper.isIdle && System.nanoTime() < deadline) Thread.sleep(5)
+        Thread.sleep(50)
+    }
+
     private fun figureUrl(n: Int) = server.url("/fig/$n.png").toString()
 
     private fun reply(n: Int) = buildString {
@@ -119,6 +133,7 @@ class ScrollUpThroughFiguresTest {
                 val n = request.path.orEmpty().removePrefix("/fig/").removeSuffix(".png").toIntOrNull() ?: return MockResponse().setResponseCode(404)
                 val bytes = figures[n] ?: return MockResponse().setResponseCode(404)
                 if (holding) gate(n).await(60, TimeUnit.SECONDS)
+                served += n
                 return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(bytes))
             }
         }
@@ -249,12 +264,12 @@ class ScrollUpThroughFiguresTest {
                     if (all.none { it.text().startsWith("Reply $figure paragraph") && it.boundsInRoot.bottom > list.top }) continue
                     release(figure)
                     released = figure
-                    // Fetched and decoded off the main thread in wall-clock time; the next frame delivers it.
-                    Thread.sleep(400)
+                    awaitDecoded(figure)
                     break
                 }
             }
-            if (moves.size > 10 && moves.takeLast(2).all { it == 0f }) break
+            // Over once the fling has stopped and the figure let through has landed (at rest, it must land without a move either).
+            if (moves.size > 10 && moves.takeLast(2).all { it == 0f } && (released == null || released in seenFigures)) break
         }
         if (releasing) assertWithMessage("a figure was let onto the wire while its reply crossed the top edge").that(released).isNotNull()
         return Pass(moves, landedAcrossTop, placeholderHeights, figureHeights)
