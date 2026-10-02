@@ -117,8 +117,8 @@ class FaultRig(
     terminalGraceMs: Long = 15_000L,
     /** How long a watched run stream may say nothing before it is taken up again from its last event (production: 30 s, doubling to ten times that). */
     stallTimeoutMs: Long = 30_000L,
-    /** How recently a run's stream must have delivered an event for the list's refresh to leave its record unread (production: 30 s). */
-    followedFreshMs: Long = 30_000L,
+    /** How recently a run's stream must have delivered an event for the list's refresh to leave its record unread (production: the stall window). */
+    followedFreshMs: Long = stallTimeoutMs,
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var now: Long = 1_800_000_000_000L

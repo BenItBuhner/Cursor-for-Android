@@ -117,8 +117,12 @@ class LiveRunHub(
      * current rather than verify it (see [follow]); a connection quiet for longer is verified the moment a chat comes.
      */
     private val arrivalTrustMs: Long = ARRIVAL_TRUST_MS,
-    /** How recently a live pass must have applied an event of its run for the agent list to take the run as followed (see [followsLive]). */
-    private val followedFreshMs: Long = FOLLOWED_FRESH_MS,
+    /**
+     * How recently a live pass must have applied an event of its run for the agent list to take the run as followed
+     * (see [followsLive]): a stall window, the silence after which this hub stops taking a connection at its word for
+     * a chat. Zero or less (the stall watch off) takes no run as followed, and the list reads every record as before.
+     */
+    private val followedFreshMs: Long = stallTimeoutMs,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     /** Everything known about a run right now. Items are the same timeline entries the conversation renders. */
@@ -379,7 +383,7 @@ class LiveRunHub(
     fun followsLive(agentId: String, runId: String, freshMs: Long = followedFreshMs): Boolean {
         val entry = synchronized(entries) { entries[key(agentId, runId)] } ?: return false
         val at = entry.eventAt
-        return entry.openPasses.get() > 0 && !entry.live.finished && entry.endSaidAt.value == 0L && at != 0L &&
+        return freshMs > 0 && entry.openPasses.get() > 0 && !entry.live.finished && entry.endSaidAt.value == 0L && at != 0L &&
             System.nanoTime() - at < freshMs * NANOS_PER_MS
     }
 
@@ -1081,8 +1085,6 @@ class LiveRunHub(
         const val STALL_TIMEOUT_MS = 30_000L
         /** See [arrivalTrustMs]: a connection that spoke this recently is one a resume would only open again. */
         const val ARRIVAL_TRUST_MS = 2_000L
-        /** See [followedFreshMs]: under the list's refresh period, so a stream that has gone quiet since has its record read on the next. */
-        const val FOLLOWED_FRESH_MS = 30_000L
         /**
          * The longest a pass that keeps hearing nothing goes between two resumes. Each resume is a record read and a
          * stream reopened, for every followed run — eight followed agents inside long tool calls paid 1.5 requests

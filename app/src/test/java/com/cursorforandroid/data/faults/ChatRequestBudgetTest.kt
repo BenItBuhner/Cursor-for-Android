@@ -79,7 +79,7 @@ class ChatRequestBudgetTest {
     }
 
     private fun openRig(): FaultRig =
-        FaultRig(server.baseUrl, folder.newFolder("rig"), readTimeoutMs = 20_000L, extended = true, engine = TranscriptEngine.STABLE, queuePollMs = 10_000L / SCALE, http2 = true, stallTimeoutMs = STALL_MS, followedFreshMs = FOLLOWED_FRESH_MS).also {
+        FaultRig(server.baseUrl, folder.newFolder("rig"), readTimeoutMs = 20_000L, extended = true, engine = TranscriptEngine.STABLE, queuePollMs = 10_000L / SCALE, http2 = true, stallTimeoutMs = STALL_MS).also {
             it.now = now
             rig = it
         }
@@ -279,8 +279,6 @@ class ChatRequestBudgetTest {
         /** The hub's windows run [SCALE] times faster than production's here: a 30 s stall window is 1.5 s. */
         const val SCALE = 20L
         const val STALL_MS = 30_000L / SCALE
-        /** How recently a followed run's stream must have delivered for the list to leave its record unread (production's 30 s). */
-        const val FOLLOWED_FRESH_MS = 30_000L / SCALE
         /** A held stream's keep-alive every 2 s of the agents' time. */
         const val BEAT_MS = 2_000L / SCALE
         /**
