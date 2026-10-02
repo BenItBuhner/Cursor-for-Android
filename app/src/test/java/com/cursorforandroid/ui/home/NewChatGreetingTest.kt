@@ -18,6 +18,9 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -50,7 +53,8 @@ import java.util.TimeZone
  * as the page recomposes and the minute ticks, a new one when the part of the day turns or the page is opened again;
  * a name arriving filling in the line rather than replacing it, and a line that needs the name replaced when it goes.
  * Its entrance plays once per line — not again as the page recomposes — and not at all with animations removed. With
- * the keyboard up it stays on a phone in portrait and folds away, out of the accessibility tree, in landscape.
+ * the keyboard up it stays on a phone in portrait and folds away, out of the accessibility tree, in landscape; it folds
+ * away too while the composer is expanded up the page.
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -276,6 +280,21 @@ class NewChatGreetingTest {
         val composer = compose.onNode(hasTestTag(NewChatHomeTags.COMPOSER)).fetchSemanticsNode()
         assertThat(node.boundsInRoot.top).isAtLeast(composer.boundsInRoot.top)
         assertThat(node.boundsInRoot.height).isGreaterThan(0f)
+    }
+
+    @Test
+    fun `the composer expanded up the page folds it away, and collapsed brings it back`() {
+        show()
+        val field = compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag(NewChatHomeTags.COMPOSER)))
+        field.performTextInput((1..14).joinToString("\n") { "Line $it of a long prompt" })
+        val expand = hasTestTag("composer-expand") and hasAnyAncestor(hasTestTag(NewChatHomeTags.COMPOSER))
+        compose.waitUntil(5_000) { compose.onAllNodes(expand, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onAllNodes(expand, useUnmergedTree = true).onFirst().performClick()
+        compose.waitForIdle()
+        assertThat(greetings()).isEmpty()
+        compose.onAllNodes(expand, useUnmergedTree = true).onFirst().performClick()
+        compose.waitForIdle()
+        assertThat(greetings()).hasSize(1)
     }
 
     @Test

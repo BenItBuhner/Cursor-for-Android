@@ -123,10 +123,11 @@ internal class PickedGreeting(val greeting: Greeting, val context: GreetingConte
  * With the keyboard up it stays, the composer centred under it as one block (see [PageCentring.alone]): a heading
  * takes no touch and lists nothing, and the page alone with a bare composer reads emptier than with its greeting.
  * Only where the keyboard leaves less than [FoldBelow] above it (a phone in landscape) does it fold away as the
- * keyboard rises, leaving the room to the composer, and leave the accessibility tree while folded.
+ * keyboard rises, leaving the room to the composer, and leave the accessibility tree while folded. It folds away
+ * too as the composer is expanded up the page ([expanding], its share of the way), which takes the whole page.
  */
 @Composable
-internal fun NewChatGreeting(shown: ShownGreeting, focus: KeyboardFocus, modifier: Modifier = Modifier) {
+internal fun NewChatGreeting(shown: ShownGreeting, focus: KeyboardFocus, expanding: () -> Float, modifier: Modifier = Modifier) {
     val colors = CursorTheme.colors
     val display = CursorTheme.typography.display
     val wide = LocalConfiguration.current.screenWidthDp >= WideFrom
@@ -135,7 +136,7 @@ internal fun NewChatGreeting(shown: ShownGreeting, focus: KeyboardFocus, modifie
     val entrance = remember(shown.pick) { Entrance(words.size, settled = focus.reducedMotion) }
     LaunchedEffect(entrance) { entrance.play() }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val folded by remember(focus) { derivedStateOf { focus.engaged.value && focus.roomAbove < FoldBelow } }
+    val folded by remember(focus) { derivedStateOf { focus.engaged.value && focus.roomAbove < FoldBelow || expanding() > 0f } }
     Text(
         shown.text,
         style = style,
@@ -145,7 +146,7 @@ internal fun NewChatGreeting(shown: ShownGreeting, focus: KeyboardFocus, modifie
         onTextLayout = { layout = it },
         modifier = modifier
             .fillMaxWidth()
-            .foldedUnder(focus)
+            .foldedUnder { maxOf(focus.fold(), expanding()) }
             .then(if (folded) Modifier.clearAndSetSemantics {} else Modifier.semantics { heading() })
             .testTag(NewChatHomeTags.GREETING)
             .padding(start = GreetingInset, end = GreetingInset, bottom = GreetingGap)
@@ -160,9 +161,9 @@ internal fun NewChatGreeting(shown: ShownGreeting, focus: KeyboardFocus, modifie
 private fun KeyboardFocus.fold(): Float = if (roomAbove < FoldBelow) fraction else 0f
 
 /** Shortened from the top by [fold], its words slid up out of the way and faded, all in layout and drawing. */
-private fun Modifier.foldedUnder(focus: KeyboardFocus): Modifier = layout { measurable, constraints ->
+private fun Modifier.foldedUnder(fold: () -> Float): Modifier = layout { measurable, constraints ->
     val placeable = measurable.measure(constraints)
-    val fold = focus.fold().coerceIn(0f, 1f)
+    val fold = fold().coerceIn(0f, 1f)
     val height = (placeable.height * (1f - fold)).roundToInt()
     layout(placeable.width, height) {
         placeable.placeWithLayer(0, height - placeable.height) { alpha = (1f - fold * 2f).coerceIn(0f, 1f) }

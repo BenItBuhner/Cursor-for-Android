@@ -247,6 +247,7 @@ fun HomeScreen(
         centring.squeeze = { expansion.fraction }
         var pageHeight by remember { mutableIntStateOf(0) }
         var composerTop by remember { mutableIntStateOf(0) }
+        var greetingHeight by remember { mutableIntStateOf(0) }
         val density = LocalDensity.current
         val expandedMargins = with(density) { (pageTopPadding(withHeader = onOpenSidebar != null) + ExpandedFootGap).roundToPx() }
         // The list stands clear of the keyboard, not of the navigation bar: with the keyboard down the bar is over its foot.
@@ -282,7 +283,7 @@ fun HomeScreen(
                         .onSizeChanged { centring.composerLaidOut(it.height) }
                         .testTag(NewChatHomeTags.COMPOSER),
                 ) {
-                    NewChatGreeting(greeting, keyboardFocus)
+                    NewChatGreeting(greeting, keyboardFocus, expanding = { expansion.fraction }, Modifier.onSizeChanged { greetingHeight = it.height })
                     NewChatSelectors(state, onRepo = { repoSheet = true }, onBranch = { branchSheet = true }, onDevice = { deviceSheet = true })
                     ComposerBox(
                         value = state.prompt,
@@ -326,7 +327,8 @@ fun HomeScreen(
                         focusRequests = composerFocusRequests,
                         voice = voice,
                         expansion = expansion,
-                        expandRoom = { pageHeight - footUnderBar() - expandedMargins - composerTop },
+                        // The greeting folds away as the composer expands, so its room is the composer's to take.
+                        expandRoom = { pageHeight - footUnderBar() - expandedMargins - (composerTop - greetingHeight) },
                         modifier = Modifier.onPlaced { composerTop = it.positionInParent().y.roundToInt() },
                     )
                     state.error?.let { ComposerErrorLine(it, state.errorAsked, onDismiss = viewModel::dismissError) }
