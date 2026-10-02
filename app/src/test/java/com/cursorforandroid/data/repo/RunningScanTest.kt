@@ -15,6 +15,7 @@ import com.cursorforandroid.domain.Capabilities
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.notifications.LiveDecision
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -138,5 +139,46 @@ class RunningScanTest {
         agents.applyLineage("bc-1", mapOf("bc-11" to AgentParentKind.PROJECT_WORKER), authoritative = true)
         assertThat(agents.agent("bc-11")?.isProjectScopedByEvidence).isTrue()
         assertThat(decision(agents)).isEqualTo(LiveDecision.Track(setOf("bc-2"), serviceActive = false))
+    }
+
+    @Test
+    fun `a poll reads one legacy page while the account's list names what runs, and keeps what the deeper scan found`() = runBlocking<Unit> {
+        extended = true
+        val agents = agents()
+        agents.refresh()
+        assertThat(agents.runningScan.value.ids).containsExactly("bc-2", "bc-7", "bc-11")
+        agents.accountListAnswered()
+        val before = api.listAgentsV0Calls
+        agents.refresh(silent = true, depth = RefreshDepth.Quick)
+        assertWithMessage("legacy pages a poll read with the account's word in hand").that(api.listAgentsV0Calls - before).isEqualTo(1)
+        // Its one page speaks for its own rows only: bc-7 and bc-11, beyond it, stand on the deeper scan's word.
+        assertThat(agents.runningScan.value.ids).containsExactly("bc-2", "bc-7", "bc-11")
+        assertThat(agents.runningScan.value.pagesRead).isEqualTo(4)
+        assertThat(decision(agents)).isEqualTo(LiveDecision.Track(setOf("bc-2", "bc-7", "bc-11"), serviceActive = false))
+        // A chat on the page it read that has stopped leaves the set at once; a full refresh reads the scan whole again.
+        api.v0["bc-2"] = api.v0.getValue("bc-2").copy(status = "FINISHED")
+        agents.refresh(silent = true, depth = RefreshDepth.Quick)
+        assertThat(agents.runningScan.value.ids).containsExactly("bc-7", "bc-11")
+        api.v0["bc-11"] = api.v0.getValue("bc-11").copy(status = "FINISHED")
+        val beforeFull = api.listAgentsV0Calls
+        agents.refresh(silent = true, depth = RefreshDepth.Full)
+        assertThat(api.listAgentsV0Calls - beforeFull).isEqualTo(4)
+        assertThat(agents.runningScan.value.ids).containsExactly("bc-7")
+    }
+
+    @Test
+    fun `a poll without the account's word reads the legacy list as deep as ever`() = runBlocking<Unit> {
+        // Default mode: the legacy pages are the only place an old chat's follow-up started elsewhere shows.
+        val agents = agents()
+        agents.refresh()
+        val before = api.listAgentsV0Calls
+        agents.refresh(silent = true, depth = RefreshDepth.Quick)
+        assertThat(api.listAgentsV0Calls - before).isEqualTo(4)
+        // Extended mode with the account's list not answered (refused, or not read yet): as deep as ever too.
+        extended = true
+        val deep = api.listAgentsV0Calls
+        agents.refresh(silent = true, depth = RefreshDepth.Quick)
+        assertThat(api.listAgentsV0Calls - deep).isEqualTo(4)
+        assertThat(agents.runningScan.value.ids).containsExactly("bc-2", "bc-7", "bc-11")
     }
 }
