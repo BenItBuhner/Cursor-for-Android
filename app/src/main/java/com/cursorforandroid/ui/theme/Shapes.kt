@@ -178,6 +178,16 @@ object CursorDimens {
     val menuShadowBlur = 7.dp
     val menuShadowDrop = 2.dp
     val menuShadowRoom = 12.dp
+    /** A menu or picker row on a phone, where a finger is the pointer: the platform's least touch target. */
+    val menuRowTouch = minTouchTarget
+    /** A picker row on a tablet or foldable, a little taller than the desktop's for a finger. */
+    val menuRowRegular = touchTarget
+    /** Below this width the window is a phone's: menu rows grow to [menuRowTouch] and submenus open in place. */
+    val compactWidthLimit = 600.dp
+    /** The least room on one side of its anchor a picker takes before it is a bottom sheet instead. */
+    val pickerMinRoom = 220.dp
+    /** The narrowest a window can be and still hold an anchored picker. */
+    val pickerMinWidth = 240.dp
     /** Recent-chat preview card, radius 8. */
     val previewCardWidth = 124.dp
     val previewCardHeight = 80.dp

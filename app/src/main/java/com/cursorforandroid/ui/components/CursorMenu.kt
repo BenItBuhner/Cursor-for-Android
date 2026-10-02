@@ -123,7 +123,7 @@ fun CursorMenu(
     Popup(popupPositionProvider = provider, onDismissRequest = onDismissRequest, properties = properties) {
         val transition = rememberTransition(state, label = "menu")
         val progress by transition.animateFloat(
-            transitionSpec = { if (targetState) tween(ENTER_MILLIS, easing = EnterEasing) else tween(EXIT_MILLIS, easing = ExitEasing) },
+            transitionSpec = { if (targetState) tween(MENU_ENTER_MILLIS, easing = MenuEnterEasing) else tween(MENU_EXIT_MILLIS, easing = MenuExitEasing) },
             label = "menu-progress",
         ) { open -> if (open) 1f else 0f }
         val room = CursorDimens.menuShadowRoom
@@ -132,7 +132,7 @@ fun CursorMenu(
             Modifier
                 .graphicsLayer {
                     val p = progress
-                    val scale = ENTER_SCALE + (1f - ENTER_SCALE) * p
+                    val scale = MENU_ENTER_SCALE + (1f - MENU_ENTER_SCALE) * p
                     scaleX = scale
                     scaleY = scale
                     alpha = p
@@ -263,7 +263,7 @@ fun CursorMenuSeparator(modifier: Modifier = Modifier) {
  * canvases draw shadow layers under shapes from API 28; below that there is no shadow, and the hairline alone
  * separates the menu from the page.
  */
-private fun Modifier.menuShadow(fill: Color, shadow: Color): Modifier = drawWithCache {
+internal fun Modifier.menuShadow(fill: Color, shadow: Color): Modifier = drawWithCache {
     val corner = CursorDimens.menuRadius.toPx()
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = fill.copy(alpha = 1f).toArgb()
@@ -355,8 +355,8 @@ internal class MenuPositionProvider(
     }
 }
 
-private const val ENTER_MILLIS = 180
-private const val EXIT_MILLIS = 120
-private const val ENTER_SCALE = 0.95f
-private val EnterEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-private val ExitEasing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+internal const val MENU_ENTER_MILLIS = 180
+internal const val MENU_EXIT_MILLIS = 120
+internal const val MENU_ENTER_SCALE = 0.95f
+internal val MenuEnterEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+internal val MenuExitEasing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
