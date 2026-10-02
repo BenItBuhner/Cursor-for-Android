@@ -1875,6 +1875,14 @@ class AgentRepository(
     }
 
     /**
+     * Whether a run's events reach this device now (set by the live hub, see `LiveRunHub.followsLive`): a run whose
+     * stream delivered an event moments ago needs no look at its record, which [verifyRunStatuses] would otherwise
+     * read on every refresh. A quiet stream — a long tool call, a held connection the run may have left — says
+     * nothing, and its record is read as before: that is how a run followed for the notification learns of its end.
+     */
+    @Volatile var followedLive: (agentId: String, runId: String) -> Boolean = { _, _ -> false }
+
+    /**
      * Settles the execution state the lists could not. The v1 list has no run state at all (its `status` is a
      * lifecycle that reads `ACTIVE` for finished agents too), the legacy list is one status per agent and best effort,
      * so once both have landed the runs still in question are read from their records — the one source that is
@@ -1899,9 +1907,12 @@ class AgentRepository(
         fun recent(agent: Agent) = agent.updatedAtMillis >= startedAt - VERIFY_RECENT_WINDOW_MS
         fun justActive(agent: Agent) = agent.updatedAtMillis >= startedAt - VERIFY_JUST_ACTIVE_WINDOW_MS
         fun newTurn(agent: Agent) = before[agent.id]?.latestRunId.let { it != null && it != agent.latestRunId }
+        val follows = followedLive
         val candidates = _state.value.agents.asSequence()
             .filter { it.latestRunId != null && !it.isArchived && it.id !in pendingLaunches }
             .filter { (newTurn(it) && recent(it)) || it.isRunning || justActive(it) || (it.runStatusUnknown && recent(it)) }
+            // A running row whose run's own stream is delivering it now: the record would say what the stream says.
+            .filterNot { it.isRunning && !newTurn(it) && follows(it.id, it.latestRunId!!) }
             .sortedWith(compareByDescending<Agent> { newTurn(it) }.thenByDescending { it.isRunning }.thenByDescending { it.updatedAtMillis })
             .take(MAX_VERIFIED_RUNS)
             .toList()

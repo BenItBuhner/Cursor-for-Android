@@ -117,6 +117,8 @@ class LiveRunHub(
      * current rather than verify it (see [follow]); a connection quiet for longer is verified the moment a chat comes.
      */
     private val arrivalTrustMs: Long = ARRIVAL_TRUST_MS,
+    /** How recently a live pass must have applied an event of its run for the agent list to take the run as followed (see [followsLive]). */
+    private val followedFreshMs: Long = FOLLOWED_FRESH_MS,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     /** Everything known about a run right now. Items are the same timeline entries the conversation renders. */
@@ -205,6 +207,9 @@ class LiveRunHub(
         @Volatile var stepChanges = 0
         /** Between two looks (see [lookBaseMs]), with no connection open; for [stats]. */
         @Volatile var resting = false
+        /** Connections open on the run now, and when one last applied an event of it — keep-alives are not (System.nanoTime; 0 before any). */
+        val openPasses = java.util.concurrent.atomic.AtomicInteger()
+        @Volatile var eventAt = 0L
         /** Set by [lookNow]: the next pause between looks (or the one under way) ends at once. */
         val lookRequested = MutableStateFlow(false)
         /**
@@ -296,6 +301,7 @@ class LiveRunHub(
 
     init {
         scope.launch { session.backend.drop(1).collect { resetAll() } }
+        agents.followedLive = { agentId, runId -> followsLive(agentId, runId) }
     }
 
     /**
@@ -364,6 +370,18 @@ class LiveRunHub(
     }
 
     fun current(agentId: String, runId: String): Snapshot? = synchronized(entries) { entries[key(agentId, runId)]?.state?.value }
+
+    /**
+     * The run's events reach this device now: a connection is open on it, nothing has said it ended, and an event of
+     * it was applied within [freshMs]. What a look at the run record would tell, this already knows; a quiet
+     * connection is not taken at its word (see `AgentRepository.followedLive`).
+     */
+    fun followsLive(agentId: String, runId: String, freshMs: Long = followedFreshMs): Boolean {
+        val entry = synchronized(entries) { entries[key(agentId, runId)] } ?: return false
+        val at = entry.eventAt
+        return entry.openPasses.get() > 0 && !entry.live.finished && entry.endSaidAt.value == 0L && at != 0L &&
+            System.nanoTime() - at < freshMs * NANOS_PER_MS
+    }
 
     /** For a crash report: the runs kept, those with a connection of their own, and the live subscribers on them. */
     fun stats(): String = synchronized(entries) {
@@ -678,6 +696,7 @@ class LiveRunHub(
         var atPosition = true
         var restOwed = false
         var previous: RunStreamEvent? = null
+        if (!historical) entry.openPasses.incrementAndGet()
         try {
             beats.collect { beat ->
                 if (!owns(entry, self)) return@collect
@@ -727,6 +746,7 @@ class LiveRunHub(
                 if (event !is RunStreamEvent.Heartbeat && event !is RunStreamEvent.Position) {
                     lastEventAt = System.nanoTime()
                     heardAt.set(lastEventAt)
+                    if (!historical && live === entry.live) entry.eventAt = lastEventAt
                     atPosition = false
                 }
                 if (event is RunStreamEvent.Status && !historical && live === entry.live) {
@@ -774,6 +794,8 @@ class LiveRunHub(
             // A streamer that blew up mid-pass is a dropped connection whose position is unknown.
             if (t is OutOfMemoryError) Breadcrumbs.add("out of memory reading run ${Breadcrumbs.tail(entry.runId)} of ${Breadcrumbs.tail(entry.agentId)}")
             pass.error = pass.error ?: RunStreamEvent.Error("stream_failed", t.message ?: "The run's stream failed.", resumeFrom = null)
+        } finally {
+            if (!historical) entry.openPasses.decrementAndGet()
         }
         // A connection that ends goes out with everything it applied, as it would have event by event; a rest publishes its own.
         if (!historical && !unwatched && !pass.rested && entry.owed.value && live === entry.live && owns(entry, self)) publish(entry)
@@ -1059,6 +1081,8 @@ class LiveRunHub(
         const val STALL_TIMEOUT_MS = 30_000L
         /** See [arrivalTrustMs]: a connection that spoke this recently is one a resume would only open again. */
         const val ARRIVAL_TRUST_MS = 2_000L
+        /** See [followedFreshMs]: under the list's refresh period, so a stream that has gone quiet since has its record read on the next. */
+        const val FOLLOWED_FRESH_MS = 30_000L
         /**
          * The longest a pass that keeps hearing nothing goes between two resumes. Each resume is a record read and a
          * stream reopened, for every followed run — eight followed agents inside long tool calls paid 1.5 requests

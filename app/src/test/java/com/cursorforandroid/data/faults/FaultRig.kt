@@ -117,6 +117,8 @@ class FaultRig(
     terminalGraceMs: Long = 15_000L,
     /** How long a watched run stream may say nothing before it is taken up again from its last event (production: 30 s, doubling to ten times that). */
     stallTimeoutMs: Long = 30_000L,
+    /** How recently a run's stream must have delivered an event for the list's refresh to leave its record unread (production: 30 s). */
+    followedFreshMs: Long = 30_000L,
 ) : AutoCloseable {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var now: Long = 1_800_000_000_000L
@@ -202,7 +204,7 @@ class FaultRig(
     /** The list's work in flight, shared by the list and the account layer (see `PendingWork`): what the sidebar's one loading row stands for. */
     val pending = PendingWork()
     val agents = AgentRepository(session, prefs, attachments, AgentListCache(disk.child("agents")), scope, persistDelayMs = 10, capabilities = { capabilities }, recordOf = { id -> if (this.capabilities.accountSession) accountAgents.record(id) else null }, accountPaused = { accountRpc.throttle.pausedUntil() != null }, pending = pending)
-    val hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 500, releaseGraceMs = 200, reconnectBaseMs = 200, reconnectMaxMs = 800, parking = disk.child("liveruns"), terminalGraceMs = terminalGraceMs, stallTimeoutMs = stallTimeoutMs, stallMaxMs = stallTimeoutMs * 10, scope = scope)
+    val hub = LiveRunHub(session, agents, nowProvider = { now }, pollIntervalMs = 500, releaseGraceMs = 200, reconnectBaseMs = 200, reconnectMaxMs = 800, parking = disk.child("liveruns"), terminalGraceMs = terminalGraceMs, stallTimeoutMs = stallTimeoutMs, stallMaxMs = stallTimeoutMs * 10, followedFreshMs = followedFreshMs, scope = scope)
     val conversationCache = ConversationCache(disk.child("conversations"))
     val traces = TraceCache(JsonDiskCache(File(root, "traces").apply { mkdirs() }, nowProvider = { now }, dispatcher = Dispatchers.Unconfined))
     /**
