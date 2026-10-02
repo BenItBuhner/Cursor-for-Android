@@ -1,5 +1,5 @@
-import { loadFont as loadGoogleSans } from "@remotion/google-fonts/GoogleSans";
 import { continueRender, delayRender, staticFile } from "remotion";
+import { FLEX } from "./concept/type";
 
 /**
  * Everything the video says, set in Instrument Sans as cursor.com sets its own type, from the face's variable file
@@ -28,8 +28,8 @@ if (typeof document !== "undefined" && typeof FontFace !== "undefined") {
     });
 }
 
-/** A device's system UI (the status bar, the notification shade), in Android's own face. */
-export const SYSTEM = loadGoogleSans("normal", { weights: ["400", "500"], subsets: ["latin"] }).fontFamily;
+/** A device's system UI (the status bar, the notification shade, the lock screen), in Android's own face. */
+export const SYSTEM = FLEX;
 
 export const TRACK = {
   /** Headlines, the wordmark, the end card's name, at rest. */

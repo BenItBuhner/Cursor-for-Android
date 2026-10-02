@@ -6,6 +6,7 @@
   "scripts": {
     "footage": "node scripts/footage.mjs",
     "music": "tsx scripts/cues.ts && python3 scripts/music.py public/audio/score.wav",
+    "music:film": "tsx scripts/film-cues.ts && python3 scripts/music.py public/audio/film-score.wav film-cues.json",
     "studio": "remotion studio",
     "typecheck": "tsc --noEmit",
     "render": "tsx scripts/render.ts"

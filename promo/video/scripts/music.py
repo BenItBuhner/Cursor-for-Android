@@ -13,6 +13,7 @@ glass tick as the prompt is sent, faint taps where a finger comes down, and rise
 LUFS, true peak under -1.2 dBTP.
 
     python3 scripts/music.py public/audio/score.wav      (npm run music writes the cues first, then runs this)
+    python3 scripts/music.py public/audio/film-score.wav film-cues.json      (npm run music:film, for the film)
 
 It needs numpy, scipy and pedalboard: pip install -r scripts/requirements.txt.
 """
@@ -49,6 +50,7 @@ CHORDS = {
     "live": dict(pad=[42, 50, 57, 64], strings=([42, 50], [69, 73]), piano=[57, 62, 66, 69, 74], root=Fs1),
     "ship": dict(pad=[45, 49, 52, 59], strings=([45, 52], [69, 73, 76]), piano=[61, 64, 69, 71, 76], root=A1),
     "lineup": dict(pad=[55, 59, 62, 66, 69], strings=([43, 50], [71, 74, 78]), piano=[62, 66, 69, 74, 78], root=G1),
+    "night": dict(pad=[42, 50, 57, 64], strings=([42, 50], [69, 73]), piano=[57, 62, 66, 69, 74], root=Fs1),
     "lift": dict(pad=[45, 50, 52, 57], strings=([45, 52], [69, 74, 76]), piano=[62, 64, 69, 74], root=A1),
     "end": dict(pad=[50, 57, 62, 66, 69], strings=([38, 50], [66, 69, 74]), piano=[50, 57, 62, 66], root=D1),
 }
@@ -165,6 +167,25 @@ def tap() -> np.ndarray:
     t = t_of(int(0.06 * SR))
     x = np.sin(2 * np.pi * 1650 * t) * np.exp(-t * 230) + 0.5 * filt(RNG.standard_normal(len(t)), "highpass", 3500) * np.exp(-t * 700)
     return fade(norm(x), 0.0003, 0.01)
+
+
+def click() -> np.ndarray:
+    """A lamp's switch: a dry snap of plastic, a smaller one as it seats, and the knock of it through the body."""
+    t = t_of(int(0.12 * SR))
+    x = filt(RNG.standard_normal(len(t)), "bandpass", (1800, 7000)) * np.exp(-t * 900)
+    late = int(0.011 * SR)
+    x[late:] += 0.45 * filt(RNG.standard_normal(len(t) - late), "bandpass", (2400, 8000)) * np.exp(-t[: len(t) - late] * 1400)
+    x += 0.6 * np.sin(2 * np.pi * 240 * t) * np.exp(-t * 120)
+    return fade(norm(x), 0.0002, 0.02)
+
+
+def glow(length: float = 0.9) -> np.ndarray:
+    """The screen waking: a faint high shimmer coming up with its light and settling, no louder than the room."""
+    t = t_of(int(length * SR))
+    env = (1 - np.exp(-t * 9)) * np.exp(-t * 3.2)
+    x = sum(np.sin(2 * np.pi * f * t + k) / (k + 1) for k, f in enumerate([1480, 2217, 2960]))
+    x += 0.3 * filt(RNG.standard_normal(len(t)), "bandpass", (3000, 9000))
+    return fade(norm(x * env), 0.004, 0.1)
 
 
 def riser(length: float) -> np.ndarray:
@@ -385,6 +406,7 @@ ARC = {
     "code": dict(gain=0.84, top=2800, strings=(0.85, 0.25), piano=2, pluck=0.7, kit=("kick",)),
     "steer": dict(gain=0.9, top=3000, strings=(0.9, 0.45), piano=2, pluck=0.85, kit=("kick", "snap", "hat")),
     "live": dict(gain=0.94, top=3200, strings=(1.0, 0.7), piano=2, pluck=0.9, kit=("kick", "snap", "hat")),
+    "night": dict(gain=0.62, top=1500, strings=(0.55, 0.45), piano=1, pluck=0.0, kit=()),
     "ship": dict(gain=1.0, top=3600, strings=(1.0, 1.0), piano=2, pluck=1.0, kit=("kick", "snap", "hat")),
     "lineup": dict(gain=1.06, top=4200, strings=(1.0, 1.0), piano=2, pluck=1.0, kit=("kick", "snap", "hat")),
     "lift": dict(gain=1.06, top=4600, strings=(1.0, 1.1), piano=0, pluck=0.8, kit=("kick", "hat")),
@@ -408,7 +430,11 @@ def score(cues: dict) -> np.ndarray:
         ("dictate", at["dictate"], at["code"]),
         ("code", at["code"], at["steer"]),
         ("steer", at["steer"], at["live"]),
-        ("live", at["live"], at["ship"]),
+        *(
+            [("live", at["live"], at["night"]), ("night", at["night"], at["ship"])]
+            if "night" in at
+            else [("live", at["live"], at["ship"])]
+        ),
         ("ship", at["ship"], at["lineup"]),
         ("lineup", at["lineup"], at["lineup"] + 4 * fps * beat),
         ("lift", at["lineup"] + 4 * fps * beat, at["end"]),
@@ -459,7 +485,9 @@ def score(cues: dict) -> np.ndarray:
             mix.add(t0, crash(), lv["crash"], verb=0.25)
         if name in ("dictate", "live"):
             mix.add(t0, crash(1.6), lv["crash"] * 0.5, verb=0.25)
-        if name in ("ship", "lift"):
+        if name == "night":
+            mix.add(t0, impact(3.0), lv["impact"] * 0.4, verb=0.5)
+        if name in ("ship", "lift", "night"):
             mix.add(t1 - beat * 1.5, riser(beat * 1.5), lv["riser"], verb=0.3)
             mix.add(t1 - beat, swell(beat), lv["swell"])
         if name == "dictate":
@@ -517,6 +545,15 @@ def score(cues: dict) -> np.ndarray:
     # The taps on screen, faintly.
     for frame in cues["taps"]:
         mix.add(sec(frame), tap(), lv["tap"], pan=0.1)
+
+    # The day's foley: the screen waking, the lamp's switch at night, the notification's chime on the lock screen.
+    foley = cues.get("foley")
+    if foley:
+        for frame in foley["screen"]:
+            mix.add(sec(frame), glow(), lv["tick"] * 0.5, pan=0.1, verb=0.5)
+        mix.add(sec(foley["lamp"]), click(), lv["tick"] * 0.7, pan=-0.35, verb=0.25)
+        mix.add(sec(foley["chime"]), bell(86, 2.4), lv["bell"] * 0.42, pan=0.12, verb=0.6)
+        mix.add(sec(foley["chime"]) + 0.16, bell(81, 2.4), lv["bell"] * 0.32, pan=0.12, verb=0.6)
 
     gain = pump(mix, kicks)
     wet = Pedalboard([Reverb(room_size=0.74, damping=0.4, wet_level=1.0, dry_level=0.0, width=1.0)])(mix.send.astype(np.float32), SR)
@@ -598,7 +635,8 @@ def master(x: np.ndarray) -> np.ndarray:
 
 def main():
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "public/audio/score.wav")
-    cues = json.loads((Path(__file__).resolve().parent.parent / "public" / "audio" / "cues.json").read_text())
+    name = sys.argv[2] if len(sys.argv) > 2 else "cues.json"
+    cues = json.loads((Path(__file__).resolve().parent.parent / "public" / "audio" / name).read_text())
     x = master(score(cues))
     print(f"score: {x.shape[1] / SR:.2f}s, {lufs(x):.2f} LUFS, true peak {true_peak(x):.2f} dBTP")
     pcm = np.clip(x.T + RNG.triangular(-1, 0, 1, x.T.shape) / 32768, -1, 1)

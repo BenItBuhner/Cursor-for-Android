@@ -12,25 +12,27 @@ import { COLOR, SYSTEM } from "../theme";
  * its first frame and trimmed to [frame]: Remotion clamps a frozen frame to the composition's length, which a take's
  * later frames run past, but not a trim.
  */
-export const Screen: React.FC<{ take: TakeId; frame: number; width: number; shade?: Shade }> = ({ take, frame, width, shade }) => {
+export const Screen: React.FC<{ take: TakeId; frame: number; width: number; shade?: Shade; lock?: boolean }> = ({ take, frame, width, shade, lock }) => {
   const t = takes[take];
   const f = Math.max(0, Math.min(t.frames - 1, Math.round(frame)));
   const scale = width / t.width;
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: t.night ? "#000" : "#fff" }}>
-      <Freeze frame={0}>
-        <OffthreadVideo
-          src={staticFile(t.file)}
-          trimBefore={f}
-          muted
-          toneMapped={false}
-          style={{ position: "absolute", left: 0, top: 0, width, height: t.height * scale, maxWidth: "none" }}
-        />
-      </Freeze>
+      {lock ? null : (
+        <Freeze frame={0}>
+          <OffthreadVideo
+            src={staticFile(t.file)}
+            trimBefore={f}
+            muted
+            toneMapped={false}
+            style={{ position: "absolute", left: 0, top: 0, width, height: t.height * scale, maxWidth: "none" }}
+          />
+        </Freeze>
+      )}
       <div style={{ position: "absolute", left: 0, top: 0, width: t.width, height: t.height, transform: `scale(${scale})`, transformOrigin: "0 0" }}>
-        <Finger take={take} f={f} />
+        {lock ? <LockScreen take={take} f={f} /> : <Finger take={take} f={f} />}
         {shade && shade.open > 0 ? <NotificationShade take={take} f={f} open={shade.open} /> : null}
-        <SystemBars take={take} f={f} />
+        <SystemBars take={take} f={f} clock={!lock} />
         {shade?.finger ? (
           <FingerDisc
             take={take}
@@ -49,7 +51,7 @@ export const Screen: React.FC<{ take: TakeId; frame: number; width: number; shad
 const ink = (take: TakeId) => (takes[take].night ? COLOR.statusText : COLOR.statusTextOnLight);
 
 /** The status bar (the take's clock, Wi-Fi and a full battery) and the gesture handle, in the take's pixels. */
-const SystemBars: React.FC<{ take: TakeId; f: number }> = ({ take, f }) => {
+const SystemBars: React.FC<{ take: TakeId; f: number; clock?: boolean }> = ({ take, f, clock = true }) => {
   const t = takes[take];
   const dp = (v: number) => v * pxPerDp(take);
   const status = t.statusBar[f] ?? 0;
@@ -76,7 +78,7 @@ const SystemBars: React.FC<{ take: TakeId; f: number }> = ({ take, f }) => {
           letterSpacing: dp(0.1),
         }}
       >
-        <span style={{ fontVariantNumeric: "tabular-nums" }}>{t.clock[f] ?? "9:41"}</span>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>{clock ? (t.clock[f] ?? "9:41") : ""}</span>
         <span style={{ display: "flex", alignItems: "center", gap: dp(6) }}>
           <Wifi size={dp(15)} color={ink(take)} />
           <Battery size={dp(15)} color={ink(take)} />
@@ -150,14 +152,7 @@ const NotificationShade: React.FC<{ take: TakeId; f: number; open: number }> = (
   const t = takes[take];
   const dp = (v: number) => v * pxPerDp(take);
   const look = SHADE_LOOK[t.night ? "dark" : "light"];
-  const step = liveAt(take, f);
   const status = t.statusBar[f] ?? dp(28);
-  const elapsed = Math.max(0, Math.floor(((t.t[f] ?? 0) - t.live.startT) / 1000));
-  const chronometer = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
-  const sweep = ((t.t[f] ?? 0) % SWEEP_MS) / SWEEP_MS;
-  const cardW = t.width - dp(24);
-  const barW = cardW - dp(60 + 16);
-  const segment = 0.36;
   /** The app dims and blurs as the shade's content slides down out from under the status bar, opaque the whole way. */
   const dimmed = clamp01(open * 1.5);
   const drop = dp(44 + 140 + 24);
@@ -176,16 +171,41 @@ const NotificationShade: React.FC<{ take: TakeId; f: number; open: number }> = (
           }}
         >
           <div style={{ position: "absolute", left: dp(24), top: status + dp(10), fontSize: dp(15), fontWeight: 500, color: look.primary }}>{DATE}</div>
-          {step ? (
+          <LiveCard take={take} f={f} top={status + dp(44)} />
+        </div>
+      </div>
+    </>
+  );
+};
+
+/**
+ * The run's live notification at [top] of the screen, as Android 16 lays out a promoted ProgressStyle one
+ * (LiveNotificationRenderer.single): the small icon in the notification's colour, "Cursor • Running •" and the
+ * chronometer, the chat's title, the step, the bar, and Stop. Nothing while the run has none posted.
+ */
+const LiveCard: React.FC<{ take: TakeId; f: number; top: number }> = ({ take, f, top }) => {
+  const t = takes[take];
+  const dp = (v: number) => v * pxPerDp(take);
+  const look = SHADE_LOOK[t.night ? "dark" : "light"];
+  const step = liveAt(take, f);
+  if (!step) return null;
+  const elapsed = Math.max(0, Math.floor(((t.t[f] ?? 0) - t.live.startT) / 1000));
+  const chronometer = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+  const sweep = ((t.t[f] ?? 0) % SWEEP_MS) / SWEEP_MS;
+  const cardW = t.width - dp(24);
+  const barW = cardW - dp(60 + 16);
+  const segment = 0.36;
+  return (
             <div
               style={{
                 position: "absolute",
                 left: dp(12),
-                top: status + dp(44),
+                top,
                 width: cardW,
                 height: dp(140),
                 borderRadius: dp(24),
                 background: look.card,
+                fontFamily: SYSTEM,
               }}
             >
               <div style={{ position: "absolute", left: dp(16), top: dp(16), width: dp(32), height: dp(32), borderRadius: "50%", background: ACCENT }}>
@@ -280,9 +300,47 @@ const NotificationShade: React.FC<{ take: TakeId; f: number; open: number }> = (
                 ))}
               </div>
             </div>
-          ) : null}
-        </div>
+  );
+};
+
+/**
+ * The lock screen the phone wakes to when the run's notification updates: the wallpaper, the clock, the date and the
+ * notification under them, and the lock at the foot.
+ */
+const LockScreen: React.FC<{ take: TakeId; f: number }> = ({ take, f }) => {
+  const t = takes[take];
+  const dp = (v: number) => v * pxPerDp(take);
+  const look = SHADE_LOOK.dark;
+  const clock = t.clock[f] ?? "9:41";
+  return (
+    <>
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 70% at 30% 18%, #1d2230 0%, #0c0e14 55%, #050608 100%)" }} />
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: dp(96),
+          textAlign: "center",
+          fontFamily: SYSTEM,
+          fontWeight: 400,
+          fontSize: dp(88),
+          lineHeight: 1,
+          letterSpacing: dp(-1.5),
+          color: look.primary,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {clock}
       </div>
+      <div style={{ position: "absolute", left: 0, right: 0, top: dp(196), textAlign: "center", fontFamily: SYSTEM, fontSize: dp(15), fontWeight: 500, color: look.secondary }}>
+        {DATE}
+      </div>
+      <LiveCard take={take} f={f} top={dp(244)} />
+      <svg width={dp(20)} height={dp(24)} viewBox="0 0 20 24" style={{ position: "absolute", left: t.width / 2 - dp(10), top: t.height - dp(64) }}>
+        <rect x="2" y="10" width="16" height="12" rx="3" fill="none" stroke={look.secondary} strokeWidth="1.8" />
+        <path d="M6 10 V7 a4 4 0 0 1 8 0 V10" fill="none" stroke={look.secondary} strokeWidth="1.8" />
+      </svg>
     </>
   );
 };
