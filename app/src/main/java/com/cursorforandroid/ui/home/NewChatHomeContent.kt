@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -30,13 +31,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -370,7 +373,6 @@ internal fun rememberComposerChips(graph: AppGraph): ComposerChips {
  * given. It takes no focus and no touches (the picker's option does),
  * and says nothing to accessibility services, which hear the option's label instead.
  */
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 internal fun NewChatPageMiniature(
     home: NewChatHome,
@@ -394,32 +396,44 @@ internal fun NewChatPageMiniature(
     // The page's list keeps its last row clear of the navigation bar, and so its middle is this much higher.
     val navigationBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Box(modifier) {
-        ScaledPage(pageSize, Modifier.focusProperties { enter = { FocusRequester.Cancel } }.focusGroup()) {
-            Column(Modifier.fillMaxSize().background(colors.canvas).consumeWindowInsets(WindowInsets.systemBars)) {
-                if (withHeader) CursorHeader(leading = { FlatIconButton(CursorIcons.Sidebar, null, onClick = {}) })
-                CentredWhileItFits(
-                    top = pageTopPadding(withHeader),
-                    bottom = PageBottomPadding + navigationBar,
-                    modifier = Modifier.fillMaxWidth().weight(1f),
+        // Nothing in here may take focus: a hardware Tab or D-pad press whose move is cancelled stops where it is
+        // (AndroidComposeView's key navigation counts a cancelled move as done), so a page that only refused to be
+        // entered would hold the keys on its option. The page's fields and buttons at the top take none for canFocus,
+        // read up to the group; those nested in a clickable take none because clickables take none while it is Touch.
+        ScaledPage(pageSize, Modifier.focusGroup()) {
+            CompositionLocalProvider(LocalInputModeManager provides TouchOnly) {
+                Column(
+                    Modifier
+                        .focusProperties { canFocus = false }
+                        .fillMaxSize()
+                        .background(colors.canvas)
+                        .consumeWindowInsets(WindowInsets.systemBars),
                 ) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Column(Modifier.widthIn(max = CursorDimens.composerMaxWidth).fillMaxWidth()) {
-                            NewChatSelectors(chips.repoLabel, chips.noRepo, chips.ref.ifBlank { NewAgentUiState.DEFAULT_BRANCH }, chips.device, onRepo = {}, onBranch = {}, onDevice = {})
-                            ComposerBox(
-                                value = "",
-                                onValueChange = {},
-                                placeholder = NewChatHomeCopy.PLACEHOLDER,
-                                onSend = {},
-                                canSend = false,
-                                minLines = 3,
-                                plusMenu = menu,
-                                modelLabel = chips.modelLabel,
-                                onModel = {},
-                                onModePill = {},
-                            )
+                    if (withHeader) CursorHeader(leading = { FlatIconButton(CursorIcons.Sidebar, null, onClick = {}) })
+                    CentredWhileItFits(
+                        top = pageTopPadding(withHeader),
+                        bottom = PageBottomPadding + navigationBar,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(Modifier.widthIn(max = CursorDimens.composerMaxWidth).fillMaxWidth()) {
+                                NewChatSelectors(chips.repoLabel, chips.noRepo, chips.ref.ifBlank { NewAgentUiState.DEFAULT_BRANCH }, chips.device, onRepo = {}, onBranch = {}, onDevice = {})
+                                ComposerBox(
+                                    value = "",
+                                    onValueChange = {},
+                                    placeholder = NewChatHomeCopy.PLACEHOLDER,
+                                    onSend = {},
+                                    canSend = false,
+                                    minLines = 3,
+                                    plusMenu = menu,
+                                    modelLabel = chips.modelLabel,
+                                    onModel = {},
+                                    onModePill = {},
+                                )
+                            }
+                            if (blocks.isNotEmpty()) Spacer(Modifier.height(ComposerGap))
+                            blocks.forEach { HomeBlockView(it, nowMillis = list.nowMillis, actions = MiniatureActions) }
                         }
-                        if (blocks.isNotEmpty()) Spacer(Modifier.height(ComposerGap))
-                        blocks.forEach { HomeBlockView(it, nowMillis = list.nowMillis, actions = MiniatureActions) }
                     }
                 }
             }
@@ -491,6 +505,14 @@ private const val MiniatureShortcuts = 12
 
 /** Every action the pane offers, so a miniature draws each button the page does; none is reachable through it. */
 private val MiniatureActions = HomeBlockActions(onOpenAgent = {}, rowActions = null, onNewProject = {}, onOpenSettings = {})
+
+/** Touch, whatever the device is using: a miniature's clickables then take no focus, as on a touch screen. */
+@OptIn(ExperimentalComposeUiApi::class)
+private object TouchOnly : InputModeManager {
+    override val inputMode: InputMode get() = InputMode.Touch
+
+    override fun requestInputMode(inputMode: InputMode): Boolean = inputMode == InputMode.Touch
+}
 
 /** [NewAgentUiState]'s chips as [NewChatSelectors] draws them. */
 @Composable
