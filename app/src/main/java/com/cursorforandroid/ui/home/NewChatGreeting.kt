@@ -70,8 +70,13 @@ internal fun rememberNewChatGreeting(memory: GreetingMemory, user: CursorUser?, 
     val name = remember(user?.firstName, user?.email) { FirstName.of(user) }
     val bucket = GreetingBucket.of(AppClock.now(), zone)
     val visit = remember { Visit() }
-    val picked = remember(bucket, name == null) {
+    val first = remember(bucket) {
         pickNewChatGreeting(AppClock.now(), zone, name, list, memory.peek(), firstOfVisit = !visit.picked).also { visit.picked = true }
+    }
+    val picked = if (name == null && first.greeting.line.needsName) {
+        remember(first) { pickNewChatGreeting(AppClock.now(), zone, null, list, memory.peek(), firstOfVisit = false) }
+    } else {
+        first
     }
     LaunchedEffect(picked) { memory.shown(picked.greeting.line.id, AppClock.now(), zone) }
     val text = remember(picked, name) { picked.greeting.line.render(picked.context.copy(name = name)) }
