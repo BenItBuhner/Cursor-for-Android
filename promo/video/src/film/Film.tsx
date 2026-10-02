@@ -145,6 +145,7 @@ const World: React.FC<{ f: number; framing: Framing; probe?: Partial<Cam> }> = (
         distance={set.glazing.distance}
         panes={set.glazing.panes}
         roll={set.glazing.roll}
+        plant={set.glazing.plant}
         f={f}
       />
       <Backdrop id={set.time} />
@@ -174,18 +175,18 @@ const World: React.FC<{ f: number; framing: Framing; probe?: Partial<Cam> }> = (
               y={P0.y}
               turn={P0.turn}
               size={{ w: outer.w, h: outer.h }}
-              color="#9aa6c4"
-              strength={0.3 * glow}
-              reach={3}
+              color="#b3bacb"
+              strength={0.16 * glow}
+              reach={9}
             />
           ) : null}
         </>
       ) : null}
       {set.layout === "lineup" ? (
         <>
-          <Hardware pose={LINEUP.phone} screen={phone} glow={1} />
-          <Locked device="foldable" smudgeSeed={5} />
-          <Locked device="tablet" smudgeSeed={7} />
+          {set.devices.includes("phone") ? <Hardware pose={LINEUP.phone} screen={phone} glow={1} /> : null}
+          {set.devices.includes("foldable") ? <Locked device="foldable" smudgeSeed={5} /> : null}
+          {set.devices.includes("tablet") ? <Locked device="tablet" smudgeSeed={7} /> : null}
           <Notebook x={34} y={-14} turn={0.5} pencil={false} />
         </>
       ) : null}

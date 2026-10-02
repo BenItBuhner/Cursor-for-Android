@@ -169,6 +169,20 @@ def tap() -> np.ndarray:
     return fade(norm(x), 0.0003, 0.01)
 
 
+def air(length: float, seed: int) -> np.ndarray:
+    """The room the score is played in: a breath of high noise, each side its own, drifting slowly in level and colour,
+    eased in and out."""
+    rng = np.random.default_rng(seed)
+    n = int(length * SR)
+    t = t_of(n)
+    out = np.zeros((2, n))
+    for ch in range(2):
+        x = filt(rng.standard_normal(n), "bandpass", (2600, 11000), 2)
+        drift = 0.65 + 0.35 * np.sin(2 * np.pi * rng.uniform(0.11, 0.19) * t + rng.uniform(0, 6))
+        out[ch] = x * drift
+    return fade(norm(out), 0.25, 0.25)
+
+
 def click() -> np.ndarray:
     """A lamp's switch: a dry snap of plastic, a smaller one as it seats, and the knock of it through the body."""
     t = t_of(int(0.12 * SR))
@@ -386,14 +400,15 @@ LEVEL = {
     "kick": 0.42,
     "snap": 0.3,
     "hat": 0.2,
-    "bass": 0.42,
+    "bass": 0.33,
     "pad": 0.62,
     "strings": 0.55,
     "piano": 0.5,
     "pluck": 0.26,
     "crash": 0.3,
     "bell": 0.5,
-    "tap": 0.07,
+    "tap": 0.14,
+    "air": 0.05,
 }
 # How loud each part stands (the pad's, the bass's and the piano's gain), how far its pad opens (the top of its
 # harmonics, in Hz), how loud its strings stand (low, high), how the piano moves (notes a beat), how loud the pulse is,
@@ -406,7 +421,7 @@ ARC = {
     "code": dict(gain=0.84, top=2800, strings=(0.85, 0.25), piano=2, pluck=0.7, kit=("kick",)),
     "steer": dict(gain=0.9, top=3000, strings=(0.9, 0.45), piano=2, pluck=0.85, kit=("kick", "snap", "hat")),
     "live": dict(gain=0.94, top=3200, strings=(1.0, 0.7), piano=2, pluck=0.9, kit=("kick", "snap", "hat")),
-    "night": dict(gain=0.62, top=1500, strings=(0.55, 0.45), piano=1, pluck=0.0, kit=()),
+    "night": dict(gain=0.38, top=1400, strings=(0.32, 0.26), piano=1, pluck=0.0, kit=()),
     "ship": dict(gain=1.0, top=3600, strings=(1.0, 1.0), piano=2, pluck=1.0, kit=("kick", "snap", "hat")),
     "lineup": dict(gain=1.06, top=4200, strings=(1.0, 1.0), piano=2, pluck=1.0, kit=("kick", "snap", "hat")),
     "lift": dict(gain=1.06, top=4600, strings=(1.0, 1.1), piano=0, pluck=0.8, kit=("kick", "hat")),
@@ -466,6 +481,7 @@ def score(cues: dict) -> np.ndarray:
             mix.add(t0, strings(c["strings"][0], span + 0.25, 0.5, 0.3, seed + 100), lv["strings"] * low, verb=0.5, pump=True)
         if high:
             mix.add(t0, strings(c["strings"][1], span + 0.25, 0.7, 0.3, seed + 200, top=6500), lv["strings"] * 0.7 * high, verb=0.55, pump=True)
+        mix.add(t0, air(span + 0.3, seed + 400), lv["air"] * g, verb=0.2)
         if name not in ("intro",):
             mix.add(t0, bass(c["root"], span + 0.05), lv["bass"] * g, pump=True)
         # The piano states the chord on the cut and then walks it, a note a beat or two, up and back.
@@ -483,10 +499,10 @@ def score(cues: dict) -> np.ndarray:
         # The crashes, risers and swells on the big cuts.
         if name in ("code", "ship", "lineup"):
             mix.add(t0, crash(), lv["crash"], verb=0.25)
-        if name in ("dictate", "live"):
+        if name == "live":
             mix.add(t0, crash(1.6), lv["crash"] * 0.5, verb=0.25)
         if name == "night":
-            mix.add(t0, impact(3.0), lv["impact"] * 0.4, verb=0.5)
+            mix.add(t0, impact(3.0), lv["impact"] * 0.25, verb=0.5)
         if name in ("ship", "lift", "night"):
             mix.add(t1 - beat * 1.5, riser(beat * 1.5), lv["riser"], verb=0.3)
             mix.add(t1 - beat, swell(beat), lv["swell"])
@@ -617,7 +633,7 @@ def limit(x: np.ndarray, ceiling_db: float, lookahead: float = 0.002, release: f
 
 def master(x: np.ndarray) -> np.ndarray:
     x = x * 10 ** ((-20 - lufs(x)) / 20)
-    x = Pedalboard([HighpassFilter(26), Compressor(threshold_db=-18, ratio=1.8, attack_ms=20, release_ms=180)])(x.astype(np.float32), SR).astype(np.float64)
+    x = Pedalboard([HighpassFilter(32), HighpassFilter(32), Compressor(threshold_db=-18, ratio=1.8, attack_ms=20, release_ms=180)])(x.astype(np.float32), SR).astype(np.float64)
     gain = TARGET_LUFS - lufs(x)
     for _ in range(8):
         y = limit(x * 10 ** (gain / 20), CEILING_DBTP)

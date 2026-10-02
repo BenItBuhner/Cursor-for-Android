@@ -50,12 +50,12 @@ export const LIGHT: Record<TimeOfDay, Light> = {
   },
   /** A moonlit window off the other side, almost no fill; the lamp and the screen do the rest. */
   night: {
-    sun: { azimuth: -30, elevation: 28, color: "#b9c6e2", intensity: 1.05 },
-    sky: { color: "#1b2742", ground: "#0b0f19", intensity: 0.025 },
+    sun: { azimuth: -30, elevation: 34, color: "#aebcd8", intensity: 0.75 },
+    sky: { color: "#2a3146", ground: "#14161c", intensity: 0.09 },
     view: "night",
     window: { position: [44, -14, 30], scale: [30, 46], intensity: 0.5 },
-    cards: [],
-    background: "#05070c",
+    cards: [{ position: [-60, 30, 50], scale: [14, 14, 1], color: "#ffe2c2", intensity: 0.9 }],
+    background: "#0a0b0f",
     dust: { color: "#b8c4e0", strength: 0.18 },
   },
   /** The next morning: the same window, the sun lower and further round, warmer. */
@@ -151,16 +151,17 @@ const LEAVES = (() => {
 
 /**
  * The window between the sun and the table: a wall [distance] centimetres back along the sun's ray through [through],
- * with [panes] cut in it and the plant hanging in the left one, there only for the shadow it throws (the camera never
- * sees it), so the sun falls across the stone as sharp-edged bands with the leaves in them, and the leaves stir.
+ * with [panes] cut in it and (if [plant]) the plant hanging in the left one, there only for the shadow it throws (the
+ * camera never sees it), so the sun falls across the stone as sharp-edged bands with the leaves in them, and they stir.
  */
-export const Window: React.FC<{ id: TimeOfDay; through: [number, number, number]; distance: number; panes: Panes; f: number; roll?: number }> = ({
+export const Window: React.FC<{ id: TimeOfDay; through: [number, number, number]; distance: number; panes: Panes; f: number; roll?: number; plant?: boolean }> = ({
   id,
   through,
   distance,
   panes,
   f,
   roll = 0,
+  plant = true,
 }) => {
   const frame = useWindowFrame(id, through, distance, roll);
   const wall = useMemo(() => {
@@ -194,7 +195,7 @@ export const Window: React.FC<{ id: TimeOfDay; through: [number, number, number]
       <mesh geometry={wall} castShadow>
         <meshBasicMaterial colorWrite={false} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      {LEAVES.map((l, i) => (
+      {(plant ? LEAVES : []).map((l, i) => (
         <mesh
           key={i}
           geometry={leaves[i]}
@@ -354,8 +355,8 @@ export const Lamp: React.FC<{ on: number; position: [number, number, number]; ta
       <spotLight
         position={position}
         target={object}
-        color="#ffb46a"
-        intensity={on * 520}
+        color="#ffe6cc"
+        intensity={on * 2800}
         distance={0}
         decay={2}
         angle={0.5}
@@ -423,6 +424,6 @@ export const Backdrop: React.FC<{ id: TimeOfDay }> = ({ id }) => {
 const BACKDROP: Record<TimeOfDay, [string, string]> = {
   morning: ["#4a443e", "#7d746a"],
   noon: ["#6b6863", "#a29b91"],
-  night: ["#040507", "#0b0d12"],
+  night: ["#08090c", "#15161a"],
   next: ["#4c443c", "#83776a"],
 };

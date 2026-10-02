@@ -75,7 +75,7 @@ function stainTexture(): THREE.CanvasTexture {
   return t;
 }
 
-/** A stoneware cup on an oak coaster at [x], [y], its handle at [turn], [fill] of the way up with coffee (0 is drunk). */
+/** A stoneware cup at [x], [y], its handle at [turn], [fill] of the way up with coffee (0 is drunk). */
 export const Cup: React.FC<{ x: number; y: number; turn: number; fill: number }> = ({ x, y, turn, fill }) => {
   const parts = useMemo(() => {
     const profile = [...OUTSIDE, ...[...INSIDE].reverse()].map(([r, h]) => new THREE.Vector2(r, h));
@@ -84,23 +84,18 @@ export const Cup: React.FC<{ x: number; y: number; turn: number; fill: number }>
     const glaze = stoneware(512);
     glaze.wrapS = glaze.wrapT = THREE.RepeatWrapping;
     glaze.repeat.set(3, 1);
-    const wood = oak(1024);
     return {
       body,
       glaze: new THREE.MeshPhysicalMaterial({ map: glaze, roughness: 0.42, clearcoat: 0.55, clearcoatRoughness: 0.18, side: THREE.DoubleSide }),
       handle: new THREE.TorusGeometry(2.05, 0.42, 20, 48, Math.PI * 1.15),
       coffee: new THREE.MeshPhysicalMaterial({ map: coffeeTexture(), roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02 }),
       stain: new THREE.MeshStandardMaterial({ map: stainTexture(), roughness: 0.45 }),
-      wood: new THREE.MeshStandardMaterial({ map: wood.color, bumpMap: wood.bump, bumpScale: 0.4, roughness: 0.58 }),
     };
   }, []);
   const level = 0.75 + Math.max(0, Math.min(1, fill)) * (RIM - 1.15 - 0.75);
   return (
     <group position={[x, y, 0]} rotation={[0, 0, turn]} scale={0.84}>
-      <mesh position={[0, 0, 0.45]} material={parts.wood} castShadow receiveShadow>
-        <cylinderGeometry args={[5.4, 5.4, 0.9, 96]} />
-      </mesh>
-      <group position={[0, 0, 0.9]}>
+      <group>
         <mesh geometry={parts.body} material={parts.glaze} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow />
         <mesh geometry={parts.handle} material={parts.glaze} position={[4.15, 0, 4.9]} rotation={[Math.PI / 2, 0, -Math.PI * 0.575]} castShadow />
         {fill > 0.01 ? (
@@ -188,12 +183,16 @@ function keyShape(length: number, seed: number): THREE.Shape {
   s.lineTo(length, -0.42);
   s.lineTo(length + 0.25, -0.1);
   s.lineTo(length + 0.25, 0.1);
-  const teeth = 6;
-  for (let i = 0; i < teeth; i++) {
-    const x = length - (i * (length - bow - 0.6)) / teeth;
-    const depth = 0.18 + 0.22 * (((seed * 31 + i * 17) % 7) / 7);
-    s.lineTo(x - 0.15, 0.42 - depth);
-    s.lineTo(x - 0.35, 0.42);
+  // Cuts with sloped flanks and flat roots, as a key machine leaves them, not a saw's teeth.
+  const cuts = 5;
+  const pitch = (length - bow - 0.9) / cuts;
+  s.lineTo(length - 0.1, 0.36);
+  for (let i = 0; i < cuts; i++) {
+    const x = length - 0.25 - i * pitch;
+    const depth = 0.1 + 0.2 * (((seed * 31 + i * 17) % 7) / 7);
+    s.lineTo(x - pitch * 0.3, 0.42 - depth);
+    s.lineTo(x - pitch * 0.55, 0.42 - depth);
+    s.lineTo(x - pitch, 0.4);
   }
   s.lineTo(bow + 0.25, 0.42);
   s.closePath();
@@ -210,15 +209,15 @@ export const Keys: React.FC<{ x: number; y: number; turn: number }> = ({ x, y, t
     return {
       brass: extrude(keyShape(5.4, 1)),
       steel: extrude(keyShape(4.6, 2)),
-      brassMat: new THREE.MeshPhysicalMaterial({ color: "#c9a25e", metalness: 1, roughness: 0.28 }),
-      steelMat: new THREE.MeshPhysicalMaterial({ color: "#b9bcc2", metalness: 1, roughness: 0.24 }),
+      brassMat: new THREE.MeshPhysicalMaterial({ color: "#c9a873", metalness: 1, roughness: 0.42, envMapIntensity: 1.6 }),
+      steelMat: new THREE.MeshPhysicalMaterial({ color: "#c2c5ca", metalness: 1, roughness: 0.38, envMapIntensity: 1.6 }),
     };
   }, []);
   return (
     <group position={[x, y, 0]} rotation={[0, 0, turn]}>
       <mesh position={[0, 0, 0.09]} castShadow>
         <torusGeometry args={[1.25, 0.08, 10, 48]} />
-        <meshPhysicalMaterial color="#9a9da3" metalness={1} roughness={0.2} />
+        <meshPhysicalMaterial color="#b0b3b8" metalness={1} roughness={0.32} envMapIntensity={1.6} />
       </mesh>
       <mesh geometry={parts.brass} material={parts.brassMat} position={[1.6, 0.6, 0.04]} rotation={[0, 0, 0.35]} castShadow receiveShadow />
       <mesh geometry={parts.steel} material={parts.steelMat} position={[0.6, -1.5, 0.21]} rotation={[0, 0, -0.9]} castShadow receiveShadow />

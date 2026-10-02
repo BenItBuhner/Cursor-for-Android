@@ -190,13 +190,13 @@ export function roundedRect(w: number, h: number, r: number): THREE.ShapeGeometr
 
 /**
  * The cover glass's reflecting face: a grid [w] by [h] with UVs 0 to 1, its corners left to an alpha map, and for the
- * foldable a dip of a tenth of a millimetre along the crease, so reflections bend across it as they do on the real one.
+ * foldable a dip of a third of a millimetre along the crease, so reflections bend across it as they do on the real one.
  */
 function coatGeometry(w: number, h: number, crease: boolean): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(w, h, crease ? 96 : 1, 1);
   if (crease) {
     const pos = g.attributes.position!;
-    for (let i = 0; i < pos.count; i++) pos.setZ(i, -0.012 * Math.exp(-((pos.getX(i) / 0.35) ** 2)));
+    for (let i = 0; i < pos.count; i++) pos.setZ(i, -0.03 * Math.exp(-((pos.getX(i) / 0.45) ** 2)));
     g.computeVertexNormals();
   }
   return g;
@@ -338,7 +338,7 @@ export const Hardware: React.FC<{
           blending={THREE.AdditiveBlending}
           transparent
           depthWrite={false}
-          envMapIntensity={0.75}
+          envMapIntensity={0.18}
           polygonOffset
           polygonOffsetFactor={-2}
           polygonOffsetUnits={-8}
@@ -366,7 +366,7 @@ const Details: React.FC<{ device: DeviceId; f: ReturnType<typeof useFinishes>; t
         <boxGeometry args={[0.05, length + 0.06, 0.26]} />
       </mesh>
       <RoundedBox args={[0.11, length, 0.2]} radius={0.045} smoothness={4} position={[x + 0.02, y, mid]} castShadow>
-        <meshPhysicalMaterial color="#3f4044" metalness={1} roughness={0.26} anisotropy={0.5} envMapIntensity={1} />
+        <meshPhysicalMaterial color="#323337" metalness={1} roughness={0.17} anisotropy={0.5} envMapIntensity={0.55} />
       </RoundedBox>
     </group>
   );
@@ -445,7 +445,7 @@ const Details: React.FC<{ device: DeviceId; f: ReturnType<typeof useFinishes>; t
         <boxGeometry args={[length + 0.06, 0.05, 0.26]} />
       </mesh>
       <RoundedBox args={[length, 0.11, 0.2]} radius={0.045} smoothness={4} position={[x, end + 0.02, mid]} castShadow>
-        <meshPhysicalMaterial color="#3f4044" metalness={1} roughness={0.26} anisotropy={0.5} envMapIntensity={1} />
+        <meshPhysicalMaterial color="#323337" metalness={1} roughness={0.17} anisotropy={0.5} envMapIntensity={0.55} />
       </RoundedBox>
     </group>
   );

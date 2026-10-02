@@ -211,7 +211,7 @@ export function cameraAt(f: number, framing: Framing): Cam {
 }
 
 /** The window for a stretch of the film: the sun's bands fall through [through], from a wall [distance] back. */
-export type Glazing = { through: V3; distance: number; panes: Panes; roll: number };
+export type Glazing = { through: V3; distance: number; panes: Panes; roll: number; plant?: boolean };
 
 const WIDE_PANES: Panes = { w: 26, h: 54, mullion: 4.5 };
 
@@ -225,6 +225,8 @@ export type Set = {
   span: number;
   glazing: Glazing;
   layout: "story" | "lineup" | "end";
+  /** In the lineup, the devices on the table: each hero cut has only its own, the tableau all three. */
+  devices: DeviceId[];
   cup: { x: number; y: number; turn: number; fill: number } | null;
   keys: boolean;
   lamp: number;
@@ -233,12 +235,13 @@ export type Set = {
 };
 
 export function setAt(f: number): Set {
-  const story = (time: TimeOfDay, span: number, glazing: Glazing, fill: number, cup = { x: 13.3, y: 0.2, turn: 2.2 }): Set => ({
+  const story = (time: TimeOfDay, span: number, glazing: Glazing, fill: number, cup = { x: 12.2, y: 7.5, turn: 2.2 }): Set => ({
     time,
     center: [0, 0],
     span,
     glazing,
     layout: "story",
+    devices: [],
     cup: { ...cup, fill },
     keys: f >= NIGHT && f < SHOT.live.to,
     lamp: time === "night" ? Math.max(0, Math.min(1, (f - LAMP) / 6)) : 0,
@@ -250,30 +253,33 @@ export function setAt(f: number): Set {
   if (f < SHOT.code.from) return story("morning", 60, morning, 0.92);
   if (f < SHOT.steer.from) return story("morning", 60, morning, 0.7);
   if (f < NIGHT) return story("morning", 60, morning, 0.45);
-  if (f < SHOT.live.to) return story("night", 60, { through: [1, -1, 0], distance: 60, panes: { w: 6.5, h: 60, mullion: 2.2 }, roll: 0 }, 0);
-  if (f < SHOT.ship.to) return story("next", 60, { through: [0.5, 2, 0], distance: 70, panes: WIDE_PANES, roll: 0 }, 1, { x: 13.3, y: 0.2, turn: 1.1 });
-  const lineup = (time: TimeOfDay, through: V3, span: number, panes = WIDE_PANES): Set => ({
+  if (f < SHOT.live.to) return story("night", 60, { through: [1, -1, 0], distance: 60, panes: { w: 10, h: 60, mullion: 2.6 }, roll: 0, plant: false }, 0);
+  if (f < SHOT.ship.to) return story("next", 60, { through: [0.5, 2, 0], distance: 70, panes: WIDE_PANES, roll: 0 }, 1, { x: 12.2, y: 7.5, turn: 1.1 });
+  const lineup = (time: TimeOfDay, through: V3, span: number, devices: DeviceId[], panes = WIDE_PANES): Set => ({
     time,
     center: [through[0], through[1]],
     span,
     glazing: { through, distance: 80, panes, roll: 0 },
     layout: "lineup",
+    devices,
     cup: { x: -38, y: 20, turn: 1.4, fill: 0.8 },
     keys: false,
     lamp: 0,
     dust: time === "next",
   });
   const at = (pose: Pose): V3 => [pose.x, pose.y, 0];
-  if (f < SHOT.foldable.from) return lineup("next", at(LINEUP.phone), 50);
-  if (f < SHOT.tablet.from) return lineup("next", at(LINEUP.foldable), 60);
-  if (f < SHOT.tableau.from) return lineup("next", at(LINEUP.tablet), 70);
-  if (f < SHOT.end.from) return lineup("noon", [-3, 3, 0], 160, { w: 44, h: 80, mullion: 5 });
+  if (f < SHOT.foldable.from) return lineup("next", at(LINEUP.phone), 50, ["phone"]);
+  if (f < SHOT.tablet.from) return lineup("next", at(LINEUP.foldable), 60, ["foldable"]);
+  if (f < SHOT.tableau.from) return lineup("next", at(LINEUP.tablet), 70, ["tablet"]);
+  if (f < SHOT.end.from) return lineup("next", [-3, 3, 0], 160, ["phone", "foldable", "tablet"], { w: 44, h: 80, mullion: 5 });
   return {
     time: "noon",
     center: [END_AT[0], END_AT[1]],
     span: 80,
-    glazing: { through: [END_AT[0] + 2 + ((f - SHOT.end.from) / (SHOT.end.to - SHOT.end.from)) * 3, END_AT[1] - 4, 0], distance: 90, panes: { w: 34, h: 70, mullion: 5 }, roll: 0 },
+    // The mullion's foot placed so the type lies in the upper right pane's light, the leaves in the other corner.
+    glazing: { through: [END_AT[0] - 16.6 + ((f - SHOT.end.from) / (SHOT.end.to - SHOT.end.from)) * 3, END_AT[1] + 42, 0], distance: 90, panes: { w: 34, h: 70, mullion: 5 }, roll: 0 },
     layout: "end",
+    devices: [],
     cup: null,
     keys: false,
     lamp: 0,
