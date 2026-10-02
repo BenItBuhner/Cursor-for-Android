@@ -173,11 +173,17 @@ fun ImageBlock(src: String, alt: String?, modifier: Modifier = Modifier, heightC
             }
         }
 
+        // A figure decoded before in this process is laid out at its own size from the first frame, the pixels
+        // filling in where the placeholder stood: a row the reader scrolls back to never changes height under them
+        // (a transcript's list keeps its anchored row's top still, and a change in height moves everything below).
+        val known = remember(ref, request) { media?.loader?.knownImageSize(ref, request.width, request.height) }
+        val placeholderSize = if (known != null) Modifier.size(fitted(known.width, known.height, maxWidth, maxHeight)) else Modifier.fillMaxWidth().height(PlaceholderHeight)
+
         when (val s = state) {
             ImageLoad.Loading -> if (stalled) {
-                MediaStalledRow(stage, waking = wake, onRetry = { attempt++ }, modifier = Modifier.fillMaxWidth().height(PlaceholderHeight))
+                MediaStalledRow(stage, waking = wake, onRetry = { attempt++ }, modifier = placeholderSize)
             } else {
-                MediaPlaceholder(Modifier.fillMaxWidth().height(PlaceholderHeight), if (wake) "Waking the agent's machine" else "Loading image")
+                MediaPlaceholder(placeholderSize, if (wake) "Waking the agent's machine" else "Loading image")
             }
             is ImageLoad.Failed -> if (ref is MediaRef.Store) {
                 // The store answered nothing for it: the card still opens the Project, and a tap on Retry asks again.
@@ -277,8 +283,11 @@ fun VideoBlock(src: String, poster: String?, modifier: Modifier = Modifier, heig
         val maxHeight = heightCap ?: mediaMaxHeight()
         val density = LocalDensity.current
         val maxPx = with(density) { maxOf(maxWidth, maxHeight).roundToPx() }
-        var frame by remember(ref) { mutableStateOf<ImageBitmap?>(null) }
-        var durationMs by remember(ref) { mutableStateOf<Long?>(null) }
+        // A recording probed before in this process keeps its card's proportions from the first frame, as a figure
+        // decoded before keeps its size (see ImageBlock): the card never changes shape under the reader.
+        val probed = remember(ref, maxPx) { loader.knownVideoPoster(ref, maxPx) }
+        var frame by remember(ref) { mutableStateOf(probed?.frame?.asImageBitmap()) }
+        var durationMs by remember(ref) { mutableStateOf(probed?.durationMs) }
 
         LaunchedEffect(ref, posterRef, maxPx) {
             val explicitPoster = posterRef?.takeIf { it !is MediaRef.Unavailable }

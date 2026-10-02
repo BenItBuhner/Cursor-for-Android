@@ -128,7 +128,25 @@ class MediaLoader(
 
     private val posters = LruCache<String, VideoPoster>(12)
 
+    /**
+     * The size each figure decoded to, by artifact and the bounds it was asked to fit (the inline figures' are the
+     * device's, see `inlineDecodeBounds`): what a figure shown again is laid out at before its pixels are back, so
+     * that its row never changes height under the reader (see `ImageBlock`). Sizes only — the pixels are Coil's.
+     */
+    private val sizes = LruCache<String, Size>(SIZES_REMEMBERED)
+
     private val copyLocks = List(COPY_LOCK_STRIPES) { Mutex() }
+
+    /** The size [ref] last decoded to within [maxWidthPx] x [maxHeightPx] through [image] in this process, if it has. */
+    fun knownImageSize(ref: MediaRef, maxWidthPx: Int, maxHeightPx: Int): Size? = sizes.get(sizeKey(ref, maxWidthPx, maxHeightPx))
+
+    /** The poster [videoPoster] last answered for [ref] at [maxPx] in this process, if it has, without asking again. */
+    fun knownVideoPoster(ref: MediaRef, maxPx: Int): VideoPoster? = posters.get("${ref.cacheKey}@$maxPx")
+
+    private fun sizeKey(ref: MediaRef, maxWidthPx: Int, maxHeightPx: Int) = "${ref.cacheKey}@${maxWidthPx}x$maxHeightPx"
+
+    /** A decoded figure's pixel size. */
+    class Size(val width: Int, val height: Int)
 
     /** Every figure asked for with a chat named, and how its read went: the transcript diagnostics' `media:` section. */
     val loads = MediaLoads()
@@ -162,6 +180,7 @@ class MediaLoader(
             val bitmap = withTimeoutOrNull(deadline) { named { decodeImage(ref, maxWidthPx, maxHeightPx, wake, reached) } }
                 ?: throw MediaProblemException(MediaProblem.TimedOut(stage, deadline / 1_000))
             chat?.let { loads.ready(it, ref, bitmap.width, bitmap.height) }
+            sizes.put(sizeKey(ref, maxWidthPx, maxHeightPx), Size(bitmap.width, bitmap.height))
             bitmap
         } catch (e: CancellationException) {
             chat?.let { loads.left(it, ref) }
@@ -495,6 +514,7 @@ class MediaLoader(
     /** Forgets everything fetched for the signed-out account; the disk cache is wiped off the main thread. */
     suspend fun clearCaches() {
         posters.evictAll()
+        sizes.evictAll()
         loads.clear()
         if (lazyImageLoader.isInitialized()) imageLoader.memoryCache?.clear()
         withContext(Dispatchers.IO) {
@@ -643,6 +663,8 @@ class MediaLoader(
         const val ASSET_PREFIX = "file:///android_asset/"
         /** Decoded images kept in memory at most (see the image loader's memory cache). */
         const val MEMORY_CACHE_BYTES = 32L * 1024 * 1024
+        /** Figures whose decoded size is remembered ([knownImageSize]): a few ints each, so far more than the memory cache holds pixels for. */
+        private const val SIZES_REMEMBERED = 1_024
         /** Under the cache: the copies [file] makes for other apps; `file_paths.xml` lets the FileProvider hand them out. */
         const val MEDIA_DIR = "media"
         /** Under [MEDIA_DIR]: the files the panel and the file viewer hand to the media viewer ([keep]). */
