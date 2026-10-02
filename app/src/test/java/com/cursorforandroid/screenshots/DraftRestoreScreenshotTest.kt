@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -17,14 +18,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.FakeCursorApi
 import com.cursorforandroid.data.FakeRunStreamer
+import com.cursorforandroid.data.api.RunStreamEvent
 import com.cursorforandroid.data.api.dto.ApiKeyInfoDto
 import com.cursorforandroid.data.demo.DemoBackendFactory
 import com.cursorforandroid.data.local.FollowUpStore
 import com.cursorforandroid.data.local.SecureKeyStore
-import com.cursorforandroid.data.api.RunStreamEvent
 import com.cursorforandroid.data.repo.CursorBackend
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.ui.components.ModePills
+import com.cursorforandroid.ui.components.PickerTags
 import com.cursorforandroid.ui.conversation.ConversationScreen
 import com.cursorforandroid.ui.conversation.ConversationViewModel
 import com.cursorforandroid.ui.theme.CursorTheme
@@ -180,7 +182,10 @@ class DraftRestoreScreenshotTest {
         waitForText("Plan")
         capture("182_draft_restore_after")
 
+        // The picker opens on the restored model; its row opens the restored options.
         compose.onNodeWithText("Claude Fable 5.1").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(PickerTags.List)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(hasText("Claude Fable 5.1") and hasAnyAncestor(hasTestTag(PickerTags.List))).performClick()
         waitForText("Effort")
         capture("183_draft_restore_after_picker")
     }

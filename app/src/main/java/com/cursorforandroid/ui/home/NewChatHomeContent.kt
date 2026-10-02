@@ -65,6 +65,7 @@ import com.cursorforandroid.ui.components.ComposerMenuActions
 import com.cursorforandroid.ui.components.CursorButton
 import com.cursorforandroid.ui.components.CursorCard
 import com.cursorforandroid.ui.components.CursorHeader
+import com.cursorforandroid.ui.components.ComposerPickerAnchors
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.Dot
 import com.cursorforandroid.ui.components.FlatIconButton
@@ -323,14 +324,15 @@ internal fun NewChatSelectors(
     onRepo: () -> Unit,
     onBranch: () -> Unit,
     onDevice: () -> Unit,
+    anchors: ComposerPickerAnchors? = null,
 ) {
     SelectorRow {
         // The source: a repository, or "Start from scratch" as the web composer names a chat without one.
-        SelectorChip(repoLabel, onClick = onRepo, icon = if (noRepo) CursorIcons.Cloud else CursorIcons.Repo, modifier = Modifier.weight(1f, fill = false))
+        SelectorChip(repoLabel, onClick = onRepo, icon = if (noRepo) CursorIcons.Cloud else CursorIcons.Repo, modifier = Modifier.weight(1f, fill = false), anchor = anchors?.repository)
         if (!noRepo) {
-            SelectorChip(branchLabel, onClick = onBranch, icon = CursorIcons.GitBranch)
+            SelectorChip(branchLabel, onClick = onBranch, icon = CursorIcons.GitBranch, anchor = anchors?.branch)
         }
-        SelectorChip(device.label, onClick = onDevice, icon = deviceIcon(device))
+        SelectorChip(device.label, onClick = onDevice, icon = deviceIcon(device), anchor = anchors?.device)
     }
 }
 
@@ -516,5 +518,5 @@ private object TouchOnly : InputModeManager {
 
 /** [NewAgentUiState]'s chips as [NewChatSelectors] draws them. */
 @Composable
-internal fun NewChatSelectors(state: NewAgentUiState, onRepo: () -> Unit, onBranch: () -> Unit, onDevice: () -> Unit) =
-    NewChatSelectors(state.repoLabel, state.noRepo, state.branchLabel, state.selectedDevice, onRepo, onBranch, onDevice)
+internal fun NewChatSelectors(state: NewAgentUiState, onRepo: () -> Unit, onBranch: () -> Unit, onDevice: () -> Unit, anchors: ComposerPickerAnchors? = null) =
+    NewChatSelectors(state.repoLabel, state.noRepo, state.branchLabel, state.selectedDevice, onRepo, onBranch, onDevice, anchors)

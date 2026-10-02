@@ -1,38 +1,29 @@
 package com.cursorforandroid.ui.home
 
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.cursorforandroid.domain.BranchOption
 import com.cursorforandroid.domain.KnownBranches
 import com.cursorforandroid.domain.Repository
 import com.cursorforandroid.ui.components.CursorIcons
-import com.cursorforandroid.ui.components.CursorSheet
-import com.cursorforandroid.ui.components.FadingLazyColumn
-import com.cursorforandroid.ui.components.HairlineDivider
-import com.cursorforandroid.ui.components.SheetHeader
-import com.cursorforandroid.ui.theme.CursorTheme
+import com.cursorforandroid.ui.components.CursorPicker
+import com.cursorforandroid.ui.components.PickerAction
+import com.cursorforandroid.ui.components.PickerDismiss
+import com.cursorforandroid.ui.components.PickerDivider
+import com.cursorforandroid.ui.components.PickerEntry
+import com.cursorforandroid.ui.components.PickerItem
+import com.cursorforandroid.ui.components.PickerNote
+import com.cursorforandroid.ui.components.PickerPresentation
+import com.cursorforandroid.ui.components.PickerWidths
+import com.cursorforandroid.ui.components.PopoverAnchor
+import com.cursorforandroid.ui.components.pickerMatches
 
 /**
- * The composer's branch picker: the repository's default branch — or, for a machine's checkout ([fromCheckout]), the
- * branch that checkout is on — then every branch agents in the repository started from or pushed and, with an account
- * session, the repository's own branches ([branches], see `KnownBranches`), filtered by the search field. A name typed
- * into the field that matches none of them is offered as a row of its own: without the account's list, that is the
- * only way to start from a branch no agent has touched yet.
+ * The composer's branch picker, on Cursor's branch dropdown: the repository's default branch — or, for a machine's
+ * checkout ([fromCheckout]), the branch that checkout is on — then every branch agents in the repository started from
+ * or pushed and, with an account session, the repository's own branches ([branches], see `KnownBranches`), filtered
+ * by the search. A name typed into it that matches none of them is offered as a "+" row of its own: without the
+ * account's list, that is the only way to start from a branch no agent has touched yet.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun BranchSheet(
     repo: Repository?,
@@ -42,65 +33,68 @@ internal fun BranchSheet(
     onDismiss: () -> Unit,
     fromCheckout: Boolean = false,
     listedByAccount: Boolean = false,
+    anchor: PopoverAnchor? = null,
+    presentation: PickerPresentation? = null,
 ) {
-    val colors = CursorTheme.colors
-    val type = CursorTheme.typography
-    var query by rememberSaveable { mutableStateOf("") }
-    CursorSheet(onDismiss = onDismiss) { dismiss ->
-        // Picking a row plays the sheet's hide animation before the selection is applied.
-        fun pick(ref: String) {
-            onSelect(ref)
-            dismiss()
+    CursorPicker(
+        onDismiss = onDismiss,
+        anchor = anchor,
+        title = "Branch",
+        searchPlaceholder = "Search branches\u2026",
+        width = PickerWidths.Default,
+        presentation = presentation,
+        testTag = BRANCH_PICKER_TAG,
+        entries = { query -> branchEntries(query, repo, branches, selected, fromCheckout, listedByAccount, onSelect) },
+    )
+}
+
+internal const val BRANCH_PICKER_TAG = "branch-picker"
+
+private fun branchEntries(
+    query: String,
+    repo: Repository?,
+    branches: List<BranchOption>,
+    selected: String,
+    fromCheckout: Boolean,
+    listedByAccount: Boolean,
+    onSelect: (String) -> Unit,
+): List<PickerEntry> = buildList {
+    val typed = query.trim()
+    val current = selected.trim()
+    val visible = branches.filter { pickerMatches(typed, it.name) }
+    // The selection always has a row, even when no agent has used it (typed earlier, or restored from the last launch).
+    val currentUnlisted = current.isNotEmpty() && branches.none { it.name == current } && pickerMatches(typed, current)
+    val unlisted = typed.isNotEmpty() && typed != current && branches.none { it.name == typed }
+    val offerTyped = unlisted && KnownBranches.isPlausibleRef(typed)
+    if (typed.isEmpty()) {
+        if (fromCheckout) {
+            add(PickerItem("default", "Current branch", subtitle = "The machine's checkout, on the branch it is on", icon = CursorIcons.GitBranch, selected = current.isEmpty(), onPick = { onSelect("") }))
+        } else {
+            add(PickerItem("default", "Default branch", subtitle = "The repository's default branch", icon = CursorIcons.GitBranch, selected = current.isEmpty(), onPick = { onSelect("") }))
         }
-        SheetHeader("Branch")
-        SheetSearchField(value = query, onValueChange = { query = it }, placeholder = "Search branches")
-        Spacer(Modifier.height(6.dp))
-        val typed = query.trim()
-        val current = selected.trim()
-        fun matches(name: String) = typed.isEmpty() || name.contains(typed, ignoreCase = true)
-        val visible = branches.filter { matches(it.name) }
-        // The selection always has a row, even when no agent has used it (typed earlier, or restored from the last launch).
-        val currentUnlisted = current.isNotEmpty() && branches.none { it.name == current } && matches(current)
-        val unlisted = typed.isNotEmpty() && typed != current && branches.none { it.name == typed }
-        val offerTyped = unlisted && KnownBranches.isPlausibleRef(typed)
-        val nothingToShow = typed.isNotEmpty() && visible.isEmpty() && !currentUnlisted && !offerTyped
-        FadingLazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false), contentPadding = PaddingValues(bottom = 12.dp)) {
-            if (typed.isEmpty()) {
-                item("default") {
-                    if (fromCheckout) {
-                        SheetRow(title = "Current branch", subtitle = "The machine's checkout, on the branch it is on", checked = current.isEmpty(), icon = CursorIcons.GitBranch) { pick("") }
-                    } else {
-                        SheetRow(title = "Default branch", subtitle = "The repository's default branch", checked = current.isEmpty(), icon = CursorIcons.GitBranch) { pick("") }
-                    }
-                    HairlineDivider(Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-                }
-            }
-            if (currentUnlisted) {
-                item("current") {
-                    SheetRow(title = current, subtitle = null, checked = true, icon = CursorIcons.GitBranch) { pick(current) }
-                }
-            }
-            items(visible, key = { "branch:${it.name}" }) { branch ->
-                SheetRow(title = branch.name, subtitle = branch.description, checked = branch.name == current, icon = CursorIcons.GitBranch) { pick(branch.name) }
-            }
-            if (offerTyped) {
-                item("typed") {
-                    SheetRow(title = typed, subtitle = "Use this branch name", checked = false, icon = CursorIcons.Plus) { pick(typed) }
-                }
-            }
-            if (nothingToShow) {
-                item("invalid") {
-                    Text("\u201C$typed\u201D can't be a branch name", style = type.small, color = colors.textQuaternary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-                }
-            }
-            if (repo != null && !listedByAccount) {
-                item("note") {
-                    Text(
-                        "Cursor's API can't list a repository's branches, so these are the ones your agents started from or pushed in ${repo.shortName}. Search for any other branch by name to use it.",
-                        style = type.small, color = colors.textQuaternary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                    )
-                }
-            }
-        }
+        if (currentUnlisted || visible.isNotEmpty()) add(PickerDivider("default-divider"))
+    }
+    if (currentUnlisted) add(PickerItem("current", current, icon = CursorIcons.GitBranch, selected = true, onPick = { onSelect(current) }))
+    visible.forEach { branch ->
+        add(
+            PickerItem(
+                key = "branch:${branch.name}",
+                label = branch.name,
+                detail = branch.description,
+                icon = CursorIcons.GitBranch,
+                selected = branch.name == current,
+                onPick = { onSelect(branch.name) },
+            ),
+        )
+    }
+    if (offerTyped) {
+        if (isNotEmpty()) add(PickerDivider("typed-divider"))
+        add(PickerAction("typed", "Use \u201C$typed\u201D", onClick = { onSelect(typed) }, dismiss = PickerDismiss.All))
+    }
+    if (typed.isNotEmpty() && visible.isEmpty() && !currentUnlisted && !offerTyped) {
+        add(PickerNote("invalid", "\u201C$typed\u201D can't be a branch name"))
+    }
+    if (repo != null && !listedByAccount) {
+        add(PickerNote("note", "Cursor's API can't list a repository's branches, so these are the ones your agents started from or pushed in ${repo.shortName}. Search for any other branch by name to use it."))
     }
 }

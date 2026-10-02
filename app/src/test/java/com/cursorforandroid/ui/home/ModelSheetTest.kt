@@ -1,31 +1,34 @@
 package com.cursorforandroid.ui.home
 
 import androidx.activity.ComponentActivity
-import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.domain.ModelOption
 import com.cursorforandroid.domain.ModelParam
 import com.cursorforandroid.domain.ModelParameter
 import com.cursorforandroid.domain.ModelParameterValue
 import com.cursorforandroid.domain.ModelVariant
+import com.cursorforandroid.ui.components.PickerTags
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.google.common.truth.Truth.assertThat
@@ -90,18 +93,13 @@ class ModelSheetTest {
         onRefresh: () -> Unit = {},
         pinnedIds: List<String> = emptyList(),
         noModelRow: NoModelRow? = null,
-        referenceLine: Boolean = false,
     ) {
         compose.setContent {
-            // The host applies what the sheet reports; mirror that so the sheet re-renders against the new selection.
+            // The host applies what the picker reports; mirror that so it re-renders against the new selection.
             var selectedModel by remember { mutableStateOf(selected) }
             var selectedVariant by remember { mutableStateOf(selected?.defaultVariant) }
             var pins by remember { mutableStateOf(pinnedIds) }
             CursorTheme(mode = ThemeMode.Dark) {
-                // One unconstrained line of a chip's own style: what its label asks for at this font scale.
-                if (referenceLine) {
-                    Text("Reference line", style = CursorTheme.typography.base, maxLines = 1, modifier = Modifier.testTag("line"))
-                }
                 ModelSheet(
                     models = models,
                     selectedModel = selectedModel,
@@ -124,93 +122,86 @@ class ModelSheetTest {
                 )
             }
         }
-        compose.waitUntil(10_000) { compose.onAllNodes(hasText("Model")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("Search models")).fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun assertAbsent(text: String) = assertThat(compose.onAllNodes(hasText(text)).fetchSemanticsNodes()).isEmpty()
 
-    /** The "Fast" picker row under Composer 2 — not a model subtitle, which the list no longer shows. */
-    private val fastPicker get() = compose.onNode(hasText("Fast") and !hasText("Composer 2"))
+    private fun top(text: String): Float = compose.onNodeWithText(text, substring = true).fetchSemanticsNode().boundsInRoot.top
+
+    /** The options' "Fast" switch, not the selected row's muted "Fast" summary. */
+    private val fastSwitch get() = compose.onNode(hasText("Fast") and isToggleable())
+
+    private val hasSubmenu = SemanticsMatcher.keyIsDefined(SemanticsProperties.StateDescription)
 
     /**
-     * The API identifies a variant only by `id`+`params` and reuses the model's display name for each one. Listing
-     * every variant as a row of its own showed "Composer 2" twice (and a model with an effort × fast grid eight
-     * times); the parameters are pickers under the selected model instead, and the row itself is just the name.
+     * The API identifies a variant only by `id`+`params` and reuses the model's display name for each one, so a row
+     * per variant showed "Composer 2" twice. One row per model; the variant in force is muted after the selected
+     * model's name only, as Cursor's picker writes "Grok 4.7 High Fast".
      */
     @Test
-    fun `each model is one row, and the selected model's parameters unfold as pickers`() {
-        show(listOf(composer, sonnet))
+    fun `each model is one row, and only the selected one names its variant inline`() {
+        show(listOf(grok, composer, sonnet))
         compose.onAllNodesWithText("Composer 2").assertCountEquals(1)
-        compose.onAllNodesWithText("Fast off").assertCountEquals(0)
-        compose.onAllNodesWithText("High effort").assertCountEquals(0)
-        fastPicker.assertIsDisplayed()
-        compose.onNodeWithText("Claude 4.6 Sonnet").assertIsDisplayed()
-    }
-
-    @Test
-    fun `the list never shows variant state on the model rows`() {
-        show(listOf(composer, grok), selected = grok)
+        compose.onNodeWithText("High Fast", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithText("Fast", useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithText("Cursor Grok 4.6", substring = true).assertIsSelected()
         assertAbsent("Fast off")
         assertAbsent("High effort")
-        assertAbsent("Low effort · Fast")
-        assertAbsent("1M context")
-        compose.onNodeWithText("Cursor Grok 4.6").assertIsDisplayed()
-        compose.onNodeWithText("High").assertIsSelected()
     }
 
     @Test
-    fun `flipping a toggle reports the model with the matching variant and keeps the sheet open`() {
-        show(listOf(composer))
-        fastPicker.performClick()
-        compose.waitForIdle()
-        assertThat(picked).isEqualTo(composer to composer.variant("fast" to "false"))
-        assertThat(dismissed).isFalse()
-        // The row stays a clean name; the toggle is what shows the new value.
-        assertAbsent("Fast off")
-        compose.onNodeWithText("Composer 2").assertIsDisplayed()
-    }
-
-    @Test
-    fun `tapping a model row selects it at its default variant, lifts it, and keeps the sheet open`() {
+    fun `tapping a model with options selects it at its default variant and opens them`() {
         show(listOf(composer, sonnet, grok))
         compose.onNodeWithText("Cursor Grok 4.6").performClick()
         compose.waitForIdle()
         assertThat(picked).isEqualTo(grok to grok.defaultVariant)
         assertThat(dismissed).isFalse()
+        compose.onNodeWithText("Effort").assertIsDisplayed()
         compose.onNodeWithText("High").assertIsSelected()
         compose.onNodeWithText("Low").assertIsDisplayed()
-        // The selected model is now first among the model names.
-        val grokTop = compose.onNodeWithText("Cursor Grok 4.6").fetchSemanticsNode().boundsInRoot.top
-        val composerTop = compose.onNodeWithText("Composer 2").fetchSemanticsNode().boundsInRoot.top
-        val sonnetTop = compose.onNodeWithText("Claude 4.6 Sonnet").fetchSemanticsNode().boundsInRoot.top
-        assertThat(grokTop).isLessThan(composerTop)
-        assertThat(grokTop).isLessThan(sonnetTop)
+        fastSwitch.assertIsDisplayed()
     }
 
     @Test
-    fun `another model's row unfolds its pickers by selecting it, and a choice there keeps that model`() {
+    fun `a choice in a model's options keeps that model and the picker open`() {
         show(listOf(composer, grok))
-        compose.onAllNodesWithText("Low").assertCountEquals(0)
         compose.onNodeWithText("Cursor Grok 4.6").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("High").assertIsSelected()
         compose.onNodeWithText("Low").performClick()
         compose.waitForIdle()
         // Effort changed, the default's fast stayed: the closest variant with the value asked for.
         assertThat(picked).isEqualTo(grok to grok.variant("effort" to "low", "fast" to "true"))
         assertThat(dismissed).isFalse()
         compose.onNodeWithText("Low").assertIsSelected()
-        assertAbsent("Low effort · Fast")
     }
 
     @Test
-    fun `a model whose variants leave nothing to choose has no pickers of its own`() {
+    fun `flipping a switch reports the model with the matching variant and keeps the picker open`() {
+        show(listOf(composer))
+        compose.onNodeWithText("Composer 2", substring = true).performClick()
+        compose.waitForIdle()
+        fastSwitch.performClick()
+        compose.waitForIdle()
+        assertThat(picked).isEqualTo(composer to composer.variant("fast" to "false"))
+        assertThat(dismissed).isFalse()
+    }
+
+    @Test
+    fun `a model with nothing to choose is picked and the picker closes`() {
+        show(listOf(composer, sonnet))
+        compose.onNodeWithText("Claude 4.6 Sonnet").performClick()
+        compose.waitUntil(10_000) { dismissed }
+        assertThat(picked).isEqualTo(sonnet to sonnet.defaultVariant)
+    }
+
+    @Test
+    fun `a model whose variants leave nothing to choose has no submenu`() {
         show(listOf(sonnet, composer), selected = null)
-        compose.onAllNodes(hasContentDescription("Show Claude 4.6 Sonnet options")).assertCountEquals(0)
-        compose.onAllNodes(hasContentDescription("Show Composer 2 options")).assertCountEquals(0)
+        compose.onAllNodes(hasText("Claude 4.6 Sonnet") and hasSubmenu).assertCountEquals(0)
+        compose.onAllNodes(hasText("Composer 2") and hasSubmenu).assertCountEquals(1)
         compose.onNodeWithContentDescription("Pin Claude 4.6 Sonnet").assertIsDisplayed()
         compose.onNodeWithContentDescription("Pin Composer 2").assertIsDisplayed()
-        compose.onAllNodes(hasText("Fast") and !hasText("Composer 2")).assertCountEquals(0)
     }
 
     @Test
@@ -223,29 +214,51 @@ class ModelSheetTest {
         compose.waitForIdle()
         assertThat(pinned).containsExactly(grok.id)
         compose.onNodeWithContentDescription("Unpin Cursor Grok 4.6").assertIsDisplayed()
+        assertThat(dismissed).isFalse()
     }
 
     @Test
     fun `a pinned model that is not selected still sits under the selection`() {
         show(listOf(composer, sonnet, grok), selected = composer, pinnedIds = listOf(grok.id))
-        val composerTop = compose.onNodeWithText("Composer 2").fetchSemanticsNode().boundsInRoot.top
-        val grokTop = compose.onNodeWithText("Cursor Grok 4.6").fetchSemanticsNode().boundsInRoot.top
-        val sonnetTop = compose.onNodeWithText("Claude 4.6 Sonnet").fetchSemanticsNode().boundsInRoot.top
-        assertThat(composerTop).isLessThan(grokTop)
-        assertThat(grokTop).isLessThan(sonnetTop)
+        assertThat(top("Composer 2")).isLessThan(top("Cursor Grok 4.6"))
+        assertThat(top("Cursor Grok 4.6")).isLessThan(top("Claude 4.6 Sonnet"))
+    }
+
+    /** Picking a model must not move it out from under the finger, or from beside the options it opened. */
+    @Test
+    fun `the order the picker opened with holds while it is open`() {
+        show(listOf(composer, sonnet, grok))
+        compose.onNodeWithText("Cursor Grok 4.6").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag(PickerTags.Back).performClick()
+        compose.waitForIdle()
+        assertThat(top("Composer 2")).isLessThan(top("Claude 4.6 Sonnet"))
+        assertThat(top("Claude 4.6 Sonnet")).isLessThan(top("Cursor Grok 4.6"))
     }
 
     @Test
-    fun `a failed catalogue load says so and is refreshed from the header instead of loading forever`() {
+    fun `typing filters the models and says when nothing matches`() {
+        show(listOf(composer, sonnet, grok))
+        compose.onNodeWithTag(PickerTags.Search).performTextInput("son")
+        compose.waitForIdle()
+        compose.onNodeWithText("Claude 4.6 Sonnet").assertIsDisplayed()
+        assertAbsent("Composer 2")
+        assertAbsent("Cursor Grok 4.6")
+        compose.onNodeWithTag(PickerTags.Search).performTextInput("zzz")
+        compose.waitForIdle()
+        compose.onNodeWithText("No models match \u201Csonzzz\u201D").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a failed catalogue load says so and is refreshed from the foot instead of loading forever`() {
         var refreshes = 0
         show(emptyList(), unavailable = true, onRefresh = { refreshes++ })
         compose.onNodeWithText("Couldn't load the model list. Refresh to try again.").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Refresh models").performClick()
+        compose.onNodeWithText("Refresh models").performClick()
         compose.waitForIdle()
         assertThat(refreshes).isEqualTo(1)
-        assertAbsent("Retry")
+        assertThat(dismissed).isFalse()
         assertThat(compose.onAllNodes(hasText("Loading models", substring = true)).fetchSemanticsNodes()).isEmpty()
-        assertAbsent("Default still works")
     }
 
     @Test
@@ -254,47 +267,67 @@ class ModelSheetTest {
         compose.onNodeWithText("Loading models…").assertIsDisplayed()
     }
 
-    /** The repository picker's control, in the same place: the refresh glyph at the end of the header row. */
     @Test
-    fun `the header's refresh button sits at its end and asks for the list again`() {
+    fun `the refresh row sits under the models and asks for the list again`() {
         var refreshes = 0
         show(listOf(composer, sonnet), onRefresh = { refreshes++ })
-        val header = compose.onNodeWithTag("model-sheet-header", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        val button = compose.onNodeWithContentDescription("Refresh models").fetchSemanticsNode().boundsInRoot
-        assertThat(header.right - button.right).isLessThan(header.width / 8)
-        assertThat(button.top).isAtLeast(header.top)
-        assertThat(button.bottom).isAtMost(header.bottom + 1f)
-        compose.onNodeWithContentDescription("Refresh models").performClick()
+        assertThat(top("Refresh models")).isGreaterThan(top("Claude 4.6 Sonnet"))
+        compose.onNodeWithText("Refresh models").performClick()
         compose.waitForIdle()
         assertThat(refreshes).isEqualTo(1)
     }
 
     @Test
-    fun `a spinner stands in for the refresh button while the list is fetched, and the list shown stays`() {
+    fun `the refresh row spins and takes no tap while the list is fetched, and the list shown stays`() {
         show(listOf(composer, sonnet), loading = true)
-        assertThat(compose.onAllNodes(hasContentDescription("Refresh models")).fetchSemanticsNodes()).isEmpty()
+        compose.onNodeWithText("Refresh models").assertIsNotEnabled()
         compose.onNodeWithText("Claude 4.6 Sonnet").assertIsDisplayed()
     }
 
     @Test
-    fun `the picker has no Default row and no Options section, and starts at the models`() {
+    fun `a refresh started while the picker is up turns its row off, and finishing turns it back on`() {
+        var loading by mutableStateOf(false)
+        compose.setContent {
+            CursorTheme(mode = ThemeMode.Dark) {
+                ModelSheet(
+                    models = listOf(composer, sonnet),
+                    selectedModel = composer,
+                    selectedVariant = composer.defaultVariant,
+                    loading = loading,
+                    unavailable = false,
+                    onRefresh = {},
+                    onSelect = { _, _ -> },
+                    onDismiss = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Refresh models").assertIsEnabled()
+        loading = true
+        compose.waitForIdle()
+        compose.onNodeWithText("Refresh models").assertIsNotEnabled()
+        loading = false
+        compose.waitForIdle()
+        compose.onNodeWithText("Refresh models").assertIsEnabled()
+    }
+
+    @Test
+    fun `the picker has no Default row and no options of its own until a model opens them`() {
         show(listOf(sonnet))
         assertAbsent("Default")
         assertAbsent("Your Cursor default model")
         assertAbsent("Options")
         assertAbsent("Plan mode")
         assertAbsent("Auto-create PR")
-        compose.onNodeWithText("Models").assertIsDisplayed()
         compose.onNodeWithText("Claude 4.6 Sonnet").assertIsDisplayed()
     }
 
     /** On a follow-up the row stands for the chat's current model, and picking it reports no model at all. */
     @Test
     fun `the no-model row reads as the caller says and still reports no model`() {
-        show(listOf(sonnet), noModelRow = NoModelRow("Current model", "Keep the model this chat has been using"))
-        compose.onNodeWithText("Keep the model this chat has been using").assertIsDisplayed()
+        show(listOf(sonnet), selected = null, noModelRow = NoModelRow("Current model", "Keep the model this chat has been using"))
+        compose.onNodeWithText("Keep the model this chat has been using", useUnmergedTree = true).assertIsDisplayed()
         assertAbsent("Default")
-        compose.onNodeWithText("Current model").performClick()
+        compose.onNodeWithText("Current model", substring = true).performClick()
         compose.waitUntil(10_000) { dismissed }
         assertThat(picked).isEqualTo(null to null)
     }
@@ -308,30 +341,22 @@ class ModelSheetTest {
         assertAbsent("Current model")
     }
 
-    private fun chipHeight(): Float =
-        compose.onNodeWithText("High").getUnclippedBoundsInRoot().let { (it.bottom - it.top).value }
-
-    private fun lineHeight(): Float =
-        compose.onNodeWithTag("line").getUnclippedBoundsInRoot().let { (it.bottom - it.top).value }
-
-    /**
-     * A chip is a 28dp tap target around an sp label, and that label's line outgrows 28dp at the system's largest
-     * font — so 28dp has to be the chip's minimum rather than its height, or the value is cut off. The scale is set
-     * on the configuration because the sheet's content lives in a dialog window of its own, which a locally provided
-     * density would not reach; the line is measured rather than assumed so the chip is held to its own content.
-     */
+    /** A phone's rows are full touch targets: 48dp, as Android asks, where the desktop's are 28. */
     @Test
-    @Config(fontScale = 2f)
-    fun `a parameter chip grows at the largest system font`() {
-        show(listOf(grok), referenceLine = true)
-        assertThat(lineHeight()).isGreaterThan(28f)
-        assertThat(chipHeight()).isWithin(0.5f).of(lineHeight())
+    fun `a phone's model rows are 48dp touch targets`() {
+        show(listOf(composer, sonnet))
+        val row = compose.onNodeWithText("Claude 4.6 Sonnet").fetchSemanticsNode().boundsInRoot
+        assertThat(row.height / compose.density.density).isWithin(0.5f).of(48f)
     }
 
+    /** At the system's largest font a row grows round its label rather than cutting it off. */
     @Test
-    fun `a parameter chip keeps its designed height at the default font`() {
-        show(listOf(grok), referenceLine = true)
-        assertThat(lineHeight()).isLessThan(28f)
-        assertThat(chipHeight()).isWithin(1f).of(28f)
+    @Config(fontScale = 2f)
+    fun `a row grows round its label at the largest system font`() {
+        show(listOf(composer, sonnet))
+        val row = compose.onNodeWithText("Claude 4.6 Sonnet").fetchSemanticsNode().boundsInRoot
+        val label = compose.onNodeWithText("Claude 4.6 Sonnet", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertThat(row.top).isAtMost(label.top)
+        assertThat(row.bottom).isAtLeast(label.bottom)
     }
 }

@@ -156,8 +156,6 @@ object CursorDimens {
     val menuRadius = composerRadius - composerPadding
     /** Between a menu's edge and its rows' press highlights: above the first row, below the last, beside each. */
     val menuInset = 4.dp
-    /** A menu row with one line; a second line grows it. */
-    val menuRow = 40.dp
     /** A menu row's glyph box. */
     val menuIcon = 16.dp
     /** A menu row's text and glyph stand this far in from its press highlight, [menuInset] + this from the menu's edge. */
@@ -178,6 +176,18 @@ object CursorDimens {
     val menuShadowBlur = 7.dp
     val menuShadowDrop = 2.dp
     val menuShadowRoom = 12.dp
+    /** A menu or picker row on a phone, where a finger is the pointer: the platform's least touch target. A second line grows it. */
+    val menuRowTouch = minTouchTarget
+    /** A menu or picker row on a tablet or foldable, a little taller than the desktop's for a finger. */
+    val menuRowRegular = touchTarget
+    /** A row of a type-ahead list over the keyboard (the composer's `/` menu), where rows shown matter more than reach. */
+    val menuRowDense = 40.dp
+    /** Below this width the window is a phone's: menu rows grow to [menuRowTouch] and submenus open in place. */
+    val compactWidthLimit = 600.dp
+    /** The least room on one side of its anchor a picker takes before it is a bottom sheet instead. */
+    val pickerMinRoom = 220.dp
+    /** The narrowest a window can be and still hold an anchored picker. */
+    val pickerMinWidth = 240.dp
     /** Recent-chat preview card, radius 8. */
     val previewCardWidth = 124.dp
     val previewCardHeight = 80.dp

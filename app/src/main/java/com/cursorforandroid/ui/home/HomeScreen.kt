@@ -84,6 +84,18 @@ import com.cursorforandroid.ui.components.CursorCard
 import com.cursorforandroid.ui.components.CursorHeader
 import com.cursorforandroid.ui.components.FadingLazyColumn
 import com.cursorforandroid.ui.components.CursorIcons
+import com.cursorforandroid.ui.components.CursorPicker
+import com.cursorforandroid.ui.components.PickerAction
+import com.cursorforandroid.ui.components.PickerDismiss
+import com.cursorforandroid.ui.components.PickerDivider
+import com.cursorforandroid.ui.components.PickerEntry
+import com.cursorforandroid.ui.components.PickerItem
+import com.cursorforandroid.ui.components.PickerNote
+import com.cursorforandroid.ui.components.PickerPresentation
+import com.cursorforandroid.ui.components.PickerSection
+import com.cursorforandroid.ui.components.PickerWidths
+import com.cursorforandroid.ui.components.PopoverAnchor
+import com.cursorforandroid.ui.components.rememberComposerPickerAnchors
 import com.cursorforandroid.ui.components.CursorSheet
 import com.cursorforandroid.ui.components.Dot
 import com.cursorforandroid.ui.components.FlatIconButton
@@ -164,6 +176,7 @@ fun HomeScreen(
     var branchSheet by rememberSaveable { mutableStateOf(false) }
     var deviceSheet by rememberSaveable { mutableStateOf(false) }
     var modelSheet by rememberSaveable { mutableStateOf(false) }
+    val pickerAnchors = rememberComposerPickerAnchors()
 
     // The Chats filters chosen in the sidebar's menu apply here just the same (the sidebar search does not), so the two
     // lists never disagree about which chats are visible; the cards are newest first.
@@ -278,7 +291,7 @@ fun HomeScreen(
                         .onSizeChanged { centring.composerLaidOut(it.height) }
                         .testTag(NewChatHomeTags.COMPOSER),
                 ) {
-                    NewChatSelectors(state, onRepo = { repoSheet = true }, onBranch = { branchSheet = true }, onDevice = { deviceSheet = true })
+                    NewChatSelectors(state, onRepo = { repoSheet = true }, onBranch = { branchSheet = true }, onDevice = { deviceSheet = true }, anchors = pickerAnchors)
                     ComposerBox(
                         value = state.prompt,
                         onValueChange = viewModel::setPrompt,
@@ -310,6 +323,7 @@ fun HomeScreen(
                         media = graph.media,
                         modelLabel = state.modelLabel,
                         onModel = { modelSheet = true },
+                        modelAnchor = pickerAnchors.model,
                         // The mode is a pill beside "+" rather than a suffix on the model chip, as on cursor.com/agents.
                         // Plan goes over the documented API; Ask and Debug, in Extended mode, through the account's start.
                         modePill = state.modePill,
@@ -347,6 +361,7 @@ fun HomeScreen(
             onDismiss = { repoSheet = false },
             device = state.selectedDevice.takeUnless { it.isCloud },
             deviceRepo = state.deviceRepository,
+            anchor = pickerAnchors.repository,
         )
     }
     if (branchSheet) {
@@ -358,6 +373,7 @@ fun HomeScreen(
             listedByAccount = state.branchesListedByAccount,
             onSelect = viewModel::setRef,
             onDismiss = { branchSheet = false },
+            anchor = pickerAnchors.branch,
         )
     }
     if (deviceSheet) {
@@ -368,6 +384,7 @@ fun HomeScreen(
             onSelect = viewModel::selectDevice,
             onRefresh = viewModel::refreshDevices,
             onDismiss = { deviceSheet = false },
+            anchor = pickerAnchors.device,
         )
     }
     if (modelSheet) {
@@ -382,6 +399,7 @@ fun HomeScreen(
             onDismiss = { modelSheet = false },
             pinnedIds = state.pinnedModelIds,
             onTogglePin = viewModel::togglePinnedModel,
+            anchor = pickerAnchors.model,
         )
     }
 }
@@ -525,8 +543,11 @@ internal fun ComposerErrorLine(error: String, asked: String?, onDismiss: () -> U
     }
 }
 
-/** The source picker: Start from scratch, the device's checkout, the recent repositories, the catalogue. Shared with the quick composer. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The source picker, on Cursor's repository dropdown: a search, the recent repositories under "Recents" and the
+ * catalogue under "All", the device's checkout first where it has one, then "Start from scratch" and Refresh at the
+ * foot as Cursor's "+" rows. Shared with the quick composer.
+ */
 @Composable
 internal fun RepositorySheet(
     repos: List<Repository>,
@@ -542,88 +563,97 @@ internal fun RepositorySheet(
     device: DeviceTarget? = null,
     /** The repository [device] is checked out at, when it reports one (see [NewAgentUiState.deviceRepository]). */
     deviceRepo: Repository? = null,
+    anchor: PopoverAnchor? = null,
+    presentation: PickerPresentation? = null,
 ) {
-    val colors = CursorTheme.colors
-    val type = CursorTheme.typography
-    var filter by rememberSaveable { mutableStateOf("") }
-    CursorSheet(onDismiss = onDismiss) { dismiss ->
-        // Picking a row plays the sheet's hide animation before the selection is applied.
-        fun pick(repo: Repository?) {
-            onSelect(repo)
-            dismiss()
-        }
-        RefreshableSheetHeader("Repository", loading, "Refresh repositories", onRefresh, Modifier.testTag("repository-sheet-header"))
-        SheetSearchField(value = filter, onValueChange = { filter = it }, placeholder = "Filter repositories")
-        Spacer(Modifier.height(6.dp))
-        // The list keys rows on the URL, so duplicates from the catalogue must go before they reach the LazyColumn.
-        fun matches(repo: Repository) = repo.slug.contains(filter, ignoreCase = true)
-        val recentVisible = recent.distinctBy { it.url }.filter(::matches)
-        val recentSlugs = recent.map { it.slug.lowercase() }.toSet()
-        val restVisible = repos.distinctBy { it.url }.filter { matches(it) && it.slug.lowercase() !in recentSlugs }
-        // The device's repository leads the list when the catalogue does not carry it (a checkout Cursor's GitHub
-        // app does not see), as does a selection the catalogue lacks: either must still show checked.
-        val listedUrls = (recent + repos).map { it.url }.toSet()
-        val unlisted = listOfNotNull(deviceRepo, selected?.takeIf { !noRepo }).distinctBy { it.url }.filter { it.url !in listedUrls && matches(it) }
-        FadingLazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false), contentPadding = PaddingValues(bottom = 12.dp)) {
-            if (device != null && filter.isEmpty()) {
-                item("device-note") {
-                    Text(
-                        if (deviceRepo != null) {
-                            "${device.label} is checked out at ${deviceRepo.slug}. Cursor runs a machine only in a checkout of the requested repository; pick another only if the worker was started with a root for it."
-                        } else {
-                            "${device.label} reports no repository of its own (an any-repo worker): the one picked here is what the chat runs in."
-                        },
-                        style = type.small,
-                        color = colors.textQuaternary,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                    )
-                }
-            }
-            item("none") {
-                // The web composer's source for a chat without a repository; on a machine or pool the worker's own checkout stands in.
-                SheetRow(
-                    title = NewAgentUiState.START_FROM_SCRATCH,
-                    subtitle = if (device != null) "No repository: the worker's own directory" else "No repository: an empty cloud VM",
-                    checked = noRepo,
-                    icon = if (device != null) deviceIcon(device) else CursorIcons.Cloud,
-                ) { pick(null) }
-                HairlineDivider(Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-            }
-            items(unlisted, key = { "unlisted:${it.url}" }) { repo ->
-                SheetRow(
-                    title = repo.shortName,
-                    subtitle = if (deviceRepo?.url == repo.url) "Checked out on ${device?.label ?: "the device"}" else repo.slug.substringBeforeLast('/', ""),
-                    checked = !noRepo && repo.url == selected?.url,
-                    icon = CursorIcons.Repo,
-                ) { pick(repo) }
-            }
-            if (unavailable && repos.isEmpty()) {
-                item("unavailable") {
-                    Text(
-                        "Cursor couldn't list your GitHub repositories right now (the endpoint is heavily rate limited). Refresh later or start without one.",
-                        style = type.small, color = colors.textQuaternary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                    )
-                }
-            }
-            if (recentVisible.isEmpty() && restVisible.isEmpty() && repos.isNotEmpty()) {
-                item("no-match") {
-                    Text("No repositories match \"$filter\"", style = type.small, color = colors.textQuaternary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
-                }
-            }
-            items(recentVisible, key = { "recent:${it.url}" }) { repo ->
-                SheetRow(title = repo.shortName, subtitle = repo.slug.substringBeforeLast('/', ""), checked = !noRepo && repo.url == selected?.url, icon = CursorIcons.Repo) { pick(repo) }
-            }
-            // Recent activity (last week, at most ten) sits above the catalogue; the hairline is the only mark.
-            if (recentVisible.isNotEmpty() && restVisible.isNotEmpty()) {
-                item("recent-divider") {
-                    HairlineDivider(Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
-                }
-            }
-            items(restVisible, key = { it.url }) { repo ->
-                SheetRow(title = repo.shortName, subtitle = repo.slug.substringBeforeLast('/', ""), checked = !noRepo && repo.url == selected?.url, icon = CursorIcons.Repo) { pick(repo) }
-            }
-        }
+    CursorPicker(
+        onDismiss = onDismiss,
+        anchor = anchor,
+        title = "Repository",
+        searchPlaceholder = "Search repositories\u2026",
+        width = PickerWidths.Wide,
+        presentation = presentation,
+        testTag = REPOSITORY_PICKER_TAG,
+        entries = { query -> repositoryEntries(query, repos, recent, selected, noRepo, loading, unavailable, device, deviceRepo, onSelect, onRefresh) },
+    )
+}
+
+internal const val REPOSITORY_PICKER_TAG = "repository-picker"
+
+private fun repositoryEntries(
+    query: String,
+    repos: List<Repository>,
+    recent: List<Repository>,
+    selected: Repository?,
+    noRepo: Boolean,
+    loading: Boolean,
+    unavailable: Boolean,
+    device: DeviceTarget?,
+    deviceRepo: Repository?,
+    onSelect: (Repository?) -> Unit,
+    onRefresh: () -> Unit,
+): List<PickerEntry> = buildList {
+    val filter = query.trim()
+    // The list keys rows on the URL, so duplicates from the catalogue must go before they reach the list.
+    fun matches(repo: Repository) = repo.slug.contains(filter, ignoreCase = true)
+    val recentVisible = recent.distinctBy { it.url }.filter(::matches)
+    val recentSlugs = recent.map { it.slug.lowercase() }.toSet()
+    val restVisible = repos.distinctBy { it.url }.filter { matches(it) && it.slug.lowercase() !in recentSlugs }
+    // The device's repository leads the list when the catalogue does not carry it (a checkout Cursor's GitHub
+    // app does not see), as does a selection the catalogue lacks: either must still show checked.
+    val listedUrls = (recent + repos).map { it.url }.toSet()
+    val unlisted = listOfNotNull(deviceRepo, selected?.takeIf { !noRepo }).distinctBy { it.url }.filter { it.url !in listedUrls && matches(it) }
+    fun row(prefix: String, repo: Repository, detail: String? = repo.slug.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }) = PickerItem(
+        key = "$prefix:${repo.url}",
+        label = repo.shortName,
+        detail = detail,
+        icon = CursorIcons.Repo,
+        selected = !noRepo && repo.url == selected?.url,
+        onPick = { onSelect(repo) },
+    )
+    if (device != null && filter.isEmpty()) {
+        add(
+            PickerNote(
+                "device-note",
+                if (deviceRepo != null) {
+                    "${device.label} is checked out at ${deviceRepo.slug}. Cursor runs a machine only in a checkout of the requested repository; pick another only if the worker was started with a root for it."
+                } else {
+                    "${device.label} reports no repository of its own (an any-repo worker): the one picked here is what the chat runs in."
+                },
+            ),
+        )
     }
+    unlisted.forEach { repo ->
+        add(row("unlisted", repo, detail = if (deviceRepo?.url == repo.url) "on ${device?.label ?: "the device"}" else repo.slug.substringBeforeLast('/', "").takeIf { it.isNotEmpty() }))
+    }
+    if (recentVisible.isNotEmpty()) {
+        add(PickerSection("recents", "Recents"))
+        recentVisible.forEach { add(row("recent", it)) }
+    }
+    if (restVisible.isNotEmpty()) {
+        if (recentVisible.isNotEmpty()) add(PickerSection("all", "All"))
+        restVisible.forEach { add(row("repo", it)) }
+    }
+    if (unavailable && repos.isEmpty()) {
+        add(PickerNote("unavailable", "Cursor couldn't list your GitHub repositories right now (the endpoint is heavily rate limited). Refresh later or start without one."))
+    }
+    if (recentVisible.isEmpty() && restVisible.isEmpty() && repos.isNotEmpty()) {
+        add(PickerNote("no-match", "No repositories match \"$filter\""))
+    }
+    if (isNotEmpty()) add(PickerDivider("actions-divider"))
+    // The web composer's source for a chat without a repository; on a machine or pool the worker's own checkout stands in.
+    add(
+        PickerAction(
+            key = "none",
+            label = NewAgentUiState.START_FROM_SCRATCH,
+            detail = if (device != null) "the worker's own directory" else "an empty cloud VM",
+            icon = CursorIcons.Plus,
+            selected = noRepo,
+            dismiss = PickerDismiss.All,
+            onClick = { onSelect(null) },
+        ),
+    )
+    add(PickerAction("refresh", "Refresh repositories", onClick = onRefresh, icon = CursorIcons.Refresh, busy = loading))
 }
 
 /** Small 12sp label above a group of sheet rows ("Options", a model's name above its variants). */

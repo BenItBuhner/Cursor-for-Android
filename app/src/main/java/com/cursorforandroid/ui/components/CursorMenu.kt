@@ -123,7 +123,7 @@ fun CursorMenu(
     Popup(popupPositionProvider = provider, onDismissRequest = onDismissRequest, properties = properties) {
         val transition = rememberTransition(state, label = "menu")
         val progress by transition.animateFloat(
-            transitionSpec = { if (targetState) tween(ENTER_MILLIS, easing = EnterEasing) else tween(EXIT_MILLIS, easing = ExitEasing) },
+            transitionSpec = { if (targetState) tween(MENU_ENTER_MILLIS, easing = MenuEnterEasing) else tween(MENU_EXIT_MILLIS, easing = MenuExitEasing) },
             label = "menu-progress",
         ) { open -> if (open) 1f else 0f }
         val room = CursorDimens.menuShadowRoom
@@ -132,7 +132,7 @@ fun CursorMenu(
             Modifier
                 .graphicsLayer {
                     val p = progress
-                    val scale = ENTER_SCALE + (1f - ENTER_SCALE) * p
+                    val scale = MENU_ENTER_SCALE + (1f - MENU_ENTER_SCALE) * p
                     scaleX = scale
                     scaleY = scale
                     alpha = p
@@ -181,7 +181,9 @@ internal fun menuProperties(focusable: Boolean, keepsKeyboard: Boolean): PopupPr
  * corner concentric with the menu's. A [tint] other than the primary text colour (a destructive red) colours the
  * glyph as well; [iconTint] colours the glyph alone (a mode's own colour). Not [enabled], the row dims and takes no
  * taps. [highlighted] is the row a physical keyboard would pick ([PopoverSelection]): it wears the hover fill in the
- * press highlight's place and is scrolled into view.
+ * press highlight's place and is scrolled into view. A row is [CursorDimens.menuRowTouch] tall on a phone and
+ * [CursorDimens.menuRowRegular] elsewhere, as a picker's are; [dense] keeps it at [CursorDimens.menuRowDense], for a
+ * type-ahead list that shares the room above a raised keyboard.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -196,6 +198,7 @@ fun CursorMenuItem(
     enabled: Boolean = true,
     subtitleMaxLines: Int = 2,
     highlighted: Boolean = false,
+    dense: Boolean = false,
     trailing: (@Composable RowScope.() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
@@ -208,6 +211,7 @@ fun CursorMenuItem(
         tint == colors.textPrimary -> colors.iconSecondary
         else -> tint
     }
+    val metrics = if (dense) PickerMetrics(CursorDimens.menuRowDense, type.base, compact = false) else pickerMetrics()
     val inView = remember { BringIntoViewRequester() }
     LaunchedEffect(highlighted) { if (highlighted) inView.bringIntoView() }
     Row(
@@ -225,7 +229,7 @@ fun CursorMenuItem(
                 },
             )
             .pressable(onClick, CursorTheme.shapes.menuItem, enabled = enabled, role = null)
-            .heightIn(min = CursorDimens.menuRow)
+            .heightIn(min = metrics.row)
             .padding(horizontal = CursorDimens.menuItemPadding, vertical = if (subtitle != null) 7.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -235,10 +239,10 @@ fun CursorMenuItem(
         }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(label, style = type.base, color = labelColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Text(label, style = metrics.label, color = labelColor, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (hint != null) {
                     Spacer(Modifier.width(6.dp))
-                    Text(hint, style = type.base, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(hint, style = metrics.label, color = colors.textQuaternary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             if (subtitle != null) {
@@ -263,7 +267,7 @@ fun CursorMenuSeparator(modifier: Modifier = Modifier) {
  * canvases draw shadow layers under shapes from API 28; below that there is no shadow, and the hairline alone
  * separates the menu from the page.
  */
-private fun Modifier.menuShadow(fill: Color, shadow: Color): Modifier = drawWithCache {
+internal fun Modifier.menuShadow(fill: Color, shadow: Color): Modifier = drawWithCache {
     val corner = CursorDimens.menuRadius.toPx()
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = fill.copy(alpha = 1f).toArgb()
@@ -355,8 +359,8 @@ internal class MenuPositionProvider(
     }
 }
 
-private const val ENTER_MILLIS = 180
-private const val EXIT_MILLIS = 120
-private const val ENTER_SCALE = 0.95f
-private val EnterEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-private val ExitEasing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+internal const val MENU_ENTER_MILLIS = 180
+internal const val MENU_EXIT_MILLIS = 120
+internal const val MENU_ENTER_SCALE = 0.95f
+internal val MenuEnterEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+internal val MenuExitEasing = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)

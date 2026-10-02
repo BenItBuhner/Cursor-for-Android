@@ -1,53 +1,27 @@
 package com.cursorforandroid.ui.home
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.cursorforandroid.domain.ModelAxis
 import com.cursorforandroid.domain.ModelOption
 import com.cursorforandroid.domain.ModelVariant
 import com.cursorforandroid.domain.arrangedForPicker
 import com.cursorforandroid.ui.components.CursorIcons
-import com.cursorforandroid.ui.components.CursorSheet
-import com.cursorforandroid.ui.components.FadingLazyColumn
-import com.cursorforandroid.ui.components.CursorToggle
-import com.cursorforandroid.ui.components.HairlineDivider
-import com.cursorforandroid.ui.components.RefreshableSheetHeader
-import com.cursorforandroid.ui.components.cursorSurface
-import com.cursorforandroid.ui.components.pressable
-import com.cursorforandroid.ui.components.rememberHaptics
-import com.cursorforandroid.ui.theme.CursorDimens
-import com.cursorforandroid.ui.theme.CursorTheme
+import com.cursorforandroid.ui.components.CursorPicker
+import com.cursorforandroid.ui.components.PickerAction
+import com.cursorforandroid.ui.components.PickerDismiss
+import com.cursorforandroid.ui.components.PickerDivider
+import com.cursorforandroid.ui.components.PickerEntry
+import com.cursorforandroid.ui.components.PickerItem
+import com.cursorforandroid.ui.components.PickerNote
+import com.cursorforandroid.ui.components.PickerPresentation
+import com.cursorforandroid.ui.components.PickerSection
+import com.cursorforandroid.ui.components.PickerSubmenu
+import com.cursorforandroid.ui.components.PickerToggle
+import com.cursorforandroid.ui.components.PickerTrailingAction
+import com.cursorforandroid.ui.components.PopoverAnchor
+import com.cursorforandroid.ui.components.pickerMatches
+import androidx.compose.ui.unit.dp
 
 /**
  * A fallback row for a follow-up whose current model the catalog cannot show checked — unknown (started elsewhere)
@@ -56,16 +30,18 @@ import com.cursorforandroid.ui.theme.CursorTheme
 internal data class NoModelRow(val title: String, val subtitle: String?)
 
 /**
- * The composer's model picker: one clean row per model from `GET /v1/models`. Tapping a model selects it, lifts it
- * to the top of the list and unfolds its parameters — effort, speed, context — under it. Pinning keeps a model at the
- * top after something else is selected.
+ * The composer's model picker, on Cursor's model dropdown: a search, one row per model from `GET /v1/models` with the
+ * selected variant muted after the selected model's name, a pin that keeps a model at the top, and a Refresh row at
+ * the foot. A model with parameters opens its options beside the picker as it is selected — switches under
+ * "Options" ("Fast", "Thinking"), then a section of choices per other parameter ("Effort", "Context") — and stays
+ * open while they are set; a model without any is picked and the picker closes.
  *
- * Tapping a model keeps the sheet open so its pickers can be set; dismissing the sheet keeps the last selection.
+ * The order is the one the picker opened with (the selection first, then pins, then the catalog), so a row does not
+ * jump out from under the finger, or from beside its open options, when it is picked.
  *
  * List keys are positional plus id: the API's model ids are unique in practice but nothing guarantees it, and a
  * duplicate key aborts the composition.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ModelSheet(
     models: List<ModelOption>,
@@ -73,180 +49,137 @@ internal fun ModelSheet(
     selectedVariant: ModelVariant?,
     loading: Boolean,
     unavailable: Boolean,
-    /** Fetches the list again, whether or not it is fresh: the header's refresh button, as on the repository picker. */
+    /** Fetches the list again, whether or not it is fresh: the picker's Refresh row. */
     onRefresh: () -> Unit,
     onSelect: (ModelOption?, ModelVariant?) -> Unit,
     onDismiss: () -> Unit,
     pinnedIds: List<String> = emptyList(),
     onTogglePin: (String) -> Unit = {},
     noModelRow: NoModelRow? = null,
+    anchor: PopoverAnchor? = null,
+    presentation: PickerPresentation? = null,
 ) {
-    val colors = CursorTheme.colors
-    val type = CursorTheme.typography
-    val ordered = remember(models, pinnedIds, selectedModel?.id) { models.arrangedForPicker(pinnedIds, selectedModel?.id) }
-    CursorSheet(onDismiss = onDismiss) { dismiss ->
-        fun pickNone() {
-            onSelect(null, null)
-            dismiss()
-        }
-        RefreshableSheetHeader("Model", loading, "Refresh models", onRefresh, Modifier.testTag("model-sheet-header"))
-        FadingLazyColumn(
-            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-            contentPadding = PaddingValues(bottom = 12.dp),
-        ) {
-            if (noModelRow != null) {
-                item("current") {
-                    SheetRow(title = noModelRow.title, subtitle = noModelRow.subtitle, checked = selectedModel == null) { pickNone() }
-                    HairlineDivider(Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-                }
-            }
-            if (models.isEmpty()) {
-                when {
-                    // The header's spinner and refresh button are the controls; the body only says why the list is empty.
-                    loading -> item("loading") {
-                        Text("Loading models…", style = type.small, color = colors.textQuaternary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp))
-                    }
-                    unavailable -> item("unavailable") {
-                        Text(
-                            "Couldn't load the model list. Refresh to try again.",
-                            style = type.small,
-                            color = colors.textQuaternary,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                        )
-                    }
-                }
-            } else {
-                item("models") { SheetSectionLabel("Models") }
-            }
-            ordered.forEachIndexed { index, model ->
-                item("model-$index-${model.id}") {
-                    val selected = model.id == selectedModel?.id
-                    val variant = if (selected) selectedVariant ?: model.defaultVariant else model.defaultVariant
-                    val axes = remember(model) { model.axes }
-                    ModelRow(
-                        model = model,
-                        selected = selected,
-                        pinned = model.id in pinnedIds,
-                        onClick = { onSelect(model, variant) },
-                        onTogglePin = { onTogglePin(model.id) },
-                    )
-                    AnimatedVisibility(selected && axes.isNotEmpty(), enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-                        ModelPickers(axes, variant) { axis, value ->
-                            model.variantWith(variant, axis.id, value)?.let { onSelect(model, it) }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    val openedWith = remember { selectedModel?.id }
+    val ordered = remember(models, pinnedIds) { models.arrangedForPicker(pinnedIds, openedWith) }
+    CursorPicker(
+        onDismiss = onDismiss,
+        anchor = anchor,
+        title = "Model",
+        searchPlaceholder = "Search models",
+        width = 300.dp,
+        presentation = presentation,
+        testTag = MODEL_PICKER_TAG,
+        entries = { query ->
+            modelEntries(query, ordered, selectedModel, selectedVariant, loading, unavailable, pinnedIds, noModelRow, onSelect, onTogglePin, onRefresh)
+        },
+    )
 }
 
-/** One model: its name alone, the accent check when selected, and a pin that keeps it at the top of the list. */
-@Composable
-private fun ModelRow(
-    model: ModelOption,
-    selected: Boolean,
-    pinned: Boolean,
-    onClick: () -> Unit,
-    onTogglePin: () -> Unit,
-) {
-    val colors = CursorTheme.colors
-    val type = CursorTheme.typography
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp)
-            .pressable(onClick, CursorTheme.shapes.base)
-            .heightIn(min = CursorDimens.listRow)
-            .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            model.displayName,
-            style = type.base,
-            color = colors.textPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+internal const val MODEL_PICKER_TAG = "model-picker"
+
+private fun modelEntries(
+    query: String,
+    ordered: List<ModelOption>,
+    selectedModel: ModelOption?,
+    selectedVariant: ModelVariant?,
+    loading: Boolean,
+    unavailable: Boolean,
+    pinnedIds: List<String>,
+    noModelRow: NoModelRow?,
+    onSelect: (ModelOption?, ModelVariant?) -> Unit,
+    onTogglePin: (String) -> Unit,
+    onRefresh: () -> Unit,
+): List<PickerEntry> = buildList {
+    val typed = query.trim()
+    if (noModelRow != null && pickerMatches(typed, noModelRow.title, noModelRow.subtitle)) {
+        add(PickerItem("current", noModelRow.title, subtitle = noModelRow.subtitle, selected = selectedModel == null, onPick = { onSelect(null, null) }))
+        add(PickerDivider("current-divider"))
+    }
+    if (ordered.isEmpty()) {
+        when {
+            loading -> add(PickerNote("loading", "Loading models…"))
+            unavailable -> add(PickerNote("unavailable", "Couldn't load the model list. Refresh to try again."))
+        }
+    }
+    val visible = ordered.withIndex().filter { (_, model) -> pickerMatches(typed, model.displayName, model.id) }
+    if (ordered.isNotEmpty() && visible.isEmpty()) add(PickerNote("no-match", "No models match \u201C$typed\u201D"))
+    visible.forEach { (index, model) ->
+        val selected = model.id == selectedModel?.id
+        val variant = if (selected) selectedVariant ?: model.defaultVariant else model.defaultVariant
+        val axes = model.axes
+        val pinned = model.id in pinnedIds
+        add(
+            PickerItem(
+                key = "model-$index-${model.id}",
+                label = model.displayName,
+                detail = if (selected) variantSummary(axes, variant) else null,
+                selected = selected,
+                onPick = { onSelect(model, variant) },
+                trailingAction = PickerTrailingAction(
+                    icon = CursorIcons.Pin,
+                    contentDescription = if (pinned) "Unpin ${model.displayName}" else "Pin ${model.displayName}",
+                    active = pinned,
+                    onClick = { onTogglePin(model.id) },
+                ),
+                submenu = if (axes.isEmpty()) null else PickerSubmenu(title = model.displayName, width = 232.dp) {
+                    optionEntries(model, axes, variant) { picked -> onSelect(model, picked) }
+                },
+            ),
         )
-        if (selected) {
-            Spacer(Modifier.width(12.dp))
-            Icon(CursorIcons.Check, null, tint = colors.accent, modifier = Modifier.size(16.dp))
+    }
+    add(PickerDivider("refresh-divider"))
+    add(PickerAction("refresh", "Refresh models", onClick = onRefresh, icon = CursorIcons.Refresh, busy = loading))
+}
+
+/**
+ * A model's options: its on/off parameters as switches under "Options", then each other parameter as a section of
+ * choices, the one in force checked. [onVariant] gets the variant the change resolves to; which one that is is the
+ * model's business ([ModelOption.variantWith]).
+ */
+internal fun optionEntries(model: ModelOption, axes: List<ModelAxis>, variant: ModelVariant?, onVariant: (ModelVariant) -> Unit): List<PickerEntry> = buildList {
+    fun set(axis: ModelAxis, value: String) {
+        model.variantWith(variant, axis.id, value)?.let(onVariant)
+    }
+    val switches = axes.filter { it.isSwitch }
+    val choices = axes.filterNot { it.isSwitch }
+    if (switches.isNotEmpty()) {
+        add(PickerSection("options", "Options"))
+        switches.forEach { axis ->
+            val on = variant?.param(axis.id).equals(axis.onValue, ignoreCase = true)
+            add(PickerToggle("switch-${axis.id}", axis.displayName, on, onToggle = { checked -> set(axis, if (checked) axis.onValue else axis.offValue) }))
         }
-        Spacer(Modifier.width(4.dp))
-        PinButton(pinned, model.displayName, onTogglePin)
     }
-}
-
-/**
- * The pin control on a model row. Its label sits on the clickable node itself so a tap aimed at it pins rather
- * than selecting the row — for accessibility services and UI tests alike.
- */
-@Composable
-private fun PinButton(pinned: Boolean, modelName: String, onClick: () -> Unit) {
-    val colors = CursorTheme.colors
-    Box(
-        Modifier
-            .size(width = 40.dp, height = CursorDimens.iconButton)
-            .pressable(onClick, CursorTheme.shapes.lg)
-            .semantics { contentDescription = if (pinned) "Unpin $modelName" else "Pin $modelName" },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(CursorIcons.Pin, null, tint = if (pinned) colors.accent else colors.iconTertiary, modifier = Modifier.size(16.dp))
-    }
-}
-
-/**
- * A model's unfolded parameters: a toggle per on/off parameter ("Fast"), a label over a row of choices for the rest
- * ("Effort": Low / Medium / High). [onValue] is called with the parameter and the value the user asked for; which
- * variant that resolves to is the model's business.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ModelPickers(axes: List<ModelAxis>, variant: ModelVariant?, onValue: (ModelAxis, String) -> Unit) {
-    val colors = CursorTheme.colors
-    val type = CursorTheme.typography
-    val haptics = rememberHaptics()
-    Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 10.dp)) {
-        axes.forEach { axis ->
-            val current = variant?.param(axis.id)
-            if (axis.isSwitch) {
-                val on = current.equals(axis.onValue, ignoreCase = true)
-                fun set(checked: Boolean) = onValue(axis, if (checked) axis.onValue else axis.offValue)
-                Row(
-                    Modifier.fillMaxWidth().pressable({ haptics.toggle(!on); set(!on) }, CursorTheme.shapes.base).height(36.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(axis.displayName, style = type.base, color = colors.textSecondary, modifier = Modifier.weight(1f))
-                    CursorToggle(on, ::set)
-                }
-            } else {
-                Text(axis.displayName, style = type.small, color = colors.textTertiary, modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    axis.values.forEach { value ->
-                        ChoiceChip(value.displayName, selected = value.value == current) { onValue(axis, value.value) }
-                    }
-                }
-            }
+    choices.forEachIndexed { i, axis ->
+        if (i > 0 || switches.isNotEmpty()) add(PickerDivider("divider-${axis.id}"))
+        add(PickerSection("axis-${axis.id}", axis.displayName))
+        val current = variant?.param(axis.id)
+        axis.values.forEach { value ->
+            add(
+                PickerItem(
+                    key = "value-${axis.id}-${value.value}",
+                    label = value.displayName,
+                    selected = value.value == current,
+                    dismiss = PickerDismiss.None,
+                    onPick = { set(axis, value.value) },
+                ),
+            )
         }
     }
 }
 
-/** One value of a parameter: a 28dp chip on a 4 % wash, lifted to the 12 % selection fill when it is in force. */
-@Composable
-private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val colors = CursorTheme.colors
-    val shape = CursorTheme.shapes.base
-    Row(
-        Modifier
-            .semantics { this.selected = selected }
-            .cursorSurface(if (selected) colors.fillActive else colors.fillFaint, if (selected) colors.strokeStrong else colors.strokeSubtle, shape)
-            .pressable(onClick, shape, role = Role.RadioButton)
-            // The label is sp: at the system's largest font its line alone is taller than 28dp.
-            .heightIn(min = 28.dp)
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, style = CursorTheme.typography.base, color = if (selected) colors.textPrimary else colors.textSecondary, maxLines = 1)
+/**
+ * The variant in force, as Cursor's picker writes it after the name: each choice's value and each switch that is on,
+ * in the parameters' order ("High Fast", "1M Max"); null when it leaves nothing to say.
+ */
+internal fun variantSummary(axes: List<ModelAxis>, variant: ModelVariant?): String? {
+    if (variant == null || axes.isEmpty()) return null
+    val words = axes.mapNotNull { axis ->
+        val value = variant.param(axis.id) ?: return@mapNotNull null
+        if (axis.isSwitch) {
+            axis.displayName.takeIf { value.equals(axis.onValue, ignoreCase = true) }
+        } else {
+            axis.values.firstOrNull { it.value == value }?.displayName
+        }
     }
+    return words.joinToString(" ").takeIf { it.isNotBlank() }
 }

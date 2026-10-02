@@ -49,6 +49,7 @@ import com.cursorforandroid.ui.agents.DraftRow
 import com.cursorforandroid.ui.agents.Sidebar
 import com.cursorforandroid.ui.agents.SidebarCallbacks
 import com.cursorforandroid.ui.agents.SidebarDestination
+import com.cursorforandroid.ui.components.rememberPopoverAnchor
 import com.cursorforandroid.ui.components.CursorDrawer
 import com.cursorforandroid.ui.components.rememberCursorDrawerState
 import com.cursorforandroid.ui.conversation.ConversationScreen
@@ -175,6 +176,7 @@ private fun AppShell(
     val drawerState = rememberCursorDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var customizeOpen by remember { mutableStateOf(false) }
+    val customizeAnchor = rememberPopoverAnchor()
     // The Project editor, opened from the Projects group's plus or a Project row's menu; kept up across a rotation.
     var projectEditor by rememberSaveable { mutableStateOf<ProjectEditorTarget?>(null) }
     // Wide layout: the sidebar collapses like on the web, and the toggle moves into the detail pane header.
@@ -520,6 +522,7 @@ private fun AppShell(
                 onSettings = ::openSettings,
                 onWhatsNew = ::openWhatsNew,
                 onCustomize = { customizeOpen = true },
+                customizeAnchor = customizeAnchor,
                 onToggleSidebar = if (inDrawer) ({ closeDrawer() }) else ({ sidebarCollapsed = true }),
                 onRefresh = agentsViewModel::refresh,
                 rowActions = rowActions,
@@ -795,7 +798,7 @@ private fun AppShell(
         }
 
         if (customizeOpen) {
-            CustomizeSheet(viewModel = agentsViewModel, onDismiss = { customizeOpen = false })
+            CustomizeSheet(viewModel = agentsViewModel, onDismiss = { customizeOpen = false }, anchor = customizeAnchor)
         }
         projectEditor?.let { target ->
             // Asked for from the sidebar or the New Chat pane: a Project created here is a new top-level chat.

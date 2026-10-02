@@ -9,12 +9,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
@@ -24,6 +24,7 @@ import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.ui.agents.AgentRowActions
+import com.cursorforandroid.ui.components.PickerTags
 import com.cursorforandroid.ui.home.HomeScreen
 import com.cursorforandroid.ui.home.NewChatHomeCopy
 import com.cursorforandroid.ui.home.NewChatHomeFixtures
@@ -47,10 +48,10 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * The New Chat composer's model picker with no Options section: the sheet opens on "Models", the selected model
- * first with its parameters unfolded, dark (`730`) and light (`731`). Plan mode is the composer's own — the "+" menu
- * still leads with it (`732`), beside `/plan` and Shift+Tab. Driven through the real pane over the demo session.
- * Written to `screenshots/`; CI compares them pixel for pixel.
+ * The New Chat composer's model picker with no Options section: the popover opens on its list of models, the
+ * selected one first with its parameters beside it, dark (`730`) and light (`731`). Plan mode is the composer's own —
+ * the "+" menu still leads with it (`732`), beside `/plan` and Shift+Tab. Driven through the real pane over the demo
+ * session. Written to `screenshots/`; CI compares them pixel for pixel.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalRoborazziApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -122,12 +123,12 @@ class ModelPickerScreenshotTest {
         compose.waitUntil(30_000) { onScreen(MODEL_CHIP) }
     }
 
-    /** The chip opens the sheet; its list is shown from its first row, whatever it scrolled to on opening. */
+    /** The chip opens the picker on its list of models, the selected one first with its parameters beside it. */
     private fun modelPicker(mode: ThemeMode, frame: String) {
         showComposer(mode)
         compose.onNodeWithText(MODEL_CHIP).performClick()
-        compose.waitUntil(10_000) { onScreen("Models") }
-        compose.onNode(hasScrollToIndexAction() and hasAnyDescendant(hasText("Models"))).performScrollToIndex(0)
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(PickerTags.List)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag(PickerTags.List).performScrollToIndex(0)
         compose.waitForIdle()
         assertThat(onScreen("Options")).isFalse()
         assertThat(onScreen("Plan mode")).isFalse()

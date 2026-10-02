@@ -2,23 +2,27 @@ package com.cursorforandroid.ui
 
 import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
-import androidx.activity.ComponentDialog
 import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.findViewTreeOnBackPressedDispatcherOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -31,8 +35,11 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.repo.SessionState
+import com.cursorforandroid.domain.FilterKind
 import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.ui.components.BackEdgeMinWidth
+import com.cursorforandroid.ui.customize.CHATS_MENU_TAG
+import com.cursorforandroid.ui.customize.filterTag
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.google.common.truth.Truth.assertThat
@@ -43,11 +50,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import org.robolectric.shadows.ShadowDialog
 
 /**
  * Drives the predictive back gesture the way the system does — started, progressed, then cancelled or committed —
- * through the window's [OnBackPressedDispatcher] (the activity's, or the sheet dialog's) and checks what is on
+ * through the window's [OnBackPressedDispatcher] (the activity's, or the chats menu popup's) and checks what is on
  * screen at each step. Robolectric's `pressBack` only exercises the legacy key path, which never reaches the
  * gesture code.
  */
@@ -110,10 +116,14 @@ class PredictiveBackTest {
         compose.waitForIdle()
     }
 
-    /** Sheets are separate windows: their back events arrive through the sheet dialog's own dispatcher. */
-    private fun sheetDispatcher(): OnBackPressedDispatcher = (ShadowDialog.getLatestDialog() as ComponentDialog).onBackPressedDispatcher
+    /** The chats menu is a popup, a window of its own: its back events arrive through the popup's own dispatcher. */
+    private fun menuDispatcher(): OnBackPressedDispatcher =
+        (compose.onNodeWithTag(CHATS_MENU_TAG).fetchSemanticsNode().root as ViewRootForTest).view.findViewTreeOnBackPressedDispatcherOwner()!!.onBackPressedDispatcher
 
-    private fun sheetShowing() = ShadowDialog.getLatestDialog()?.isShowing == true
+    private fun menuShowing() = compose.onAllNodes(hasTestTag(CHATS_MENU_TAG)).fetchSemanticsNodes().isNotEmpty()
+
+    /** [text] on the chats menu, not the sidebar under it. */
+    private fun inMenu(text: String) = compose.onAllNodes(hasText(text) and hasAnyAncestor(hasTestTag(CHATS_MENU_TAG))).fetchSemanticsNodes().isNotEmpty()
 
     private fun scrollListTo(text: String) {
         compose.waitUntil(30_000) { compose.onAllNodes(hasScrollToNodeAction()).fetchSemanticsNodes().isNotEmpty() }
@@ -147,43 +157,41 @@ class PredictiveBackTest {
     }
 
     @Test
-    fun `filter sheet drill-in is scrubbed by the gesture, rewinds on cancel and pops on commit`() {
+    fun `chats menu drill-in is scrubbed by the gesture, rewinds on cancel and pops on commit`() {
         compose.onNodeWithContentDescription("Open sidebar").performClick()
         waitForText("Demo User")
         compose.onNodeWithContentDescription("Filter and group chats").performClick()
-        waitForText(ROOT_PAGE)
-        compose.onNodeWithText("Status").performClick()
-        waitForText(STATUS_PAGE)
+        compose.waitUntil(20_000) { inMenu(ROOT_PAGE) }
+        compose.onNodeWithTag(filterTag(FilterKind.Status)).performClick()
+        compose.waitUntil(20_000) { inMenu(STATUS_PAGE) }
         compose.waitForIdle()
-        assertThat(onScreen(ROOT_PAGE)).isFalse()
-        val dispatcher = sheetDispatcher()
+        assertThat(inMenu(ROOT_PAGE)).isFalse()
+        val dispatcher = menuDispatcher()
 
         // Half-way: the drill-in is on its way out and the root page is already coming in behind it.
         dispatcher.swipe(0.25f, 0.5f)
-        assertThat(onScreen(STATUS_PAGE)).isTrue()
-        assertThat(onScreen(ROOT_PAGE)).isTrue()
-        assertThat(sheetShowing()).isTrue()
+        assertThat(inMenu(STATUS_PAGE)).isTrue()
+        assertThat(inMenu(ROOT_PAGE)).isTrue()
 
-        // Cancelled: back on the drill-in page, sheet still up.
+        // Cancelled: back on the drill-in page, menu still up.
         dispatcher.cancel()
-        assertThat(onScreen(STATUS_PAGE)).isTrue()
-        assertThat(onScreen(ROOT_PAGE)).isFalse()
-        assertThat(sheetShowing()).isTrue()
+        assertThat(inMenu(STATUS_PAGE)).isTrue()
+        assertThat(inMenu(ROOT_PAGE)).isFalse()
 
-        // Committed: the page pops but the sheet stays. Material's own dismiss callback used to win here on
-        // Android 13+ and close the whole sheet instead.
+        // Committed: the page pops but the menu stays.
         dispatcher.swipe(0.6f)
         dispatcher.release()
-        assertThat(onScreen(ROOT_PAGE)).isTrue()
-        assertThat(onScreen(STATUS_PAGE)).isFalse()
-        assertThat(sheetShowing()).isTrue()
+        assertThat(inMenu(ROOT_PAGE)).isTrue()
+        assertThat(inMenu(STATUS_PAGE)).isFalse()
 
-        // At the root the gesture shrinks the sheet and, once committed, dismisses it.
+        // At the root the gesture shrinks the menu and, once committed, closes it.
         dispatcher.swipe(0.6f)
-        assertThat(sheetShowing()).isTrue()
+        assertThat(menuShowing()).isTrue()
         dispatcher.release()
-        compose.waitUntil(10_000) { !sheetShowing() }
-        assertThat(onScreen(ROOT_PAGE)).isFalse()
+        compose.waitUntil(10_000) { !menuShowing() }
+        // Only the menu: the sidebar it opened from is still out.
+        compose.waitForIdle()
+        assertThat(drawerSheet().positionInRoot.x).isWithin(1f).of(0f)
     }
 
     /**
@@ -344,7 +352,7 @@ class PredictiveBackTest {
         const val CHAT_PLACEHOLDER = "Follow up"
         const val PROMPT = "Do the thing"
         const val HOME_PLACEHOLDER = "Ask Cursor to build, fix bugs, explore"
-        const val ROOT_PAGE = "Grouping"
+        const val ROOT_PAGE = "Group by"
         const val STATUS_PAGE = "Archived"
         const val SETTINGS_PAGE = "Appearance"
     }

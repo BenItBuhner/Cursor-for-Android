@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -28,6 +29,7 @@ import com.cursorforandroid.domain.AgentParent
 import com.cursorforandroid.domain.AgentParentKind
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.fixtures.LiveModelCatalog
+import com.cursorforandroid.ui.components.PickerTags
 import com.cursorforandroid.ui.conversation.ConversationScreen
 import com.cursorforandroid.ui.conversation.ConversationViewModel
 import com.cursorforandroid.ui.theme.CursorTheme
@@ -147,6 +149,8 @@ class ModelSlugScreenshotTest {
         capture("197_model_slug_worker_chip")
 
         compose.onNodeWithText("Claude Opus 5.5").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(PickerTags.List)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(hasText("Claude Opus 5.5") and hasAnyAncestor(hasTestTag(PickerTags.List))).performClick()
         waitForText("Effort")
         capture("198_model_slug_worker_picker")
     }

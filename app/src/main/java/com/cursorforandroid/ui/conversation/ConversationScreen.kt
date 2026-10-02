@@ -84,6 +84,7 @@ import com.cursorforandroid.domain.StorePath
 import com.cursorforandroid.domain.SubagentPlacement
 import com.cursorforandroid.ui.agents.RenameChatDialog
 import com.cursorforandroid.ui.agents.SnoozeChatDialog
+import com.cursorforandroid.ui.components.rememberPopoverAnchor
 import com.cursorforandroid.ui.components.ChatHeader
 import com.cursorforandroid.ui.components.ComposerAnchor
 import com.cursorforandroid.ui.components.rememberComposerExpansion
@@ -352,6 +353,7 @@ fun ConversationScreen(
     val readerScroll = rememberReaderScroll(transcriptScroll, pull = catchUpPull, canCatchUp = viewModel::canCatchUp, onCatchUp = viewModel::catchUp)
     var menuOpen by rememberSaveable { mutableStateOf(false) }
     var modelSheet by rememberSaveable { mutableStateOf(false) }
+    val modelAnchor = rememberPopoverAnchor()
     var renameOpen by rememberSaveable { mutableStateOf(false) }
     var snoozeOpen by rememberSaveable { mutableStateOf(false) }
     // Every tap here that would stop, pause or interrupt the run asks first while the setting is on (see
@@ -964,6 +966,7 @@ fun ConversationScreen(
                         // follow-up; an archived chat takes no follow-ups, so there is nothing to switch.
                         modelLabel = picker.chipLabel,
                         onModel = if (archived) null else ({ modelSheet = true }),
+                        modelAnchor = modelAnchor,
                         // The mode for the next run is a pill beside "+", as on cursor.com/agents, not a suffix on the chip:
                         // Plan in either mode; Ask and Debug where the account's follow-up can carry them (Extended mode).
                         modePill = picker.modePill,
@@ -1017,6 +1020,7 @@ fun ConversationScreen(
             onDismiss = { modelSheet = false },
             pinnedIds = picker.pinnedModelIds,
             onTogglePin = viewModel::togglePinnedModel,
+            anchor = modelAnchor,
             // The chat's model has its own row only while the catalog cannot show it checked in the list: nothing
             // reports it (a chat started elsewhere, in default mode — Auto is assumed and the row says so), or the
             // catalog no longer offers it. Picking the row keeps whatever the chat has been using.

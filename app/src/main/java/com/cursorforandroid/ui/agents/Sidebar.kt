@@ -80,6 +80,8 @@ import com.cursorforandroid.domain.AgentSection
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.MediaRef
 import com.cursorforandroid.domain.NestedRow
+import com.cursorforandroid.ui.components.popoverAnchor
+import com.cursorforandroid.ui.components.PopoverAnchor
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.FlatIconButton
 import com.cursorforandroid.ui.components.PullRefreshHaptics
@@ -132,6 +134,8 @@ data class SidebarCallbacks(
     val onDeleteDraft: (DraftRow) -> Unit = {},
     /** The first ten chat rows as drawn, whenever they change: what Ctrl+1 … Ctrl+0 open (see [SidebarGroup.numbered]). */
     val onShortcutRows: (List<AgentRow>) -> Unit = {},
+    /** Where the chats menu [onCustomize] opens is anchored: the footer's filter button. */
+    val customizeAnchor: PopoverAnchor? = null,
 )
 
 /** Test tags for the card slot above the account footer: one card at a time, the update's or the notes'. */
@@ -407,6 +411,7 @@ fun Sidebar(
             filtered = !state.prefs.isDefault,
             onClick = callbacks.onSettings,
             onFilter = callbacks.onCustomize,
+            filterAnchor = callbacks.customizeAnchor,
         )
     }
 }
@@ -627,6 +632,7 @@ private fun AccountFooter(
     filtered: Boolean,
     onClick: () -> Unit,
     onFilter: () -> Unit,
+    filterAnchor: PopoverAnchor? = null,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
@@ -656,6 +662,7 @@ private fun AccountFooter(
             CursorIcons.Filter,
             "Filter and group chats",
             onClick = onFilter,
+            modifier = Modifier.popoverAnchor(filterAnchor),
             tint = if (filtered) colors.accent else colors.iconSecondary,
         )
     }
