@@ -1,9 +1,12 @@
 package com.cursorforandroid.ui.components
 
-import androidx.activity.compose.BackHandler
+import android.view.View
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
@@ -47,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -116,8 +120,11 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /**
  * What a [CursorPicker] opens from: the bounds of the chip or button that opened it, in its window, kept current as
@@ -700,164 +707,208 @@ private fun AnchoredPicker(state: PickerState, anchor: IntRect, area: IntRect, w
     Popup(
         popupPositionProvider = FullWindow,
         onDismissRequest = state::back,
-        properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = false),
-    ) {
-        val popupView = LocalView.current
-        val density = LocalDensity.current
-        var shift by remember { mutableStateOf(IntOffset.Zero) }
-        val local = { rect: IntRect -> rect.translate(shift) }
-        val rootFocus = remember { FocusRequester() }
-        val gap = with(density) { CursorDimens.menuGap.roundToPx() }
-        val inset = with(density) { CursorDimens.menuInset.roundToPx() }
-        val canCascade = { key: String ->
-            val menu = state.submenuOf(key)
-            menu != null && with(density) { PickerGeometry.cascades(state.rootBounds, menu.width.roundToPx(), local(area), gap) }
-        }
-        LaunchedEffect(Unit) {
-            runCatching { rootFocus.requestFocus() }
-            withFrameNanos { }
-            state.restoreSubmenu(canCascade)
-        }
-        val transition = rememberTransition(state.visible, label = "picker")
-        val progress by transition.animateFloat(
-            transitionSpec = { if (targetState) tween(MENU_ENTER_MILLIS, easing = MenuEnterEasing) else tween(MENU_EXIT_MILLIS, easing = MenuExitEasing) },
-            label = "picker-progress",
-        ) { if (it) 1f else 0f }
-        val subTransition = rememberTransition(state.submenuVisible, label = "picker-submenu")
-        val subProgress by subTransition.animateFloat(
-            transitionSpec = { if (targetState) tween(MENU_ENTER_MILLIS, easing = MenuEnterEasing) else tween(MENU_EXIT_MILLIS, easing = MenuExitEasing) },
-            label = "picker-submenu-progress",
-        ) { if (it) 1f else 0f }
-        var subOrigin by remember { mutableStateOf(TransformOrigin(0f, 0f)) }
+        properties = PopupProperties(focusable = true, dismissOnBackPress = false, dismissOnClickOutside = false),
+    ) { PopupBackDispatcher { backKeys -> AnchoredPickerWindow(state, anchor, area, width, modifier, testTag, backKeys, hostRoot, metrics, ltr) } }
+}
 
-        Layout(
-            modifier = Modifier
-                .fillMaxSize()
-                .onGloballyPositioned {
-                    val inPopup = IntArray(2).also(popupView::getLocationOnScreen)
-                    val inHost = IntArray(2).also(hostRoot::getLocationOnScreen)
-                    shift = IntOffset(inHost[0] - inPopup[0], inHost[1] - inPopup[1])
+/**
+ * The anchored picker's window. A back gesture scrubs a submenu drilled in place back to the list, rewinding if it is
+ * let go; on a cascaded submenu or the list itself it shrinks that surface, and committing backs out one level.
+ */
+@Composable
+private fun AnchoredPickerWindow(
+    state: PickerState,
+    anchor: IntRect,
+    area: IntRect,
+    width: Dp,
+    modifier: Modifier,
+    testTag: String,
+    backKeys: Modifier,
+    hostRoot: View,
+    metrics: PickerMetrics,
+    ltr: Boolean,
+) {
+    val popupView = LocalView.current
+    val drilled = state.submenu?.takeIf { !state.cascade }
+    val pageState = rememberPickerPages(drilled)
+    val backProgress = remember { Animatable(0f) }
+    var backOnSubmenu by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
+    PredictiveBackHandler(enabled = !state.closing) { events ->
+        val open = state.submenu?.takeIf { state.submenuVisible.targetState }
+        val scrubbing = open != null && !state.cascade
+        backOnSubmenu = open != null && state.cascade
+        pageState.rewind?.cancel()
+        try {
+            events.feltOnCommit(haptics).collect {
+                if (scrubbing) pageState.transition.seekTo(it.progress, targetState = null)
+                else backProgress.snapTo(PredictiveBackEasing.transform(it.progress))
+            }
+        } catch (e: CancellationException) {
+            if (scrubbing) pageState.rewind = scope.launch { pageState.transition.rewind(PAGE_MILLIS) }
+            else scope.launch { backProgress.animateTo(0f) }
+            return@PredictiveBackHandler
+        }
+        if (open != null) {
+            state.closeSubmenu()
+            scope.launch { backProgress.animateTo(0f, tween(MENU_EXIT_MILLIS)) }
+        } else {
+            state.close()
+        }
+    }
+    val density = LocalDensity.current
+    var shift by remember { mutableStateOf(IntOffset.Zero) }
+    val local = { rect: IntRect -> rect.translate(shift) }
+    val rootFocus = remember { FocusRequester() }
+    val gap = with(density) { CursorDimens.menuGap.roundToPx() }
+    val inset = with(density) { CursorDimens.menuInset.roundToPx() }
+    val canCascade = { key: String ->
+        val menu = state.submenuOf(key)
+        menu != null && with(density) { PickerGeometry.cascades(state.rootBounds, menu.width.roundToPx(), local(area), gap) }
+    }
+    LaunchedEffect(Unit) {
+        runCatching { rootFocus.requestFocus() }
+        withFrameNanos { }
+        state.restoreSubmenu(canCascade)
+    }
+    val transition = rememberTransition(state.visible, label = "picker")
+    val progress by transition.animateFloat(
+        transitionSpec = { if (targetState) tween(MENU_ENTER_MILLIS, easing = MenuEnterEasing) else tween(MENU_EXIT_MILLIS, easing = MenuExitEasing) },
+        label = "picker-progress",
+    ) { if (it) 1f else 0f }
+    val subTransition = rememberTransition(state.submenuVisible, label = "picker-submenu")
+    val subProgress by subTransition.animateFloat(
+        transitionSpec = { if (targetState) tween(MENU_ENTER_MILLIS, easing = MenuEnterEasing) else tween(MENU_EXIT_MILLIS, easing = MenuExitEasing) },
+        label = "picker-submenu-progress",
+    ) { if (it) 1f else 0f }
+    var subOrigin by remember { mutableStateOf(TransformOrigin(0f, 0f)) }
+
+    Layout(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned {
+                val inPopup = IntArray(2).also(popupView::getLocationOnScreen)
+                val inHost = IntArray(2).also(hostRoot::getLocationOnScreen)
+                shift = IntOffset(inHost[0] - inPopup[0], inHost[1] - inPopup[1])
+            }
+            .focusRequester(rootFocus)
+            .focusable()
+            .onPreviewKeyEvent { state.handleKey(it, canCascade) }
+            .then(backKeys)
+            .semantics { paneTitle = state.title }
+            .testTag(testTag),
+        content = {
+            Box(
+                Modifier
+                    .layoutId("backdrop")
+                    .focusProperties { canFocus = false }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = state::close)
+                    .semantics { contentDescription = "Close ${state.title}"; traversalIndex = 1f }
+                    .testTag(PickerTags.Backdrop),
+            )
+            Column(
+                modifier
+                    .layoutId("root")
+                    .graphicsLayer {
+                        val p = progress
+                        val scale = (MENU_ENTER_SCALE + (1f - MENU_ENTER_SCALE) * p) * backScale(if (backOnSubmenu) 0f else backProgress.value)
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = p
+                        transformOrigin = state.rootOrigin
+                        translationY = (if (state.below) -1f else 1f) * CursorDimens.menuGap.toPx() * (1f - p)
+                    }
+                    .menuShadow(CursorTheme.colors.elevated, CursorTheme.colors.shadow)
+                    .cursorSurface(CursorTheme.colors.elevated, CursorTheme.colors.strokeSubtle, CursorTheme.shapes.menu)
+                    .hitTestBoundary(),
+            ) {
+                rememberTransition(pageState.transition, label = "picker-page").AnimatedContent(
+                    transitionSpec = {
+                        val forward = targetState != null
+                        val slide = tween<IntOffset>(PAGE_MILLIS, easing = MenuEnterEasing)
+                        val pages = if (forward) {
+                            (slideInHorizontally(slide) { it / 3 } + fadeIn(tween(PAGE_MILLIS))) togetherWith (slideOutHorizontally(slide) { -it / 3 } + fadeOut(tween(PAGE_MILLIS / 2)))
+                        } else {
+                            (slideInHorizontally(slide) { -it / 3 } + fadeIn(tween(PAGE_MILLIS))) togetherWith (slideOutHorizontally(slide) { it / 3 } + fadeOut(tween(PAGE_MILLIS / 2)))
+                        }
+                        pages using SizeTransform(clip = true) { _, _ -> tween(PAGE_MILLIS, easing = MenuEnterEasing) }
+                    },
+                ) { page ->
+                    Column {
+                        if (page == null) {
+                            PageBody(state, state.root, state.searchPlaceholder, state.rootEntries, metrics, canCascade, trackRows = true)
+                        } else {
+                            val menu = state.submenuOf(page.key)
+                            if (menu != null) {
+                                BackRow(menu.title, metrics) { state.closeSubmenu() }
+                                PageBody(state, page, menu.searchPlaceholder, menu.entries(page.query.text), metrics, canCascade, trackRows = false)
+                            }
+                        }
+                    }
                 }
-                .focusRequester(rootFocus)
-                .focusable()
-                .onPreviewKeyEvent { state.handleKey(it, canCascade) }
-                .semantics { paneTitle = state.title }
-                .testTag(testTag),
-            content = {
-                Box(
-                    Modifier
-                        .layoutId("backdrop")
-                        .focusProperties { canFocus = false }
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = "Close", onClick = state::close)
-                        .semantics { contentDescription = "Close ${state.title}"; traversalIndex = 1f }
-                        .testTag(PickerTags.Backdrop),
-                )
+            }
+            val sub = state.submenu?.takeIf { state.cascade }
+            val menu = sub?.let { state.submenuOf(it.key) }
+            if (sub != null && menu != null) {
                 Column(
-                    modifier
-                        .layoutId("root")
+                    Modifier
+                        .layoutId("submenu")
                         .graphicsLayer {
-                            val p = progress
-                            val scale = MENU_ENTER_SCALE + (1f - MENU_ENTER_SCALE) * p
+                            val p = subProgress
+                            val scale = (MENU_ENTER_SCALE + (1f - MENU_ENTER_SCALE) * p) * backScale(if (backOnSubmenu) backProgress.value else 0f)
                             scaleX = scale
                             scaleY = scale
                             alpha = p
-                            transformOrigin = state.rootOrigin
-                            translationY = (if (state.below) -1f else 1f) * CursorDimens.menuGap.toPx() * (1f - p)
+                            transformOrigin = subOrigin
                         }
                         .menuShadow(CursorTheme.colors.elevated, CursorTheme.colors.shadow)
                         .cursorSurface(CursorTheme.colors.elevated, CursorTheme.colors.strokeSubtle, CursorTheme.shapes.menu)
-                        .hitTestBoundary(),
+                        .hitTestBoundary()
+                        .semantics { paneTitle = menu.title }
+                        .testTag(PickerTags.Submenu),
                 ) {
-                    val drilled = state.submenu?.takeIf { !state.cascade }
-                    AnimatedContent(
-                        targetState = drilled,
-                        transitionSpec = {
-                            val forward = targetState != null
-                            val slide = tween<IntOffset>(PAGE_MILLIS, easing = MenuEnterEasing)
-                            val pages = if (forward) {
-                                (slideInHorizontally(slide) { it / 3 } + fadeIn(tween(PAGE_MILLIS))) togetherWith (slideOutHorizontally(slide) { -it / 3 } + fadeOut(tween(PAGE_MILLIS / 2)))
-                            } else {
-                                (slideInHorizontally(slide) { -it / 3 } + fadeIn(tween(PAGE_MILLIS))) togetherWith (slideOutHorizontally(slide) { it / 3 } + fadeOut(tween(PAGE_MILLIS / 2)))
-                            }
-                            pages using SizeTransform(clip = true) { _, _ -> tween(PAGE_MILLIS, easing = MenuEnterEasing) }
-                        },
-                        label = "picker-page",
-                    ) { page ->
-                        Column {
-                            if (page == null) {
-                                PageBody(state, state.root, state.searchPlaceholder, state.rootEntries, metrics, canCascade, trackRows = true)
-                            } else {
-                                val menu = state.submenuOf(page.key)
-                                if (menu != null) {
-                                    BackRow(menu.title, metrics) { state.closeSubmenu() }
-                                    PageBody(state, page, menu.searchPlaceholder, menu.entries(page.query.text), metrics, canCascade, trackRows = false)
-                                }
-                            }
-                        }
-                    }
+                    PageBody(state, sub, menu.searchPlaceholder, menu.entries(sub.query.text), metrics, canCascade, trackRows = false)
                 }
-                val sub = state.submenu?.takeIf { state.cascade }
-                val menu = sub?.let { state.submenuOf(it.key) }
-                if (sub != null && menu != null) {
-                    Column(
-                        Modifier
-                            .layoutId("submenu")
-                            .graphicsLayer {
-                                val p = subProgress
-                                val scale = MENU_ENTER_SCALE + (1f - MENU_ENTER_SCALE) * p
-                                scaleX = scale
-                                scaleY = scale
-                                alpha = p
-                                transformOrigin = subOrigin
-                            }
-                            .menuShadow(CursorTheme.colors.elevated, CursorTheme.colors.shadow)
-                            .cursorSurface(CursorTheme.colors.elevated, CursorTheme.colors.strokeSubtle, CursorTheme.shapes.menu)
-                            .hitTestBoundary()
-                            .semantics { paneTitle = menu.title }
-                            .testTag(PickerTags.Submenu),
-                    ) {
-                        PageBody(state, sub, menu.searchPlaceholder, menu.entries(sub.query.text), metrics, canCascade, trackRows = false)
-                    }
-                }
-            },
-        ) { measurables, constraints ->
-            val full = Constraints.fixed(constraints.maxWidth, constraints.maxHeight)
-            val bounds = local(area)
-            val anchorHere = local(anchor)
-            val backdrop = measurables.first { it.layoutId == "backdrop" }.measure(full)
-            val rootWidth = width.roundToPx().coerceAtMost(max(0, bounds.width))
-            val rootHeight = when (state.side) {
-                null -> PickerGeometry.maxHeight(anchorHere, bounds, gap)
-                true -> PickerGeometry.roomBelow(anchorHere, bounds, gap)
-                false -> PickerGeometry.roomAbove(anchorHere, bounds, gap)
             }
-            val root = measurables.first { it.layoutId == "root" }.measure(Constraints(minWidth = rootWidth, maxWidth = rootWidth, maxHeight = max(0, rootHeight)))
-            val placement = PickerGeometry.place(anchorHere, IntSize(root.width, root.height), bounds, gap, ltr, keepBelow = state.side)
-            state.rootBounds = IntRect(placement.offset, IntSize(root.width, root.height))
-            state.rootOrigin = placement.origin
-            state.below = placement.below
-            if (root.height > 0) state.side = placement.below
+        },
+    ) { measurables, constraints ->
+        val full = Constraints.fixed(constraints.maxWidth, constraints.maxHeight)
+        val bounds = local(area)
+        val anchorHere = local(anchor)
+        val backdrop = measurables.first { it.layoutId == "backdrop" }.measure(full)
+        val rootWidth = width.roundToPx().coerceAtMost(max(0, bounds.width))
+        val rootHeight = when (state.side) {
+            null -> PickerGeometry.maxHeight(anchorHere, bounds, gap)
+            true -> PickerGeometry.roomBelow(anchorHere, bounds, gap)
+            false -> PickerGeometry.roomAbove(anchorHere, bounds, gap)
+        }
+        val root = measurables.first { it.layoutId == "root" }.measure(Constraints(minWidth = rootWidth, maxWidth = rootWidth, maxHeight = max(0, rootHeight)))
+        val placement = PickerGeometry.place(anchorHere, IntSize(root.width, root.height), bounds, gap, ltr, keepBelow = state.side)
+        state.rootBounds = IntRect(placement.offset, IntSize(root.width, root.height))
+        state.rootOrigin = placement.origin
+        state.below = placement.below
+        if (root.height > 0) state.side = placement.below
 
-            val subMeasurable = measurables.firstOrNull { it.layoutId == "submenu" }
-            val subKey = state.submenu?.key
-            val subMenu = state.submenuOf(subKey)
-            val sub = if (subMeasurable != null && subMenu != null) {
-                val w = subMenu.width.roundToPx().coerceAtMost(max(0, bounds.width))
-                subMeasurable.measure(Constraints(minWidth = w, maxWidth = w, maxHeight = max(0, bounds.height)))
-            } else {
-                null
-            }
-            val row = subKey?.let { state.rowBounds[it] } ?: state.rootBounds
-            val subPlacement = sub?.let { PickerGeometry.placeSubmenu(row, state.rootBounds, IntSize(it.width, it.height), bounds, gap, inset, ltr) }
-            subPlacement?.let { subOrigin = it.origin }
+        val subMeasurable = measurables.firstOrNull { it.layoutId == "submenu" }
+        val subKey = state.submenu?.key
+        val subMenu = state.submenuOf(subKey)
+        val sub = if (subMeasurable != null && subMenu != null) {
+            val w = subMenu.width.roundToPx().coerceAtMost(max(0, bounds.width))
+            subMeasurable.measure(Constraints(minWidth = w, maxWidth = w, maxHeight = max(0, bounds.height)))
+        } else {
+            null
+        }
+        val row = subKey?.let { state.rowBounds[it] } ?: state.rootBounds
+        val subPlacement = sub?.let { PickerGeometry.placeSubmenu(row, state.rootBounds, IntSize(it.width, it.height), bounds, gap, inset, ltr) }
+        subPlacement?.let { subOrigin = it.origin }
 
-            layout(constraints.maxWidth, constraints.maxHeight) {
-                backdrop.place(0, 0)
-                root.place(placement.offset)
-                if (sub != null) {
-                    val at = subPlacement?.offset ?: IntOffset(bounds.right - sub.width, row.top - inset)
-                    sub.place(at)
-                }
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            backdrop.place(0, 0)
+            root.place(placement.offset)
+            if (sub != null) {
+                val at = subPlacement?.offset ?: IntOffset(bounds.right - sub.width, row.top - inset)
+                sub.place(at)
             }
         }
     }
@@ -871,7 +922,19 @@ private fun SheetPicker(state: PickerState, modifier: Modifier, testTag: String)
     val rootFocus = remember { FocusRequester() }
     CursorSheet(onDismiss = state::finished, modifier = modifier) { dismiss ->
         state.sheetDismiss = dismiss
-        BackHandler(enabled = state.submenu != null) { state.closeSubmenu() }
+        val pageState = rememberPickerPages(state.submenu)
+        val scope = rememberCoroutineScope()
+        val haptics = rememberHaptics()
+        PredictiveBackHandler(enabled = state.submenu != null) { events ->
+            pageState.rewind?.cancel()
+            try {
+                events.feltOnCommit(haptics).collect { pageState.transition.seekTo(it.progress, targetState = null) }
+            } catch (e: CancellationException) {
+                pageState.rewind = scope.launch { pageState.transition.rewind(PAGE_MILLIS) }
+                return@PredictiveBackHandler
+            }
+            state.closeSubmenu()
+        }
         LaunchedEffect(Unit) {
             runCatching { rootFocus.requestFocus() }
             state.restoreSubmenu { false }
@@ -886,15 +949,13 @@ private fun SheetPicker(state: PickerState, modifier: Modifier, testTag: String)
                 .semantics { paneTitle = state.title }
                 .testTag(testTag),
         ) {
-            AnimatedContent(
-                targetState = state.submenu,
+            rememberTransition(pageState.transition, label = "picker-sheet-page").AnimatedContent(
                 transitionSpec = {
                     val slide = tween<IntOffset>(PAGE_MILLIS, easing = MenuEnterEasing)
                     val pages = if (targetState != null) slideInHorizontally(slide) { it } togetherWith slideOutHorizontally(slide) { -it }
                     else slideInHorizontally(slide) { -it } togetherWith slideOutHorizontally(slide) { it }
                     pages using SizeTransform { _, _ -> tween(PAGE_MILLIS, easing = MenuEnterEasing) }
                 },
-                label = "picker-sheet-page",
             ) { page ->
                 Column {
                     val menu = page?.let { state.submenuOf(it.key) }
@@ -1284,6 +1345,25 @@ private fun rowEnd(sheet: Boolean): Dp = if (sheet) 12.dp else CursorDimens.menu
 private fun textInset(sheet: Boolean): Dp = if (sheet) 20.dp else CursorDimens.menuTextInset
 
 private const val PAGE_MILLIS = 220
+private const val BACK_SHRINK = 0.1f
+
+private fun backScale(progress: Float): Float = 1f - BACK_SHRINK * progress
+
+/** A picker's pages, seekable so a back gesture scrubs a submenu out and the list in; [rewind] undoes a cancelled one. */
+@Stable
+private class PickerPages(val transition: SeekableTransitionState<PickerPage?>) {
+    var rewind: Job? = null
+}
+
+@Composable
+private fun rememberPickerPages(page: PickerPage?): PickerPages {
+    val pages = remember { PickerPages(SeekableTransitionState(page)) }
+    LaunchedEffect(page) {
+        pages.rewind?.cancel()
+        pages.transition.animateTo(page)
+    }
+    return pages
+}
 
 /** Lowercase, space-insensitive containment, for a picker's search over a label and its detail. */
 fun pickerMatches(query: String, vararg fields: String?): Boolean {

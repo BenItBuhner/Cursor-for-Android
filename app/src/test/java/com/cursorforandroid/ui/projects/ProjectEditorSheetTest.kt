@@ -31,6 +31,7 @@ import com.cursorforandroid.domain.ModelParam
 import com.cursorforandroid.domain.ModelVariant
 import com.cursorforandroid.domain.ProjectAppearance
 import com.cursorforandroid.domain.Repository
+import com.cursorforandroid.ui.home.MODEL_PICKER_TAG
 import com.cursorforandroid.ui.icons.ProjectIcons
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
@@ -108,6 +109,10 @@ class ProjectEditorSheetTest {
     private fun create() = compose.onNode(hasText("Create") and hasClickAction())
 
     /** A repository's row in the picker, not the step's list of confirmed ones behind it. */
+    private fun waitForModelPicker() = compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(MODEL_PICKER_TAG)).fetchSemanticsNodes().isNotEmpty() }
+
+    private fun modelRow(name: String) = compose.onNode(hasText(name) and hasAnyAncestor(hasTestTag(MODEL_PICKER_TAG)))
+
     private fun choice(name: String) = compose.onNode(hasText(name) and hasAnyAncestor(hasTestTag("repo-picker-list")))
 
     private fun choices(name: String) = compose.onAllNodes(hasText(name) and hasAnyAncestor(hasTestTag("repo-picker-list"))).fetchSemanticsNodes()
@@ -270,18 +275,18 @@ class ProjectEditorSheetTest {
         compose.onNodeWithText("Claude 4.5 Sonnet").assertIsDisplayed()
 
         compose.onNodeWithTag("project-model").performClick()
-        waitFor("Models")
+        waitForModelPicker()
         assertThat(compose.onAllNodes(hasText("Plan mode")).fetchSemanticsNodes()).isEmpty()
         assertThat(compose.onAllNodes(hasText("Auto-create PR")).fetchSemanticsNodes()).isEmpty()
-        compose.onNodeWithText("GPT-5.6").performClick()
+        modelRow("GPT-5.6").performClick()
         create().performClick()
         assertThat(results.last().model).isEqualTo(ModelChoice(gpt, null))
         assertThat(results.last().accountModel).isEqualTo(AccountModel("gpt-5.6"))
 
         // Auto is a row like any other, and goes out as the desktop's `default`.
         compose.onNodeWithTag("project-model").performClick()
-        waitFor("Models")
-        compose.onNodeWithText("Auto").performClick()
+        waitForModelPicker()
+        modelRow("Auto").performClick()
         create().performClick()
         assertThat(results.last().model?.model).isEqualTo(auto)
         assertThat(results.last().accountModel).isEqualTo(AccountModel("default"))
