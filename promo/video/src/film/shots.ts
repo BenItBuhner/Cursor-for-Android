@@ -118,15 +118,15 @@ function hero(device: DeviceId, from: number, to: number, t: boolean): Key[] {
 }
 
 const tableau: Cam = {
-  at: [-4, 4, 0],
-  az: -116,
-  el: 18,
-  dist: 78,
+  at: [-10, -1, 0],
+  az: -118,
+  el: 22,
+  dist: 92,
   fov: 21,
-  frame: [0.5, 0.6],
+  frame: [0.5, 0.58],
   focus: onGlass(LINEUP.foldable, 0.5, 0.5),
-  depth: 55,
-  bokeh: 1.3,
+  depth: 60,
+  bokeh: 1.2,
 };
 
 /** Where the end card lies: an empty stretch of the stone, well away from the lineup, in its own band of sun. */
@@ -157,8 +157,8 @@ export const RUNS: Run[] = [
     to: SHOT.tableau.to,
     wide: [{ f: SHOT.tableau.from, ...tableau }, { f: SHOT.tableau.to - 1, ...tableau, az: -113, dist: 55, ease: "linear" }],
     tall: [
-      { f: SHOT.tableau.from, ...tableau, fov: 34, dist: 108, el: 17, frame: [0.5, 0.62] },
-      { f: SHOT.tableau.to - 1, ...tableau, fov: 34, dist: 102, el: 17, az: -113, frame: [0.5, 0.62], ease: "linear" },
+      { f: SHOT.tableau.from, ...tableau, fov: 34, dist: 124, el: 20, frame: [0.5, 0.6] },
+      { f: SHOT.tableau.to - 1, ...tableau, fov: 34, dist: 116, el: 20, az: -115, frame: [0.5, 0.6], ease: "linear" },
     ],
   },
   { from: SHOT.end.from, to: SHOT.end.to, wide: [{ f: SHOT.end.from, ...end }, { f: SHOT.end.to - 1, ...end, dist: 66, ease: "linear" }], tall: [] },

@@ -234,9 +234,9 @@ const Line: React.FC<{
 const TitleSplash: React.FC<{ f: number; framing: Framing; height: number }> = ({ f, framing, height }) => {
   if (f < SHOT.title.from || f >= SHOT.title.to) return null;
   const wide = framing === "wide";
-  const icon = wide ? 132 : 148;
+  const icon = wide ? 124 : 140;
   const shown = settle((f - SHOT.title.from + 1) / 10) * settle((SHOT.title.to - f) / 8);
-  const top = height * (wide ? 0.16 : 0.22);
+  const top = height * (wide ? 0.175 : 0.24);
   return (
     <div
       style={{

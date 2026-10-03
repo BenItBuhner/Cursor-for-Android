@@ -470,9 +470,6 @@ const Details: React.FC<{ device: DeviceId; f: ReturnType<typeof useFinishes>; t
             <boxGeometry args={[0.5, 0.14, D - 0.04]} />
           </mesh>
         ))}
-        <mesh position={[0, 0, top + 0.002]} material={f.hole}>
-          <planeGeometry args={[0.08, outer.h - 0.9]} />
-        </mesh>
         {[antenna(side, end - 1.8, "y"), antenna(-side, -end + 1.8, "y"), antenna(-3.4, end, "x"), antenna(3.4, -end, "x")]}
         {camera(side - 3.28, end - 0.52, 0.7)}
         <mesh position={[0, -end - 0.002, mid]} rotation={[Math.PI / 2, 0, 0]} material={f.hole}>

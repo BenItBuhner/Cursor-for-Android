@@ -166,8 +166,8 @@ export function typeAt(f: number, words: Words): number {
 }
 
 export const WORDS: Words[] = [
-  { text: { wide: "Cursor", tall: "Cursor" }, from: beat(6), to: beat(8), size: TITLE, at: { wide: [0.5, 0.4], tall: [0.5, 0.46] }, align: "center", ink: "day" },
-  { text: { wide: "Now on Android.", tall: "Now on\nAndroid." }, from: beat(8), to: beat(10), size: TITLE, at: { wide: [0.5, 0.4], tall: [0.5, 0.44] }, align: "center", ink: "day" },
+  { text: { wide: "Cursor", tall: "Cursor" }, from: beat(6), to: beat(8), size: TITLE, at: { wide: [0.5, 0.325], tall: [0.5, 0.4] }, align: "center", ink: "day" },
+  { text: { wide: "Now on Android.", tall: "Now on\nAndroid." }, from: beat(8), to: beat(10), size: TITLE, at: { wide: [0.5, 0.325], tall: [0.5, 0.38] }, align: "center", ink: "day" },
   verb("Say it.", beat(11), beat(15), "day"),
   verb("Watch it\ncode.", beat(20), beat(24), "day"),
   verb("Steer it.", beat(32), beat(36), "day"),
