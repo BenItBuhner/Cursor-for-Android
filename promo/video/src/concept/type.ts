@@ -30,7 +30,7 @@ export type Role = { wght: number; wdth: number; tracking: [number, number]; lea
 
 export const ROLE = {
   /** Headlines: one weight, never animated through a middle one. */
-  display: { wght: 600, wdth: 100, tracking: [0, -0.012], leading: 0.95 },
+  display: { wght: 600, wdth: 100, tracking: [0, -0.01], leading: 1.06 },
   /** The few words that sit small beside the product: a caption's weight and open tracking. */
   caption: { wght: 450, wdth: 100, tracking: [0.006, 0.0], leading: 1.25 },
 } satisfies Record<string, Role>;
@@ -57,5 +57,8 @@ export function typeStyle(role: Role, size: number, grade = 0): React.CSSPropert
     fontVariationSettings: `"wght" ${role.wght}, "wdth" ${role.wdth}, "opsz" ${opsz.toFixed(1)}, "GRAD" ${grade.toFixed(1)}`,
     fontOpticalSizing: "none",
     fontKerning: "normal",
+    fontSynthesis: "none",
+    WebkitFontSmoothing: "antialiased",
+    textRendering: "optimizeLegibility",
   };
 }

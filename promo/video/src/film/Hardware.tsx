@@ -10,6 +10,9 @@ import { smudges } from "./materials";
  * machined frame swept around the outline (a polished chamfer either side of a satin, faintly crowned band), the cover
  * glass with its rolled edge, the take on the screen under it, and what a real body has: the buttons in their slots,
  * the ports, the antenna lines, the punch-hole camera, the earpiece, the rear camera visor the phone rests on.
+ *
+ * Phone and foldable are ported from Bennett's visual-engine Galaxy S26 Ultra and Z Fold8 Ultra (open). The tablet is a
+ * Galaxy Tab S10 Ultra body with the S26 Ultra's corner radius and graphite finishes — visual-engine has no Tab SKU.
  */
 
 type Spec = {
@@ -25,9 +28,12 @@ type Spec = {
 };
 
 export const SPEC: Record<DeviceId, Spec> = {
-  phone: { screen: 6.86, bezel: { x: 0.13, top: 0.13, bottom: 0.13 }, radius: 0.95, depth: 0.85, chamfer: 0.06, lip: 0.07, crown: 0.014 },
-  foldable: { screen: 14.4, bezel: { x: 0.24, top: 0.3, bottom: 0.24 }, radius: 0.62, depth: 0.53, chamfer: 0.045, lip: 0.06, crown: 0.008 },
-  tablet: { screen: 25.2, bezel: { x: 0.62, top: 0.62, bottom: 0.62 }, radius: 1.15, depth: 0.81, chamfer: 0.03, lip: 0.05, crown: 0.06 },
+  // Galaxy S26 Ultra: 78.1 × 163.6 × 7.9 mm, R 6, 6.9" 73.4 × 159.1 mm active. Screen height follows the take.
+  phone: { screen: 7.34, bezel: { x: 0.235, top: 0.225, bottom: 0.225 }, radius: 0.6, depth: 0.79, chamfer: 0.05, lip: 0.11, crown: 0.008 },
+  // Galaxy Z Fold8 Ultra, open: 143.2 × 158.4 × 4.1 mm, inner 137.0 × 152.0 mm, R 4, crease 2.4 mm.
+  foldable: { screen: 13.7, bezel: { x: 0.31, top: 0.815, bottom: 0.815 }, radius: 0.4, depth: 0.41, chamfer: 0.06, lip: 0.12, crown: 0.006 },
+  // Galaxy Tab S10 Ultra, landscape: 326.4 × 208.6 × 5.4 mm, 14.6" 16:10. Corners and materials match the S26 Ultra.
+  tablet: { screen: 31.45, bezel: { x: 0.595, top: 0.602, bottom: 0.602 }, radius: 0.6, depth: 0.54, chamfer: 0.05, lip: 0.11, crown: 0.008 },
 };
 
 export const screenSize = (device: DeviceId) => {
@@ -42,8 +48,11 @@ export function outerSize(device: DeviceId) {
   return { w: w + 2 * s.bezel.x, h: h + s.bezel.top + s.bezel.bottom, screenY: (s.bezel.bottom - s.bezel.top) / 2 };
 }
 
-/** The phone's rear camera visor: how far it stands off the back, its centre from the top, its height. */
-const VISOR = { stand: 0.15, fromTop: 2.3, height: 1.75 };
+/**
+ * The S26 Ultra's rear island, from visual-engine: a 21 × 57.7 mm stadium 1.55 mm proud, cameras stacked to 4.05 mm,
+ * 4.55 mm in from the left and 4.15 from the top. The phone rests on those stacks and its bottom edge.
+ */
+const VISOR = { stand: 0.405, fromTop: 3.3, height: 5.77, width: 2.1, left: 0.455, step: 0.155 };
 
 /** The phone rests on its visor and its bottom edge, so it lies a fraction of a degree off the table, top up. */
 export function restTilt(device: DeviceId): number {
@@ -196,7 +205,7 @@ function coatGeometry(w: number, h: number, crease: boolean): THREE.BufferGeomet
   const g = new THREE.PlaneGeometry(w, h, crease ? 96 : 1, 1);
   if (crease) {
     const pos = g.attributes.position!;
-    for (let i = 0; i < pos.count; i++) pos.setZ(i, -0.03 * Math.exp(-((pos.getX(i) / 0.45) ** 2)));
+    for (let i = 0; i < pos.count; i++) pos.setZ(i, -0.03 * Math.exp(-((pos.getX(i) / 0.24) ** 2)));
     g.computeVertexNormals();
   }
   return g;
@@ -248,15 +257,18 @@ function swatch(color: string): THREE.CanvasTexture {
 /** The finishes: anodized aluminium in graphite, its diamond-cut chamfers, the black glass, the dark plastics. */
 function useFinishes() {
   return useMemo(() => {
-    const band = new THREE.MeshPhysicalMaterial({ color: "#4a4b50", metalness: 1, roughness: 0.34, anisotropy: 0.65, envMapIntensity: 1.1 });
-    const chamfer = new THREE.MeshPhysicalMaterial({ color: "#8e9096", metalness: 1, roughness: 0.1, envMapIntensity: 1.3 });
+    // Graphite from visual-engine's Fold8 Ultra / S26 family: Armor Aluminum frame, satin glass back, polished lips.
+    const band = new THREE.MeshPhysicalMaterial({ color: "#4f5257", metalness: 1, roughness: 0.34, anisotropy: 0.65, envMapIntensity: 1.15 });
+    const chamfer = new THREE.MeshPhysicalMaterial({ color: "#8a8d92", metalness: 1, roughness: 0.1, envMapIntensity: 1.35 });
     const gasket = new THREE.MeshStandardMaterial({ color: "#0b0b0c", roughness: 0.6 });
     const plastic = new THREE.MeshStandardMaterial({ color: "#26272a", roughness: 0.55, metalness: 0 });
     const hole = new THREE.MeshBasicMaterial({ color: "#020202" });
-    const back = new THREE.MeshPhysicalMaterial({ color: "#2c2d31", roughness: 0.55, metalness: 0, clearcoat: 0.3, clearcoatRoughness: 0.5 });
+    const back = new THREE.MeshPhysicalMaterial({ color: "#5f6367", roughness: 0.52, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.45 });
+    const island = new THREE.MeshPhysicalMaterial({ color: "#6d7176", metalness: 0.35, roughness: 0.28, clearcoat: 0.45, clearcoatRoughness: 0.35, envMapIntensity: 1.05 });
     const glass = new THREE.MeshPhysicalMaterial({ color: "#020203", metalness: 0, roughness: 0.035, envMapIntensity: 1 });
-    const lens = new THREE.MeshPhysicalMaterial({ color: "#05060a", metalness: 0, roughness: 0.02, clearcoat: 1, clearcoatRoughness: 0, iridescence: 0.6, iridescenceIOR: 1.6, envMapIntensity: 1.6 });
-    return { band, chamfer, gasket, plastic, hole, back, glass, lens };
+    const lens = new THREE.MeshPhysicalMaterial({ color: "#05060a", metalness: 0, roughness: 0.02, clearcoat: 1, clearcoatRoughness: 0, iridescence: 0.55, iridescenceIOR: 1.6, envMapIntensity: 1.5 });
+    const ring = new THREE.MeshPhysicalMaterial({ color: "#3a3c40", metalness: 1, roughness: 0.18, envMapIntensity: 1.2 });
+    return { band, chamfer, gasket, plastic, hole, back, island, glass, lens, ring };
   }, []);
 }
 
@@ -349,11 +361,34 @@ export const Hardware: React.FC<{
   );
 };
 
+/** A camera well: the satin ring in the island metal, a black cylinder, the coated glass inside. */
+const Stack: React.FC<{
+  x: number;
+  y: number;
+  z: number;
+  ringR: number;
+  cylR: number;
+  cylH: number;
+  glassR: number;
+  f: ReturnType<typeof useFinishes>;
+}> = ({ x, y, z, ringR, cylR, cylH, glassR, f }) => (
+  <group position={[x, y, z]}>
+    <mesh material={f.ring} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -0.02]} castShadow>
+      <cylinderGeometry args={[ringR, ringR, 0.075, 48]} />
+    </mesh>
+    <mesh material={f.hole} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -cylH / 2]} castShadow>
+      <cylinderGeometry args={[cylR, cylR, cylH, 48]} />
+    </mesh>
+    <mesh material={f.lens} position={[0, 0, -cylH + 0.012]}>
+      <circleGeometry args={[glassR, 48]} />
+    </mesh>
+  </group>
+);
+
 /** What's cut into the body and printed on its glass. */
 const Details: React.FC<{ device: DeviceId; f: ReturnType<typeof useFinishes>; top: number }> = ({ device, f, top }) => {
   const spec = SPEC[device];
   const outer = outerSize(device);
-  const { w, h } = screenSize(device);
   const D = spec.depth;
   const mid = D / 2;
   const side = outer.w / 2;
@@ -362,61 +397,65 @@ const Details: React.FC<{ device: DeviceId; f: ReturnType<typeof useFinishes>; t
   const disc = (r: number) => <circleGeometry args={[r, 48]} />;
   const button = (y: number, length: number, x = side) => (
     <group key={`${x}-${y}`}>
-      <mesh position={[x - 0.015, y, mid]} material={f.hole}>
-        <boxGeometry args={[0.05, length + 0.06, 0.26]} />
+      <mesh position={[x - Math.sign(x) * 0.015, y, mid]} material={f.hole}>
+        <boxGeometry args={[0.05, length + 0.06, 0.22]} />
       </mesh>
-      <RoundedBox args={[0.11, length, 0.2]} radius={0.045} smoothness={4} position={[x + 0.02, y, mid]} castShadow>
-        <meshPhysicalMaterial color="#323337" metalness={1} roughness={0.17} anisotropy={0.5} envMapIntensity={0.55} />
+      <RoundedBox args={[0.1, length, 0.18]} radius={0.04} smoothness={4} position={[x + Math.sign(x) * 0.025, y, mid]} castShadow>
+        <meshPhysicalMaterial color="#3a3c40" metalness={1} roughness={0.17} anisotropy={0.5} envMapIntensity={0.55} />
       </RoundedBox>
     </group>
   );
   const antenna = (x: number, y: number, along: "x" | "y") => (
     <mesh key={`a${x}${y}`} position={[x, y, mid]} material={f.plastic}>
-      <boxGeometry args={along === "y" ? [0.012, 0.07, D - 0.16] : [0.07, 0.012, D - 0.16]} />
+      <boxGeometry args={along === "y" ? [0.012, 0.07, D - 0.14] : [0.07, 0.012, D - 0.14]} />
     </mesh>
   );
   const camera = (x: number, y: number, scale = 1) => (
     <group position={[x, y, top + 0.0045]} scale={scale}>
-      <mesh material={f.hole}>{disc(0.165)}</mesh>
+      <mesh material={f.hole}>{disc(0.18)}</mesh>
       <mesh geometry={ring} position={[0, 0, 0.0004]}>
         <meshPhysicalMaterial color="#191a1e" metalness={1} roughness={0.25} />
       </mesh>
       <mesh material={f.lens} position={[0, 0, 0.0008]}>
-        {disc(0.075)}
+        {disc(0.08)}
       </mesh>
     </group>
   );
   if (device === "phone") {
-    const screenTop = outer.screenY + h / 2;
+    const ix = -side + VISOR.left + VISOR.width / 2;
+    const iy = end - VISOR.fromTop;
     return (
       <>
-        {button(3.55, 1.3)}
-        {button(0.95, 2.5)}
+        {button(end - 4.0, 2.02)}
+        {button(end - 6.63, 1.35)}
         {[antenna(side, end - 2.1, "y"), antenna(side, -end + 2.1, "y"), antenna(-side, end - 2.1, "y"), antenna(-side, -end + 2.1, "y"), antenna(-1.6, end, "x"), antenna(1.6, -end, "x")]}
-        {camera(0, screenTop - 0.36)}
-        <mesh position={[0, end - spec.lip - 0.02, top + 0.0042]} material={f.hole}>
-          <planeGeometry args={[1.15, 0.035]} />
-        </mesh>
+        {camera(0, end - 0.645, 0.85)}
         <mesh position={[0, -end - 0.002, mid]} rotation={[Math.PI / 2, 0, 0]} material={f.hole}>
-          <shapeGeometry args={[roundedShape(0.86, 0.27, 0.135), 12]} />
+          <shapeGeometry args={[roundedShape(0.85, 0.28, 0.13), 12]} />
         </mesh>
         <mesh position={[0, -end - 0.004, mid]} rotation={[Math.PI / 2, 0, 0]} material={f.plastic}>
           <planeGeometry args={[0.56, 0.07]} />
         </mesh>
         {Array.from({ length: 7 }, (_, i) => (
-          <mesh key={`s${i}`} position={[1.05 + i * 0.14, -end - 0.002, mid]} rotation={[Math.PI / 2, 0, 0]} material={f.hole}>
-            {disc(0.042)}
+          <mesh key={`s${i}`} position={[1.02 + (i * 1.43) / 6, -end - 0.002, mid]} rotation={[Math.PI / 2, 0, 0]} material={f.hole}>
+            {disc(0.06)}
           </mesh>
         ))}
-        <mesh position={[-1.3, -end - 0.002, mid]} rotation={[Math.PI / 2, 0, 0]} material={f.hole}>
-          {disc(0.035)}
+        <mesh position={[-2.2, -end - 0.002, mid]} rotation={[Math.PI / 2, 0, 0]} material={f.hole}>
+          {disc(0.04)}
         </mesh>
-        <mesh position={[0.9, end + 0.002, mid]} rotation={[-Math.PI / 2, 0, 0]} material={f.hole}>
-          {disc(0.035)}
+        <RoundedBox args={[VISOR.width, VISOR.height, VISOR.step]} radius={VISOR.width / 2 - 0.02} smoothness={6} position={[ix, iy, -VISOR.step / 2]} material={f.island} castShadow />
+        <Stack x={-side + 1.505} y={end - 1.465} z={-VISOR.step} ringR={0.875} cylR={0.67} cylH={0.25} glassR={0.615} f={f} />
+        <Stack x={-side + 1.505} y={end - 3.3} z={-VISOR.step} ringR={0.875} cylR={0.67} cylH={0.25} glassR={0.615} f={f} />
+        <Stack x={-side + 1.505} y={end - 5.135} z={-VISOR.step} ringR={0.875} cylR={0.67} cylH={0.25} glassR={0.615} f={f} />
+        <mesh position={[-side + 3.28, end - 1.48, -VISOR.step - 0.02]} material={f.hole} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.47, 0.47, 0.155, 32]} />
         </mesh>
-        <mesh position={[0, end - VISOR.fromTop, -VISOR.stand / 2]} castShadow>
-          <boxGeometry args={[outer.w - 1.1, VISOR.height, VISOR.stand]} />
-          <meshPhysicalMaterial color="#5c5e63" metalness={1} roughness={0.15} />
+        <mesh position={[-side + 3.28, end - 3.3, -VISOR.step - 0.02]} material={f.hole} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.47, 0.47, 0.155, 32]} />
+        </mesh>
+        <mesh position={[-side + 3.28, end - 2.39, -VISOR.step]} material={f.lens}>
+          {disc(0.2)}
         </mesh>
       </>
     );
@@ -424,17 +463,20 @@ const Details: React.FC<{ device: DeviceId; f: ReturnType<typeof useFinishes>; t
   if (device === "foldable") {
     return (
       <>
-        {button(end - 3.2, 1.1)}
-        {button(end - 5.4, 2.0)}
+        {button(end - 4.0, 1.7, -side)}
+        {button(end - 6.2, 1.3, -side)}
         {[end, -end].map((y) => (
           <mesh key={`h${y}`} position={[0, y, mid]} material={f.hole}>
-            <boxGeometry args={[0.06, 0.02, D - 0.06]} />
+            <boxGeometry args={[0.5, 0.14, D - 0.04]} />
           </mesh>
         ))}
+        <mesh position={[0, 0, top + 0.002]} material={f.hole}>
+          <planeGeometry args={[0.08, outer.h - 0.9]} />
+        </mesh>
         {[antenna(side, end - 1.8, "y"), antenna(-side, -end + 1.8, "y"), antenna(-3.4, end, "x"), antenna(3.4, -end, "x")]}
-        {camera(w / 2 - 0.7, outer.h / 2 - spec.bezel.top / 2 - 0.02, 0.55)}
+        {camera(side - 3.28, end - 0.52, 0.7)}
         <mesh position={[0, -end - 0.002, mid]} rotation={[Math.PI / 2, 0, 0]} material={f.hole}>
-          <shapeGeometry args={[roundedShape(0.82, 0.24, 0.12), 12]} />
+          <shapeGeometry args={[roundedShape(0.89, 0.32, 0.12), 12]} />
         </mesh>
       </>
     );
@@ -442,10 +484,10 @@ const Details: React.FC<{ device: DeviceId; f: ReturnType<typeof useFinishes>; t
   const topButton = (x: number, length: number) => (
     <group key={`t${x}`}>
       <mesh position={[x, end - 0.015, mid]} material={f.hole}>
-        <boxGeometry args={[length + 0.06, 0.05, 0.26]} />
+        <boxGeometry args={[length + 0.06, 0.05, 0.22]} />
       </mesh>
-      <RoundedBox args={[length, 0.11, 0.2]} radius={0.045} smoothness={4} position={[x, end + 0.02, mid]} castShadow>
-        <meshPhysicalMaterial color="#323337" metalness={1} roughness={0.17} anisotropy={0.5} envMapIntensity={0.55} />
+      <RoundedBox args={[length, 0.1, 0.18]} radius={0.04} smoothness={4} position={[x, end + 0.02, mid]} castShadow>
+        <meshPhysicalMaterial color="#3a3c40" metalness={1} roughness={0.17} anisotropy={0.5} envMapIntensity={0.55} />
       </RoundedBox>
     </group>
   );
@@ -457,11 +499,11 @@ const Details: React.FC<{ device: DeviceId; f: ReturnType<typeof useFinishes>; t
     ));
   return (
     <>
-      {topButton(-side + 3.0, 1.5)}
-      {topButton(side - 3.4, 2.4)}
-      {[antenna(-side, 3, "y"), antenna(side, -3, "y"), antenna(-6, end, "x")]}
-      {camera(0, outer.h / 2 - spec.bezel.top / 2, 0.75)}
-      {[speaker(-side - 0.002, 4.8), speaker(-side - 0.002, -4.8), speaker(side + 0.002, 4.8), speaker(side + 0.002, -4.8)]}
+      {topButton(-side + 3.4, 1.5)}
+      {topButton(side - 3.8, 2.4)}
+      {[antenna(-side, 4, "y"), antenna(side, -4, "y"), antenna(-8, end, "x")]}
+      {camera(0, end - spec.bezel.top / 2, 0.8)}
+      {[speaker(-side - 0.002, 6.2), speaker(-side - 0.002, -6.2), speaker(side + 0.002, 6.2), speaker(side + 0.002, -6.2)]}
     </>
   );
 };

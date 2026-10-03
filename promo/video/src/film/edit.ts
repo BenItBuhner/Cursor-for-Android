@@ -118,8 +118,8 @@ export function liftAt(f: number): number {
 }
 
 /**
- * A line of display type: on at [from], off at [to], both hard cuts on beats; [grade], if given, the frame its one
- * grade pulse peaks on. [at] is where it sits in each framing, as fractions of the frame: its left edge (or centre, if
+ * A line of display type: on at [from], off at [to], both on beats, with a six-frame ease in and out so the line
+ * never pops. [at] is where it sits in each framing, as fractions of the frame: its left edge (or centre, if
  * [align] is centre) and its top.
  */
 export type Words = {
@@ -130,21 +130,19 @@ export type Words = {
   at: { wide: [number, number]; tall: [number, number] };
   align?: "left" | "center";
   ink: "day" | "night";
-  grade?: number;
 };
 
 /** Every verb at one size and one margin, the title's two lines at another, the devices' names at a third. */
 const VERB = { size: { wide: 140, tall: 136 }, at: { wide: [0.067, 0.11], tall: [0.09, 0.07] } } as const;
-const TITLE = { wide: 124, tall: 124 };
+const TITLE = { wide: 120, tall: 116 };
 const NAME = { size: { wide: 112, tall: 112 }, at: VERB.at };
-const verb = (text: string, from: number, to: number, ink: "day" | "night", grade?: number): Words => ({
+const verb = (text: string, from: number, to: number, ink: "day" | "night"): Words => ({
   text: { wide: text, tall: text },
   from,
   to,
   size: { ...VERB.size },
   at: { wide: [...VERB.at.wide], tall: [...VERB.at.tall] },
   ink,
-  grade,
 });
 const name = (text: string, shot: { from: number; to: number }): Words => ({
   text: { wide: text, tall: text },
@@ -155,14 +153,26 @@ const name = (text: string, shot: { from: number; to: number }): Words => ({
   ink: "day",
 });
 
+/** Six frames to arrive, six to leave; fully opaque on the beat. */
+export const TYPE_EASE = 6;
+
+/** How fully [words] is drawn at frame [f]: 0 off, 1 held. Arrives with an ease-out so it is on the beat, leaves smoothly. */
+export function typeAt(f: number, words: Words): number {
+  const tin = Math.max(0, Math.min(1, (f - words.from + 1) / TYPE_EASE));
+  const tout = Math.max(0, Math.min(1, (words.to - f) / TYPE_EASE));
+  const arrive = 1 - (1 - tin) ** 3;
+  const leave = tout * tout * (3 - 2 * tout);
+  return arrive * leave;
+}
+
 export const WORDS: Words[] = [
-  { text: { wide: "Cursor", tall: "Cursor" }, from: beat(6), to: beat(8), size: TITLE, at: { wide: [0.5, 0.31], tall: [0.5, 0.4] }, align: "center", ink: "day" },
-  { text: { wide: "Now on Android.", tall: "Now on\nAndroid." }, from: beat(8), to: beat(10), size: TITLE, at: { wide: [0.5, 0.31], tall: [0.5, 0.36] }, align: "center", ink: "day" },
+  { text: { wide: "Cursor", tall: "Cursor" }, from: beat(6), to: beat(8), size: TITLE, at: { wide: [0.5, 0.4], tall: [0.5, 0.46] }, align: "center", ink: "day" },
+  { text: { wide: "Now on Android.", tall: "Now on\nAndroid." }, from: beat(8), to: beat(10), size: TITLE, at: { wide: [0.5, 0.4], tall: [0.5, 0.44] }, align: "center", ink: "day" },
   verb("Say it.", beat(11), beat(15), "day"),
   verb("Watch it\ncode.", beat(20), beat(24), "day"),
   verb("Steer it.", beat(32), beat(36), "day"),
   verb("Follow it\nlive.", beat(40), beat(44), "night"),
-  verb("Ship it.", beat(47), beat(51), "day", beat(48)),
+  verb("Ship it.", beat(47), beat(51), "day"),
   name("Phone.", SHOT.phone),
   name("Foldable.", SHOT.foldable),
   name("Tablet.", SHOT.tablet),

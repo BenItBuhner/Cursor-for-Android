@@ -15,17 +15,17 @@ export type V3 = [number, number, number];
 /** The phone where it's put down in the morning; it never moves until the lineup. */
 export const P0: Pose = { device: "phone", x: 0, y: 0, turn: 0.36 };
 
-/** The lineup: the three on one heading, stepped back in depth. */
+/** The lineup: the three on one heading, stepped back in depth, spaced for the Fold8 Ultra and Tab S10 Ultra. */
 export const LINEUP: Record<DeviceId, Pose> = {
-  phone: { device: "phone", x: -16, y: -11, turn: 0.32 },
-  foldable: { device: "foldable", x: -6.5, y: 1.5, turn: 0.32 },
-  tablet: { device: "tablet", x: 9, y: 15, turn: 0.32 },
+  phone: { device: "phone", x: -20, y: -14, turn: 0.32 },
+  foldable: { device: "foldable", x: -6, y: 1, turn: 0.32 },
+  tablet: { device: "tablet", x: 16, y: 18, turn: 0.32 },
 };
 
 /** The middle of each device's diff card at the locked take frame, as fractions across its screen. */
 const DIFF: Record<DeviceId, [number, number]> = { phone: [0.5, 0.41], foldable: [0.25, 0.45], tablet: [0.41, 0.45] };
 /** The diff card's width in centimetres on each device's glass over the phone's, so the cuts can hold it at one size. */
-const CARD: Record<DeviceId, number> = { phone: 1, foldable: 1.04, tablet: 1.47 };
+const CARD: Record<DeviceId, number> = { phone: 1, foldable: 0.925, tablet: 1.71 };
 
 const G = (u: number, v: number, above = 0) => onGlass(P0, u, v, above);
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -65,15 +65,15 @@ const notice = G(0.5, 0.34);
 const LIFTED = 0.45;
 
 const wake: Key[] = [
-  { f: SHOT.wake.from, at: toWorld(P0, [2.6, 0.8, 0.5]), az: rel(P0, 24), el: 15, dist: 21, fov: 24, frame: [0.5, 0.55], focus: toWorld(P0, [3.56, 0.95, 0.42]), depth: 2.6, bokeh: 7 },
-  { f: SHOT.wake.to - 1, at: toWorld(P0, [2.6, 1.2, 0.5]), az: rel(P0, 19), el: 16, dist: 17, fov: 24, frame: [0.5, 0.55], focus: toWorld(P0, [3.56, 1.3, 0.42]), depth: 2.4, bokeh: 7, ease: "linear" },
+  { f: SHOT.wake.from, at: toWorld(P0, [2.6, 0.8, 0.5]), az: rel(P0, 24), el: 15, dist: 21, fov: 24, frame: [0.5, 0.55], focus: toWorld(P0, [3.56, 0.95, 0.42]), depth: 8, bokeh: 2.2 },
+  { f: SHOT.wake.to - 1, at: toWorld(P0, [2.6, 1.2, 0.5]), az: rel(P0, 19), el: 16, dist: 17, fov: 24, frame: [0.5, 0.55], focus: toWorld(P0, [3.56, 1.3, 0.42]), depth: 7.5, bokeh: 2.2, ease: "linear" },
 ];
 
-const titleWide: Cam = { at: centre, az: rel(P0, -14), el: 58, dist: 75, fov: 22, frame: [0.5, 0.745], depth: 9, bokeh: 5 };
-const sayStart: Cam = { at: mic, az: rel(P0, -26), el: 36, dist: 21, fov: 24, frame: [0.68, 0.56], focus: prompt, depth: 4.4, bokeh: 6 };
+const titleWide: Cam = { at: centre, az: rel(P0, -14), el: 58, dist: 82, fov: 22, frame: [0.5, 0.78], depth: 22, bokeh: 1.6 };
+const sayStart: Cam = { at: mic, az: rel(P0, -26), el: 36, dist: 21, fov: 24, frame: [0.68, 0.56], focus: prompt, depth: 12, bokeh: 2 };
 const say: Key[] = [
   { f: SHOT.title.from, ...titleWide },
-  { f: SHOT.title.to - 1, ...titleWide, dist: 71.5, ease: "linear" },
+  { f: SHOT.title.to - 1, ...titleWide, dist: 78, ease: "linear" },
   { f: SHOT.say.from, ...sayStart },
   { f: SHOT.say.from + 36, ...sayStart },
   { f: SHOT.say.to - 1, ...sayStart, az: rel(P0, -8), el: 31, dist: 16.5, frame: [0.66, 0.56] },
@@ -81,16 +81,16 @@ const say: Key[] = [
 
 /** One unbroken slow move: down the glass with the card as it lifts, then back off it, racking to the composer. */
 const code: Key[] = [
-  { f: SHOT.code.from, at: card(0.3), az: rel(P0, -18), el: 48, dist: 19, fov: 26, frame: [0.62, 0.5], focus: G(0.42, 0.3), depth: 5, bokeh: 6 },
-  { f: 700, at: card(0.46, LIFTED), az: rel(P0, -12), el: 48, dist: 19, fov: 26, frame: [0.62, 0.5], focus: G(0.42, 0.46, LIFTED), depth: 5, bokeh: 6, ease: "linear" },
-  { f: SHOT.code.to - 1, at: G(0.5, 0.62), az: rel(P0, -6), el: 45, dist: 21.5, fov: 26, frame: [0.62, 0.52], focus: composer, depth: 3.5, bokeh: 7, ease: "linear" },
+  { f: SHOT.code.from, at: card(0.3), az: rel(P0, -18), el: 48, dist: 19, fov: 26, frame: [0.62, 0.5], focus: G(0.42, 0.3), depth: 14, bokeh: 2 },
+  { f: 700, at: card(0.46, LIFTED), az: rel(P0, -12), el: 48, dist: 19, fov: 26, frame: [0.62, 0.5], focus: G(0.42, 0.46, LIFTED), depth: 14, bokeh: 2, ease: "linear" },
+  { f: SHOT.code.to - 1, at: G(0.5, 0.62), az: rel(P0, -6), el: 45, dist: 21.5, fov: 26, frame: [0.62, 0.52], focus: composer, depth: 10, bokeh: 2.2, ease: "linear" },
 ];
 
-const above: Cam = { at: centre, az: rel(P0, 0), el: 89.9, dist: 47, fov: 26, frame: [0.6, 0.5], focus: centre, depth: 12, bokeh: 3 };
+const above: Cam = { at: centre, az: rel(P0, 0), el: 89.9, dist: 47, fov: 26, frame: [0.6, 0.5], focus: centre, depth: 32, bokeh: 1 };
 const lastLive: Cam = { ...above, at: notice, dist: 37, frame: [0.62, 0.36] };
 const steerLive: Key[] = [
-  { f: SHOT.steer.from, at: G(0.56, 0.86), az: rel(P0, 28), el: 22, dist: 11.5, fov: 24, frame: [0.62, 0.6], focus: composer, depth: 3.2, bokeh: 6 },
-  { f: SHOT.steer.to - 1, at: G(0.56, 0.82), az: rel(P0, 16), el: 24, dist: 10.5, fov: 24, frame: [0.62, 0.6], focus: G(0.42, 0.8), depth: 3.2, bokeh: 6, ease: "linear" },
+  { f: SHOT.steer.from, at: G(0.56, 0.86), az: rel(P0, 28), el: 22, dist: 11.5, fov: 24, frame: [0.62, 0.6], focus: composer, depth: 9, bokeh: 2 },
+  { f: SHOT.steer.to - 1, at: G(0.56, 0.82), az: rel(P0, 16), el: 24, dist: 10.5, fov: 24, frame: [0.62, 0.6], focus: G(0.42, 0.8), depth: 9, bokeh: 2, ease: "linear" },
   { f: SHOT.live.from, ...above },
   { f: NIGHT, ...above, dist: 45, ease: "linear" },
   { f: SHOT.live.to - 1, ...lastLive, ease: "linear" },
@@ -100,8 +100,8 @@ const steerLive: Key[] = [
 const shipStart: Cam = lastLive;
 const ship: Key[] = [
   { f: SHOT.ship.from, ...shipStart },
-  { f: 1500, at: G(0.62, 0.735), az: rel(P0, -6), el: 74, dist: 29, fov: 26, frame: [0.62, 0.56], focus: G(0.56, 0.735), depth: 6, bokeh: 4 },
-  { f: SHOT.ship.to - 1, at: G(0.6, 0.72), az: rel(P0, -14), el: 64, dist: 25, fov: 26, frame: [0.62, 0.56], focus: G(0.56, 0.735), depth: 5, bokeh: 4.5, ease: "linear" },
+  { f: 1500, at: G(0.62, 0.735), az: rel(P0, -6), el: 74, dist: 29, fov: 26, frame: [0.62, 0.56], focus: G(0.56, 0.735), depth: 16, bokeh: 1.4 },
+  { f: SHOT.ship.to - 1, at: G(0.6, 0.72), az: rel(P0, -14), el: 64, dist: 25, fov: 26, frame: [0.62, 0.56], focus: G(0.56, 0.735), depth: 14, bokeh: 1.5, ease: "linear" },
 ];
 
 /** One of the three hero cuts: the diff card held at one place and size in the frame as the device around it grows. */
@@ -110,7 +110,7 @@ function hero(device: DeviceId, from: number, to: number, t: boolean): Key[] {
   const [u, v] = DIFF[device];
   const at = onGlass(pose, u, v);
   const k = CARD[device];
-  const base: Cam = { at, az: rel(pose, -30), el: 30, dist: (t ? 25 : 22) * k, fov: t ? 34 : 24, frame: t ? [0.5, 0.6] : [0.6, 0.55], depth: 4 * k, bokeh: 6 };
+  const base: Cam = { at, az: rel(pose, -30), el: 30, dist: (t ? 25 : 22) * k, fov: t ? 34 : 24, frame: t ? [0.5, 0.6] : [0.6, 0.55], depth: 12 * k, bokeh: 2 };
   return [
     { f: from, ...base },
     { f: to - 1, ...base, az: rel(pose, -20), el: 33, dist: (t ? 23.3 : 20.5) * k, ease: "linear" },
@@ -118,20 +118,20 @@ function hero(device: DeviceId, from: number, to: number, t: boolean): Key[] {
 }
 
 const tableau: Cam = {
-  at: [-5, 1.5, 0],
+  at: [-4, 4, 0],
   az: -116,
-  el: 19,
-  dist: 58,
+  el: 18,
+  dist: 78,
   fov: 21,
   frame: [0.5, 0.6],
   focus: onGlass(LINEUP.foldable, 0.5, 0.5),
-  depth: 24,
-  bokeh: 4,
+  depth: 55,
+  bokeh: 1.3,
 };
 
 /** Where the end card lies: an empty stretch of the stone, well away from the lineup, in its own band of sun. */
 export const END_AT: V3 = [-70, -64, 0];
-const end: Cam = { at: END_AT, az: -90, el: 89.9, dist: 70, fov: 30, frame: [0.5, 0.5], depth: 30, bokeh: 2 };
+const end: Cam = { at: END_AT, az: -90, el: 89.9, dist: 70, fov: 30, frame: [0.5, 0.5], depth: 80, bokeh: 0.7 };
 
 export const RUNS: Run[] = [
   { from: SHOT.wake.from, to: SHOT.wake.to, wide: wake, tall: wake.map((k) => tall(k, { az: k.az - 16, el: k.el + 8, fov: 32, frame: [0.5, 0.58] })) },
@@ -157,8 +157,8 @@ export const RUNS: Run[] = [
     to: SHOT.tableau.to,
     wide: [{ f: SHOT.tableau.from, ...tableau }, { f: SHOT.tableau.to - 1, ...tableau, az: -113, dist: 55, ease: "linear" }],
     tall: [
-      { f: SHOT.tableau.from, ...tableau, fov: 34, dist: 84, el: 18, frame: [0.5, 0.62] },
-      { f: SHOT.tableau.to - 1, ...tableau, fov: 34, dist: 79, el: 18, az: -113, frame: [0.5, 0.62], ease: "linear" },
+      { f: SHOT.tableau.from, ...tableau, fov: 34, dist: 108, el: 17, frame: [0.5, 0.62] },
+      { f: SHOT.tableau.to - 1, ...tableau, fov: 34, dist: 102, el: 17, az: -113, frame: [0.5, 0.62], ease: "linear" },
     ],
   },
   { from: SHOT.end.from, to: SHOT.end.to, wide: [{ f: SHOT.end.from, ...end }, { f: SHOT.end.to - 1, ...end, dist: 66, ease: "linear" }], tall: [] },
@@ -216,8 +216,7 @@ export type Glazing = { through: V3; distance: number; panes: Panes; roll: numbe
 const WIDE_PANES: Panes = { w: 26, h: 54, mullion: 4.5 };
 
 /**
- * The set at frame [f]: the time of day, the shadow's extent, the window, which things are on the table, and how much
- * coffee is left.
+ * The set at frame [f]: the time of day, the shadow's extent, the window, and which devices are on the table.
  */
 export type Set = {
   time: TimeOfDay;
@@ -227,34 +226,30 @@ export type Set = {
   layout: "story" | "lineup" | "end";
   /** In the lineup, the devices on the table: each hero cut has only its own, the tableau all three. */
   devices: DeviceId[];
-  cup: { x: number; y: number; turn: number; fill: number } | null;
-  keys: boolean;
   lamp: number;
   /** Whether the motes in the beam are worth drawing: only in close, where a lens would pick them out. */
   dust: boolean;
 };
 
 export function setAt(f: number): Set {
-  const story = (time: TimeOfDay, span: number, glazing: Glazing, fill: number, cup = { x: 12.2, y: 7.5, turn: 2.2 }): Set => ({
+  const story = (time: TimeOfDay, span: number, glazing: Glazing): Set => ({
     time,
     center: [0, 0],
     span,
     glazing,
     layout: "story",
     devices: [],
-    cup: { ...cup, fill },
-    keys: f >= NIGHT && f < SHOT.live.to,
     lamp: time === "night" ? Math.max(0, Math.min(1, (f - LAMP) / 6)) : 0,
-    dust: time !== "night" && !(f >= SHOT.title.from && f < SHOT.say.from) && !(f >= SHOT.live.from),
+    dust: time !== "night" && !(f >= SHOT.live.from && f < SHOT.live.to),
   });
   const morning: Glazing = { through: [1, 1, 0], distance: 70, panes: WIDE_PANES, roll: 0 };
-  if (f < SHOT.title.from) return story("morning", 40, morning, 0.92);
-  if (f < SHOT.say.from + 20) return story("morning", 110, morning, 0.92);
-  if (f < SHOT.code.from) return story("morning", 60, morning, 0.92);
-  if (f < SHOT.steer.from) return story("morning", 60, morning, 0.7);
-  if (f < NIGHT) return story("morning", 60, morning, 0.45);
-  if (f < SHOT.live.to) return story("night", 60, { through: [1, -1, 0], distance: 60, panes: { w: 10, h: 60, mullion: 2.6 }, roll: 0, plant: false }, 0);
-  if (f < SHOT.ship.to) return story("next", 60, { through: [0.5, 2, 0], distance: 70, panes: WIDE_PANES, roll: 0 }, 1, { x: 12.2, y: 7.5, turn: 1.1 });
+  if (f < SHOT.title.from) return story("morning", 40, morning);
+  if (f < SHOT.say.from + 20) return story("morning", 110, morning);
+  if (f < SHOT.code.from) return story("morning", 60, morning);
+  if (f < SHOT.steer.from) return story("morning", 60, morning);
+  if (f < NIGHT) return story("morning", 60, morning);
+  if (f < SHOT.live.to) return story("night", 60, { through: [1, -1, 0], distance: 60, panes: { w: 10, h: 60, mullion: 2.6 }, roll: 0, plant: false });
+  if (f < SHOT.ship.to) return story("next", 60, { through: [0.5, 2, 0], distance: 70, panes: WIDE_PANES, roll: 0 });
   const lineup = (time: TimeOfDay, through: V3, span: number, devices: DeviceId[], panes = WIDE_PANES): Set => ({
     time,
     center: [through[0], through[1]],
@@ -262,16 +257,14 @@ export function setAt(f: number): Set {
     glazing: { through, distance: 80, panes, roll: 0 },
     layout: "lineup",
     devices,
-    cup: { x: -38, y: 20, turn: 1.4, fill: 0.8 },
-    keys: false,
     lamp: 0,
     dust: time === "next",
   });
   const at = (pose: Pose): V3 => [pose.x, pose.y, 0];
   if (f < SHOT.foldable.from) return lineup("next", at(LINEUP.phone), 50, ["phone"]);
   if (f < SHOT.tablet.from) return lineup("next", at(LINEUP.foldable), 60, ["foldable"]);
-  if (f < SHOT.tableau.from) return lineup("next", at(LINEUP.tablet), 70, ["tablet"]);
-  if (f < SHOT.end.from) return lineup("next", [-3, 3, 0], 160, ["phone", "foldable", "tablet"], { w: 44, h: 80, mullion: 5 });
+  if (f < SHOT.tableau.from) return lineup("next", at(LINEUP.tablet), 90, ["tablet"]);
+  if (f < SHOT.end.from) return lineup("next", [-3, 5, 0], 190, ["phone", "foldable", "tablet"], { w: 44, h: 80, mullion: 5 });
   return {
     time: "noon",
     center: [END_AT[0], END_AT[1]],
@@ -280,8 +273,6 @@ export function setAt(f: number): Set {
     glazing: { through: [END_AT[0] - 16.6 + ((f - SHOT.end.from) / (SHOT.end.to - SHOT.end.from)) * 3, END_AT[1] + 42, 0], distance: 90, panes: { w: 34, h: 70, mullion: 5 }, roll: 0 },
     layout: "end",
     devices: [],
-    cup: null,
-    keys: false,
     lamp: 0,
     dust: false,
   };

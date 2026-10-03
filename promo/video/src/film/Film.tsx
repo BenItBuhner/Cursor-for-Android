@@ -10,9 +10,8 @@ import { AppIcon } from "../components/AppIcon";
 import { DISCLAIMER, REPO } from "../components/EndCard";
 import { ROLE, typeStyle } from "../concept/type";
 import type { DeviceId } from "../takes";
-import { LOCKED, lockedAt, liftAt, phoneTake, screenOn, SHOT, WORDS, type Words } from "./edit";
+import { LOCKED, lockedAt, liftAt, phoneTake, screenOn, SHOT, typeAt, WORDS, type Words } from "./edit";
 import { Hardware, outerSize, type Lift } from "./Hardware";
-import { Cup, Keys, Notebook } from "./Props";
 import { reelSrc, type ReelId } from "./reels";
 import { Backdrop, Dust, Lamp, LIGHT, ScreenSpill, SetLight, Stone, Window } from "./Room";
 import { cameraAt, LINEUP, P0, setAt, type Cam, type Framing } from "./shots";
@@ -112,8 +111,8 @@ const Lens: React.FC<{ cam: Cam }> = ({ cam }) => {
     <EffectComposer multisampling={4} frameBufferType={THREE.HalfFloatType}>
       <DepthOfField ref={ref} worldFocusDistance={20} worldFocusRange={5} bokehScale={5} resolutionScale={1} />
       <ToneMapping mode={ToneMappingMode.NEUTRAL} />
-      <Vignette offset={0.32} darkness={0.42} />
-      <Noise opacity={0.035} premultiply />
+      <Vignette offset={0.38} darkness={0.28} />
+      <Noise opacity={0.028} premultiply />
     </EffectComposer>
   );
 };
@@ -167,8 +166,6 @@ const World: React.FC<{ f: number; framing: Framing; probe?: Partial<Cam> }> = (
       {set.layout === "story" ? (
         <>
           <Hardware pose={P0} screen={phone} glow={glow} lift={lift} sun={light.sun} />
-          <Notebook x={-22} y={-15} turn={0.3} />
-          {set.keys ? <Keys x={-6.7} y={-7.9} turn={0.9} /> : null}
           {set.time === "night" ? (
             <ScreenSpill
               x={P0.x}
@@ -187,35 +184,18 @@ const World: React.FC<{ f: number; framing: Framing; probe?: Partial<Cam> }> = (
           {set.devices.includes("phone") ? <Hardware pose={LINEUP.phone} screen={phone} glow={1} /> : null}
           {set.devices.includes("foldable") ? <Locked device="foldable" smudgeSeed={5} /> : null}
           {set.devices.includes("tablet") ? <Locked device="tablet" smudgeSeed={7} /> : null}
-          <Notebook x={34} y={-14} turn={0.5} pencil={false} />
         </>
       ) : null}
-      {set.cup ? <Cup {...set.cup} /> : null}
       <Lamp on={set.lamp} position={[-60, 30, 50]} target={[-14, 6, 0]} />
       <Lens cam={cam} />
     </>
   );
 };
 
-/** The grade pulse on a word's tap: up over four frames, down over six, peaking on [at]. */
-function gradeAt(f: number, at: number | undefined): number {
-  if (at === undefined) return 0;
-  const keys: [number, number][] = [
-    [-4, 0],
-    [-2, 55],
-    [0, 100],
-    [2, 70],
-    [4, 30],
-    [6, 0],
-  ];
-  const t = f - at;
-  if (t <= keys[0]![0] || t >= keys[keys.length - 1]![0]) return 0;
-  for (let i = 1; i < keys.length; i++) {
-    const [t1, g1] = keys[i]!;
-    const [t0, g0] = keys[i - 1]!;
-    if (t <= t1) return g0 + ((g1 - g0) * (t - t0)) / (t1 - t0);
-  }
-  return 0;
+/** How far a word has settled onto the frame: 0 at its first frame, 1 once the ease has run. */
+function settle(p: number): number {
+  const u = Math.max(0, Math.min(1, p));
+  return u * u * (3 - 2 * u);
 }
 
 const Line: React.FC<{
@@ -228,6 +208,8 @@ const Line: React.FC<{
   const size = words.size[framing];
   const [x, y] = words.at[framing];
   const centred = words.align === "center";
+  const shown = typeAt(f, words);
+  if (shown <= 0.001) return null;
   return (
     <div
       style={{
@@ -238,10 +220,38 @@ const Line: React.FC<{
         color: INK[words.ink],
         textAlign: centred ? "center" : "left",
         whiteSpace: "pre",
-        ...typeStyle(ROLE.display, size, gradeAt(f, words.grade)),
+        opacity: shown,
+        transform: `translate3d(0, ${(1 - shown) * 10}px, 0)`,
+        ...typeStyle(ROLE.display, size),
       }}
     >
       {words.text[framing]}
+    </div>
+  );
+};
+
+/** The opening lockup over the title: the cube, then the name, held as a splash rather than type alone. */
+const TitleSplash: React.FC<{ f: number; framing: Framing; height: number }> = ({ f, framing, height }) => {
+  if (f < SHOT.title.from || f >= SHOT.title.to) return null;
+  const wide = framing === "wide";
+  const icon = wide ? 132 : 148;
+  const shown = settle((f - SHOT.title.from + 1) / 10) * settle((SHOT.title.to - f) / 8);
+  const top = height * (wide ? 0.16 : 0.22);
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top,
+        display: "flex",
+        justifyContent: "center",
+        opacity: shown,
+        transform: `translate3d(0, ${(1 - shown) * 12}px, 0)`,
+        filter: `drop-shadow(0 ${icon * 0.06}px ${icon * 0.18}px rgba(40,28,14,0.28))`,
+      }}
+    >
+      <AppIcon size={icon} />
     </div>
   );
 };
@@ -255,11 +265,14 @@ const EndCard: React.FC<{
 }> = ({ f, framing, width, height }) => {
   if (f < SHOT.end.from) return null;
   const wide = framing === "wide";
-  const icon = wide ? 148 : 168;
-  const title = wide ? 88 : 84;
-  const url = wide ? 34 : 36;
-  const small = wide ? 22 : 24;
-  const soft = "rgba(25,22,18,0.74)";
+  const icon = wide ? 156 : 176;
+  const title = wide ? 84 : 80;
+  const url = wide ? 32 : 34;
+  const small = wide ? 20 : 22;
+  const soft = "rgba(25,22,18,0.72)";
+  const lockup = settle((f - SHOT.end.from + 1) / 14);
+  const repo = settle((f - (SHOT.end.from + 30) + 1) / 10);
+  const note = settle((f - (SHOT.end.from + 60) + 1) / 10);
   return (
     <AbsoluteFill>
       <div
@@ -267,22 +280,20 @@ const EndCard: React.FC<{
           position: "absolute",
           left: 0,
           right: 0,
-          top: height * (wide ? 0.27 : 0.33),
+          top: height * (wide ? 0.24 : 0.3),
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
+          opacity: lockup,
+          transform: `translate3d(0, ${(1 - lockup) * 16}px, 0)`,
         }}
       >
-        <div
-          style={{
-            filter: `drop-shadow(0 ${icon * 0.05}px ${icon * 0.09}px rgba(40,28,14,0.35))`,
-          }}
-        >
+        <div style={{ filter: `drop-shadow(0 ${icon * 0.05}px ${icon * 0.12}px rgba(40,28,14,0.32))` }}>
           <AppIcon size={icon} />
         </div>
         <div
           style={{
-            marginTop: icon * 0.3,
+            marginTop: icon * 0.28,
             color: INK.day,
             whiteSpace: "nowrap",
             ...typeStyle(ROLE.display, title),
@@ -292,10 +303,19 @@ const EndCard: React.FC<{
         </div>
         <div
           style={{
-            marginTop: title * 0.32,
+            width: wide ? 72 : 64,
+            height: 1,
+            marginTop: title * 0.42,
+            background: "rgba(25,22,18,0.22)",
+            opacity: repo,
+          }}
+        />
+        <div
+          style={{
+            marginTop: title * 0.28,
             color: soft,
             whiteSpace: "nowrap",
-            visibility: f >= SHOT.end.from + 30 ? "visible" : "hidden",
+            opacity: repo,
             ...typeStyle(ROLE.caption, url),
           }}
         >
@@ -310,7 +330,7 @@ const EndCard: React.FC<{
           bottom: height * (wide ? 0.07 : 0.06),
           textAlign: "center",
           color: soft,
-          visibility: f >= SHOT.end.from + 60 ? "visible" : "hidden",
+          opacity: note,
           ...typeStyle(ROLE.caption, small),
         }}
       >
@@ -340,11 +360,19 @@ export const Film: React.FC<{ framing: Framing; at?: number; probe?: Partial<Cam
       >
         <World f={f} framing={framing} probe={probe} />
       </ThreeCanvas>
+      <TitleSplash f={f} framing={framing} height={height} />
       {WORDS.filter((w) => f >= w.from && f < w.to).map((w) => (
         <Line key={w.from} words={w} f={f} framing={framing} width={width} height={height} />
       ))}
       <EndCard f={f} framing={framing} width={width} height={height} />
-      {f < SHOT.black.to ? <AbsoluteFill style={{ background: "#000" }} /> : null}
+      {f < SHOT.black.to ? (
+        <AbsoluteFill
+          style={{
+            background: "#000",
+            opacity: f < SHOT.black.to - 12 ? 1 : Math.max(0, (SHOT.black.to - f) / 12),
+          }}
+        />
+      ) : null}
     </AbsoluteFill>
   );
 };
