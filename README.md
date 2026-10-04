@@ -3,21 +3,10 @@
 Unofficial native Android client for [Cursor Cloud Agents](https://cursor.com/agents). Kotlin and Jetpack Compose. Not affiliated with Anysphere, Inc.
 
 <p align="center">
-  <img src="docs/lineup.png" alt="Phone, foldable, and tablet" />
+  <img src="docs/hero.jpg" alt="Phone, foldable, and tablet" width="640" />
 </p>
 
 Sign in with your Cursor account, or paste an API key. Launch agents, follow them live, and ship pull requests from your phone.
-
-<table>
-  <tr>
-    <td width="50%"><img src="docs/composer.png" alt="Composer" /></td>
-    <td width="50%"><img src="docs/organize.png" alt="Organize projects" /></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/code.png" alt="Watch it code" /></td>
-    <td width="50%"><img src="docs/live.png" alt="Live notification" /></td>
-  </tr>
-</table>
 
 ## Install
 
