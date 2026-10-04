@@ -35,3 +35,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 `./gradlew :app:agentCheck` is the short pre-push test. CI, screenshots, and release signing live under `.github/` and `scripts/`.
 
 Uses the public [Cloud Agents API](https://cursor.com/docs/cloud-agent/api/endpoints). Settings has an optional Extended mode for unofficial account endpoints; it is off by default.
+
+## License
+
+[MIT](LICENSE) © 2026 Bennett Buhner
