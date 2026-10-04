@@ -780,10 +780,10 @@ internal class DemoRunStreamer(private val store: DemoStore, private val pace: D
                 emit(tool(id, "read_file", "running", "path" to "app/src/main/scale/Shard$step.kt"))
                 emit(tool(id, "read_file", "completed", "path" to "app/src/main/scale/Shard$step.kt"))
             } else {
-                type(
-                    "Scale step $step for $agentId: checked the current shard, advanced its test pass, and sent a concise status update to the Project coordinator. ".padEnd(200, '.'),
-                    chunk = 200,
-                    delayMs = 0,
+                emit(
+                    RunStreamEvent.Assistant(
+                        "Scale step $step for $agentId: checked the current shard, advanced its test pass, and sent a concise status update to the Project coordinator. ".padEnd(200, '.'),
+                    ),
                 )
             }
             delay(1_000)
