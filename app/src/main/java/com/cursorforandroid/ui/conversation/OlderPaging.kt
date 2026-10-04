@@ -4,6 +4,7 @@ import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.IntState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -203,7 +204,8 @@ internal class OlderPaging {
 /**
  * Pages older turns into the transcript [list] as [OlderPaging] says, through [loadOlder], while [canPage] (the chat
  * has older turns, rows are shown, and no page is on its way). [rows] are the transcript's rows as drawn, oldest first.
- * [areaHeight] is the chat area in px: a wrap-content list is as tall as its rows, and that is not the empty screen.
+ * [areaHeight] is the chat area in px, read only from the paging snapshot: a wrap-content list is as tall as its
+ * rows, and that is not the empty screen. Passing the state itself keeps a layout write from recomposing the list.
  *
  * Each page landed is asked about afresh, by the oldest row drawn: the page's loading is read off a conflated
  * presentation, which can go from one page to the next without ever showing it loading. Keyed on [canPage] alone, a
@@ -216,13 +218,12 @@ internal fun OlderPagingEffect(
     list: LazyListState,
     rows: List<TranscriptRow>,
     canPage: Boolean,
-    areaHeight: Int = 0,
+    areaHeight: IntState? = null,
     loadOlder: () -> Unit,
 ) {
     val paging = remember(key) { OlderPaging() }
     val load by rememberUpdatedState(loadOlder)
     val latestRows by rememberUpdatedState(rows)
-    val latestArea by rememberUpdatedState(areaHeight)
     val collapsedCapPx = with(LocalDensity.current) { (DisclosureRowHeight + TranscriptItemSpacing).roundToPx() }
     val replyShown = remember(rows) { OlderPaging.replyShown(rows) }
     val oldest = rows.firstOrNull()?.key
@@ -232,7 +233,14 @@ internal fun OlderPagingEffect(
     LaunchedEffect(paging, list, canPage, replyShown, oldest, collapsedCapPx) {
         if (!canPage) return@LaunchedEffect
         snapshotFlow {
-            paging.wants(list.layoutInfo, list.isScrollInProgress, replyShown, latestRows, collapsedCapPx, latestArea)
+            paging.wants(
+                list.layoutInfo,
+                list.isScrollInProgress,
+                replyShown,
+                latestRows,
+                collapsedCapPx,
+                areaHeight?.intValue ?: 0,
+            )
         }
             .distinctUntilChanged()
             .collect { wanted ->

@@ -547,8 +547,8 @@ fun ConversationScreen(
         val pastTwoItems by remember(presentedState) { derivedStateOf { presentedState.value.items.size > 2 } }
         val jumpShown = !following && pastTwoItems && !composerExpansion.expanded
 
-        var transcriptAreaPx by remember { mutableIntStateOf(0) }
-        Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { transcriptAreaPx = it.height }) {
+        val transcriptAreaPx = remember { mutableIntStateOf(0) }
+        Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { transcriptAreaPx.intValue = it.height }) {
             Box(Modifier.matchParentSize().readerBackdrop(readerScroll))
             val paneWidth = Modifier.widthIn(max = CursorDimens.composerMaxWidth).fillMaxWidth()
             // The column the rows are laid out in, measured whether or not there are any rows yet.

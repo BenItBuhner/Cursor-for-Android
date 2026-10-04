@@ -23,7 +23,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
@@ -184,7 +183,7 @@ private fun AgentTranscript(graph: AppGraph, agentId: String, agent: Agent?, act
     }
     val listState = rememberLazyListState()
     val hasOlder = conversation.hasOlder && rows.isNotEmpty()
-    var transcriptAreaPx by remember { mutableIntStateOf(0) }
+    val transcriptAreaPx = remember { mutableIntStateOf(0) }
     // Older turns are paged in by what the list draws, as the chat's own screen does (see OlderPaging).
     OlderPagingEffect(
         agentId,
@@ -205,7 +204,7 @@ private fun AgentTranscript(graph: AppGraph, agentId: String, agent: Agent?, act
         return
     }
     CompositionLocalProvider(LocalMarkdownMedia provides media, LocalTranscriptControls provides controls) {
-        Box(Modifier.fillMaxSize().onSizeChanged { transcriptAreaPx = it.height }) {
+        Box(Modifier.fillMaxSize().onSizeChanged { transcriptAreaPx.intValue = it.height }) {
             LazyColumn(
                 state = listState,
                 reverseLayout = true,
