@@ -172,6 +172,7 @@ class SettingsScreenshotTest {
         compose.onNode(hasTestTag(ExtendedModeTags.TOGGLE) and isOff()).assertIsDisplayed()
         compose.onNode(hasTestTag(ThemeSwitchTags.of(ThemeMode.System)) and isSelected()).assertIsDisplayed()
         compose.onNodeWithTag(SettingsTags.OLED_BLACK).assertIsDisplayed()
+        compose.onNodeWithText("Check for updates automatically").assertIsDisplayed()
         compose.onNodeWithText(SettingsCopy.DISCLAIMER).assertIsDisplayed()
         // Tall enough that nothing is left past either edge, so neither fades.
         assertThat(listRange().maxValue()).isEqualTo(0f)
@@ -233,6 +234,7 @@ class SettingsScreenshotTest {
         composeSettings()
         scrollToBottom()
         compose.onNode(hasTestTag(ExtendedModeTags.TOGGLE) and isOff()).assertIsDisplayed()
+        compose.onNodeWithText("Check for updates automatically").assertIsDisplayed()
         assertAlone()
         capture("66_settings_extended_off")
     }
