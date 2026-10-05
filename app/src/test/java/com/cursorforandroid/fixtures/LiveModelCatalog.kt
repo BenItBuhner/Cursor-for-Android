@@ -38,7 +38,28 @@ object LiveModelCatalog {
     }
 
     val items: List<ModelListItemDto> = listOf(
-        ModelListItemDto(id = "auto-smart", displayName = "Auto", description = "Cursor Router picks the model.", aliases = listOf("auto")),
+        ModelListItemDto(
+            id = "auto-smart",
+            displayName = "Auto",
+            description = "Cursor Router picks the model.",
+            aliases = listOf("auto"),
+            parameters = listOf(
+                ModelParameterDefinitionDto(
+                    "optimize_for",
+                    "Optimize for",
+                    listOf(
+                        ModelParameterValueDto("cost", "Cost"),
+                        ModelParameterValueDto("balanced", "Balanced"),
+                        ModelParameterValueDto("intelligence", "Intelligence"),
+                    ),
+                ),
+            ),
+            variants = listOf(
+                ModelVariantDto(params = listOf(ModelParamDto("optimize_for", "cost")), displayName = "Auto"),
+                ModelVariantDto(params = listOf(ModelParamDto("optimize_for", "balanced")), displayName = "Auto", isDefault = true),
+                ModelVariantDto(params = listOf(ModelParamDto("optimize_for", "intelligence")), displayName = "Auto"),
+            ),
+        ),
         grid("claude-opus-5.5", "Claude Opus 5.5", listOf(effort(EFFORTS), FAST), mapOf("effort" to "high", "fast" to "false")),
         grid("claude-opus-5-thinking", "Claude Opus 5", listOf(effort(EFFORTS), FAST), mapOf("effort" to "high", "fast" to "false")),
         grid(
@@ -51,7 +72,7 @@ object LiveModelCatalog {
             listOf(ModelParameterDefinitionDto("thinking", "Thinking", listOf(ModelParameterValueDto("false"), ModelParameterValueDto("true", "Thinking"))), effort(EFFORTS)),
             mapOf("thinking" to "true", "effort" to "high"),
         ),
-        grid("composer-2.5", "Composer 2.5", listOf(FAST), mapOf("fast" to "true"), aliases = listOf("composer-latest", "composer")),
+        grid("composer-2.5", "Composer 2.5", listOf(FAST), mapOf("fast" to "true"), aliases = listOf("composer-latest", "composer", "composer-2")),
         grid("cursor-grok-4.6", "Cursor Grok 4.6", listOf(effort(EFFORTS.dropLast(1)), FAST), mapOf("effort" to "high", "fast" to "true")),
         grid("grok-4.7", "Grok 4.7", listOf(effort(EFFORTS.dropLast(1)), FAST), mapOf("effort" to "medium", "fast" to "false")),
         grid("gemini-3.8-flash", "Gemini 3.8 Flash", listOf(effort(EFFORTS.take(3))), mapOf("effort" to "medium")),

@@ -46,6 +46,7 @@ class CursorApiException(
     val code: String,
     override val message: String,
     val helpUrl: String? = null,
+    val requestId: String? = null,
 ) : IOException(message) {
     val isUnauthorized: Boolean get() = httpCode == 401 || code == "unauthorized" || code == "api_key_not_found"
     val isRateLimited: Boolean get() = httpCode == 429
@@ -68,11 +69,15 @@ fun Throwable.toCursorError(): CursorApiException? {
         http.response()?.errorBody()?.let { it.source().peek().readString(it.contentType()?.charset() ?: Charsets.UTF_8) }
     }.getOrNull()
     val parsed = body?.let { runCatching { CursorJson.decodeFromString(ApiErrorBodyDto.serializer(), it) }.getOrNull() }?.error
+    val headerId = http.response()?.headers()?.let { headers ->
+        headers["x-request-id"] ?: headers["x-cursor-request-id"]
+    }?.trim()?.takeIf { it.isNotEmpty() }
     return CursorApiException(
         httpCode = http.code(),
         code = parsed?.code ?: "http_${http.code()}",
         message = parsed?.message?.ifBlank { null } ?: http.message().ifBlank { "Request failed (${http.code()})" },
         helpUrl = parsed?.helpUrl,
+        requestId = parsed?.requestId?.trim()?.takeIf { it.isNotEmpty() } ?: headerId,
     )
 }
 

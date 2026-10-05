@@ -87,4 +87,23 @@ class LaunchIdempotencyTest {
         assertThat(LaunchIdempotency.agentId(request.copy(ref = null), "n")).isNotEqualTo(LaunchIdempotency.agentId(request.copy(ref = ""), "n"))
         assertThat(LaunchIdempotency.agentId(request.copy(ref = null), "n")).isNotEqualTo(LaunchIdempotency.agentId(request.copy(ref = "null"), "n"))
     }
+
+    @Test
+    fun `envVars, GitHub App clone, and MCP oauth are part of the draft only when set`() {
+        val base = LaunchIdempotency.agentId(request, "n")
+        assertThat(LaunchIdempotency.agentId(request.copy(envVars = emptyMap()), "n")).isEqualTo(base)
+        assertThat(LaunchIdempotency.agentId(request.copy(openAsCursorGithubApp = false), "n")).isEqualTo(base)
+        val withEnv = LaunchIdempotency.agentId(request.copy(envVars = mapOf("FOO" to "bar")), "n")
+        val withApp = LaunchIdempotency.agentId(request.copy(openAsCursorGithubApp = true), "n")
+        assertThat(withEnv).isNotEqualTo(base)
+        assertThat(withApp).isNotEqualTo(base)
+        assertThat(withEnv).isNotEqualTo(withApp)
+        val linear = McpServer(id = "1", name = "linear", url = "https://mcp.linear.app/mcp")
+        val withoutAuth = LaunchIdempotency.agentId(request.copy(mcpServers = listOf(linear)), "n")
+        val withAuth = LaunchIdempotency.agentId(
+            request.copy(mcpServers = listOf(linear.copy(auth = com.cursorforandroid.domain.McpOAuth("cid", "secret", listOf("read"))))),
+            "n",
+        )
+        assertThat(withAuth).isNotEqualTo(withoutAuth)
+    }
 }

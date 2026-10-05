@@ -67,6 +67,7 @@ interface CursorApi {
         @Query("limit") limit: Int = 100,
         @Query("cursor") cursor: String? = null,
         @Query("includeArchived") includeArchived: Boolean = true,
+        @Query("prUrl") prUrl: String? = null,
     ): ListAgentsResponseDto
 
     @GET("v1/agents/{id}")
@@ -85,7 +86,7 @@ interface CursorApi {
     suspend fun delete(@Path("id") id: String): IdResponseDto
 
     @GET("v1/agents/{id}/usage")
-    suspend fun usage(@Path("id") id: String): AgentUsageResponseDto
+    suspend fun usage(@Path("id") id: String, @Query("runId") runId: String? = null): AgentUsageResponseDto
 
     @GET("v1/agents/{id}/artifacts")
     suspend fun artifacts(@Path("id") id: String): ListArtifactsResponseDto

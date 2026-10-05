@@ -3,6 +3,7 @@ package com.cursorforandroid.data.repo
 import com.cursorforandroid.data.api.dto.AgentDto
 import com.cursorforandroid.data.api.dto.AgentSummaryDto
 import com.cursorforandroid.data.api.dto.ApiKeyInfoDto
+import com.cursorforandroid.data.api.dto.McpAuthDto
 import com.cursorforandroid.data.api.dto.McpServerDto
 import com.cursorforandroid.data.api.dto.ModelListItemDto
 import com.cursorforandroid.data.api.dto.RunDto
@@ -278,20 +279,30 @@ fun Agent.withLatestRun(run: RunDto): Agent {
 }
 
 /** The inline `mcpServers[]` entry: only the fields of the server's transport, empty maps and lists omitted. */
-fun McpServer.toDto(): McpServerDto = when (transport) {
-    McpTransport.Http -> McpServerDto(
-        name = name.trim(),
-        type = transport.wire,
-        url = url.trim(),
-        headers = headers.takeIf { it.isNotEmpty() },
-    )
-    McpTransport.Stdio -> McpServerDto(
-        name = name.trim(),
-        type = transport.wire,
-        command = command.trim(),
-        args = args.takeIf { it.isNotEmpty() },
-        env = env.takeIf { it.isNotEmpty() },
-    )
+fun McpServer.toDto(): McpServerDto {
+    val authDto = auth?.takeIf { it.clientId.isNotBlank() }?.let { oauth ->
+        McpAuthDto(
+            CLIENT_ID = oauth.clientId.trim(),
+            CLIENT_SECRET = oauth.clientSecret.trim().takeIf { it.isNotEmpty() },
+            scopes = oauth.scopes.map { it.trim() }.filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() },
+        )
+    }
+    return when (transport) {
+        McpTransport.Http, McpTransport.Sse -> McpServerDto(
+            name = name.trim(),
+            type = transport.wire,
+            url = url.trim(),
+            headers = headers.takeIf { it.isNotEmpty() },
+            auth = authDto,
+        )
+        McpTransport.Stdio -> McpServerDto(
+            name = name.trim(),
+            type = transport.wire,
+            command = command.trim(),
+            args = args.takeIf { it.isNotEmpty() },
+            env = env.takeIf { it.isNotEmpty() },
+        )
+    }
 }
 
 /** Enabled servers as the request field, or null so the field is omitted and the agent keeps its configuration. */

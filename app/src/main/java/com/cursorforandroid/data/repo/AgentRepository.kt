@@ -46,6 +46,7 @@ import com.cursorforandroid.domain.LineageSignal
 import com.cursorforandroid.domain.MachineWorker
 import com.cursorforandroid.domain.McpServer
 import com.cursorforandroid.domain.ModelParam
+import com.cursorforandroid.domain.ModelSelection
 import com.cursorforandroid.domain.ProjectDiagnostics
 import com.cursorforandroid.domain.PromptFile
 import com.cursorforandroid.domain.PromptImage
@@ -216,6 +217,13 @@ data class LaunchRequest(
     val env: DeviceTarget = DeviceTarget.Cloud,
     /** [env]'s worker as the fleet endpoint last listed it, when [env] is a machine (see [MachineWorker]). */
     val worker: MachineWorker? = null,
+    /**
+     * Session-scoped environment variables for the cloud VM (`envVars` on Create An Agent). Cannot be combined
+     * with a client-supplied [agentId] — the wire omits the minted id when this is non-empty.
+     */
+    val envVars: Map<String, String> = emptyMap(),
+    /** `openAsCursorGithubApp`: clone through Cursor's GitHub App rather than the caller's credentials. */
+    val openAsCursorGithubApp: Boolean = false,
 ) {
     /**
      * What the chat is called until the server has named it: the prompt's first line of text, its slash commands
@@ -267,9 +275,10 @@ fun DeviceTarget.toEnvDto(): AgentEnvDto? = when (type) {
 fun LaunchRequest.toCreateAgentDto(): CreateAgentRequestDto {
     val envDto = env.toEnvDto()
     val onWorker = env.type == EnvType.MACHINE || env.type == EnvType.POOL
+    val secrets = envVars.toCloudEnvVars()
     return CreateAgentRequestDto(
         prompt = PromptEncoding.toPromptDto(prompt, images),
-        agentId = agentId,
+        agentId = agentId.takeUnless { secrets != null },
         model = modelRef(modelId, modelParams),
         name = name,
         env = envDto,
@@ -285,6 +294,8 @@ fun LaunchRequest.toCreateAgentDto(): CreateAgentRequestDto {
         },
         mcpServers = mcpServers.toInlineServers(),
         mode = if (planMode) "plan" else null,
+        envVars = secrets,
+        openAsCursorGithubApp = true.takeIf { openAsCursorGithubApp },
     )
 }
 
@@ -338,9 +349,25 @@ class MachineStartRefusedException(cause: ConnectRpcException) : IOException(
  */
 class MachineRepositoryRefusedException(val error: CursorApiException) : IOException("${error.message.trim()}\n${AgentRepository.MACHINE_NEEDS_EXTENDED}", error)
 
-/** The request's `model` field: the id with the variant's parameters, or null so the field is omitted. */
-private fun modelRef(modelId: String?, params: List<ModelParam>): ModelRefDto? = modelId?.let { id ->
-    ModelRefDto(id = id, params = params.takeIf { it.isNotEmpty() }?.map { ModelParamDto(it.id, it.value) })
+/** The request's `model` field: the documented id and params, or null so the field is omitted. */
+private fun modelRef(modelId: String?, params: List<ModelParam>): ModelRefDto? =
+    ModelSelection.wire(modelId, params)?.let { (id, wired) ->
+        ModelRefDto(id = id, params = wired.takeIf { it.isNotEmpty() }?.map { ModelParamDto(it.id, it.value) })
+    }
+
+/**
+ * Session env as Create An Agent / Create A Run send it: at most 50 names, none starting with `CURSOR_`,
+ * names ≤ 255 bytes and values ≤ 4096. Empty after that filter omits the field.
+ */
+internal fun Map<String, String>.toCloudEnvVars(): Map<String, String>? {
+    val cleaned = LinkedHashMap<String, String>()
+    for ((rawName, value) in this) {
+        val name = rawName.trim()
+        if (name.isEmpty() || name.startsWith("CURSOR_") || name.length > 255 || value.length > 4096) continue
+        cleaned[name] = value
+        if (cleaned.size == 50) break
+    }
+    return cleaned.takeIf { it.isNotEmpty() }
 }
 
 /** What a launch created: the list row, and the first run as the server reported it (null when adopting an agent whose run could not be read). */
@@ -2549,6 +2576,7 @@ class AgentRepository(
         modelId: String? = null,
         modelParams: List<ModelParam> = emptyList(),
         modelDisplayName: String? = null,
+        envVars: Map<String, String> = emptyMap(),
     ): Result<RunDto> = runCatching {
         val startedIn = token()
         val api = session.current.api
@@ -2560,6 +2588,7 @@ class AgentRepository(
                     mcpServers = mcpServers.toInlineServers(),
                     model = modelRef(modelId, modelParams),
                     mode = planMode?.let { if (it) "plan" else "agent" },
+                    envVars = envVars.toCloudEnvVars(),
                 ),
             )
         }

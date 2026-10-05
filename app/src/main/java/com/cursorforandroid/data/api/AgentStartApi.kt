@@ -395,7 +395,7 @@ class ConnectAgentStartApi(
                                     if (server.args.isNotEmpty()) put("args", JsonArray(server.args.map(::JsonPrimitive)))
                                     if (server.env.isNotEmpty()) put("env", JsonObject(server.env.mapValues { JsonPrimitive(it.value) }))
                                 }
-                                McpTransport.Http -> buildJsonObject {
+                                McpTransport.Http, McpTransport.Sse -> buildJsonObject {
                                     put("url", server.url)
                                     if (server.headers.isNotEmpty()) put("headers", JsonObject(server.headers.mapValues { JsonPrimitive(it.value) }))
                                 }
