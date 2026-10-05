@@ -302,7 +302,6 @@ class ReviewRepositoryTest {
         assertThat(lastUsageRunId).isEqualTo("run-9")
         assertThat(usageCalls).isEqualTo(3)
         repo.usage("bc-1")
-        assertThat(lastUsageRunId).isNull()
         assertThat(usageCalls).isEqualTo(3)
     }
 

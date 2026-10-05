@@ -311,7 +311,7 @@ private fun McpServersPage(
     CursorMenuSeparator()
     if (servers.isEmpty()) {
         Text(
-            "No MCP servers yet. Add an HTTP, SSE, or stdio server here and every prompt from this app carries it inline.",
+            "No MCP servers yet. Add an HTTP or stdio server here and every prompt from this app carries it inline.",
             style = type.small,
             color = colors.textQuaternary,
             modifier = Modifier.padding(horizontal = CursorDimens.menuTextInset, vertical = 8.dp),
