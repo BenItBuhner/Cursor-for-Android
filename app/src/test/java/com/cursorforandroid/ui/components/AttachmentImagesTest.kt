@@ -86,6 +86,41 @@ class AttachmentImagesTest {
         return jpeg.copyOfRange(0, 2) + app1 + jpeg.copyOfRange(2, jpeg.size)
     }
 
+    @Test
+    fun `a truncated PNG is still refused after the decode retry`() {
+        val truncated = bitmap(400, 300).encode(Bitmap.CompressFormat.PNG).copyOf(40)
+        val broken = assertThrows(UnreadableImageException::class.java) { AttachmentImages.prepare(truncated, "image/png") }
+        assertThat(broken.message).isEqualTo("Couldn't read this PNG image. Re-save it as PNG or JPEG and attach it again.")
+    }
+
+    /**
+     * The walk requires the spec's IEND CRC. A picker copy whose CRC is wrong, or whose earlier chunk length hid IEND
+     * so a Samsung SEFT trailer stayed on, used to fail BitmapFactory and show the "Couldn't read this PNG" refusal.
+     * A harder scan cuts at IEND, rewrites the CRC, and the screenshot goes out as the PNG it is.
+     */
+    @Test
+    fun `a PNG plus trailer whose IEND walk failed is recovered and stays the same PNG`() {
+        val clean = bitmap(720, 1400, noisyFraction = 0.1f).encode(Bitmap.CompressFormat.PNG)
+        val brokenIend = clean.copyOf().also { it[it.lastIndex] = (it.last().toInt() xor 0xFF).toByte() }
+        val samsung = brokenIend + samsungTrailer
+        assertThat(AttachmentImages.trimmed(samsung, FileFormat.PNG)).isNull()
+
+        val prepared = AttachmentImages.prepare(samsung, "image/png")
+
+        assertThat(prepared.mimeType).isEqualTo("image/png")
+        assertThat(prepared.bytes).isEqualTo(clean)
+        assertReceivable(prepared)
+    }
+
+    @Test
+    fun `a screenshot-shaped PNG still goes out byte for byte`() {
+        val original = bitmap(1080, 2340, noisyFraction = 0.15f).encode(Bitmap.CompressFormat.PNG)
+        val prepared = AttachmentImages.prepare(original, "image/png")
+        assertThat(prepared.bytes).isSameInstanceAs(original)
+        assertThat(prepared.mimeType).isEqualTo("image/png")
+        assertReceivable(prepared)
+    }
+
     /** The user's complaint: a full-resolution phone screenshot is a PNG the agent can view as it is, so it goes out as it is. */
     @Test
     fun `a full-resolution phone screenshot goes out byte for byte as the PNG it is`() {

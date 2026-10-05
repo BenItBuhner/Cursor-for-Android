@@ -8,13 +8,16 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.media.ExifInterface
+import android.os.Build
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 import com.cursorforandroid.domain.FileFormat
 import com.cursorforandroid.domain.PromptImage
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -63,22 +66,49 @@ object AttachmentImages {
     fun prepare(bytes: ByteArray, declaredMime: String?, maxBytes: Int = MAX_SEND_BYTES, keepTransparency: Boolean = false): PromptImage {
         val format = FileFormat.sniff(bytes)?.takeIf { it in SENDABLE }
             ?: throw UnreadableImageException("Unsupported image type (${declaredMime?.takeIf { it.isNotBlank() } ?: "unknown"}). Use PNG, JPEG, GIF or WebP.")
-        val whole = trimmed(bytes, format)
-        val source = whole ?: bytes
+        val walked = trimmed(bytes, format)
+        decodePrepared(walked ?: bytes, format, intact = walked != null, maxBytes, keepTransparency)?.let { return it }
+        // Bounds or decode failed: a picker sometimes hands over a PNG whose chunk walk missed IEND (a Samsung SEFT
+        // trailer still on, or a truncated copy), so BitmapFactory refuses. Cut harder at IEND, then try ImageDecoder.
+        if (format == FileFormat.PNG) {
+            val recovered = pngRecover(bytes)
+            recovered?.let { decodePrepared(it, format, intact = true, maxBytes, keepTransparency)?.let { image -> return image } }
+            decodePrepared(recovered ?: walked ?: bytes, format, intact = false, maxBytes, keepTransparency, allowImageDecoder = true)
+                ?.let { return it }
+        }
+        throw unreadable(format)
+    }
+
+    /**
+     * [source] as a prompt image, or null when BitmapFactory cannot read it. [intact] means the bytes already end where
+     * the container says, so they can go out as they are. [allowImageDecoder] is the last retry: some PNGs Skia's
+     * BitmapFactory path will not header, ImageDecoder still will.
+     */
+    private fun decodePrepared(
+        source: ByteArray,
+        format: FileFormat,
+        intact: Boolean,
+        maxBytes: Int,
+        keepTransparency: Boolean,
+        allowImageDecoder: Boolean = false,
+    ): PromptImage? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(source, 0, source.size, bounds)
-        val longEdge = max(bounds.outWidth, bounds.outHeight)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw unreadable(format)
-        val orientation = exifOrientation(source, format)
-        if (whole != null && orientation == ExifInterface.ORIENTATION_NORMAL && longEdge <= MAX_PASSTHROUGH_EDGE_PX && whole.size <= maxBytes) {
-            return PromptImage(whole, format.mimeType)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            if (!allowImageDecoder) return null
+            val decoded = decodeWithImageDecoder(source) ?: return null
+            return encode(decoded.fitWithin(MAX_EDGE_PX), maxBytes, keepTransparency)
         }
-
-        // Decode at the largest power-of-two reduction that still leaves at least MAX_EDGE_PX, then scale exactly.
+        val longEdge = max(bounds.outWidth, bounds.outHeight)
+        val orientation = exifOrientation(source, format)
+        if (intact && orientation == ExifInterface.ORIENTATION_NORMAL && longEdge <= MAX_PASSTHROUGH_EDGE_PX && source.size <= maxBytes) {
+            return PromptImage(source, format.mimeType)
+        }
         var sample = 1
         while (longEdge / (sample * 2) >= MAX_EDGE_PX) sample *= 2
         val decoded = BitmapFactory.decodeByteArray(source, 0, source.size, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: throw unreadable(format)
+            ?: (if (allowImageDecoder) decodeWithImageDecoder(source, sample) else null)
+            ?: return null
         return encode(decoded.oriented(orientation).fitWithin(MAX_EDGE_PX), maxBytes, keepTransparency)
     }
 
@@ -104,6 +134,46 @@ object AttachmentImages {
             else -> null
         } ?: return null
         return if (end == bytes.size) bytes else bytes.copyOf(end)
+    }
+
+    /**
+     * A PNG whose chunk walk missed `IEND`: the last empty `IEND` in the file, trailer stripped, CRC rewritten to the
+     * spec's fixed value. Pixel chunks are not touched. Null when there is no `IEND` to cut at.
+     */
+    private fun pngRecover(bytes: ByteArray): ByteArray? {
+        val end = pngEndScan(bytes) ?: return null
+        val recovered = bytes.copyOf(end)
+        PNG_IEND.copyInto(recovered, destinationOffset = end - PNG_IEND.size)
+        return recovered.takeIf { it.size != bytes.size || !it.contentEquals(bytes) }
+    }
+
+    /** Last empty `IEND` (`length · IEND · CRC`), ignoring chunk lengths so a bad earlier length cannot hide it. */
+    private fun pngEndScan(bytes: ByteArray): Int? {
+        var found: Int? = null
+        val last = bytes.size - PNG_IEND.size
+        var i = 8
+        while (i <= last) {
+            if (bytes[i] == 0.toByte() && bytes[i + 1] == 0.toByte() && bytes[i + 2] == 0.toByte() && bytes[i + 3] == 0.toByte() &&
+                bytes[i + 4] == 0x49.toByte() && bytes[i + 5] == 0x45.toByte() && bytes[i + 6] == 0x4E.toByte() && bytes[i + 7] == 0x44.toByte()
+            ) {
+                found = i + PNG_IEND.size
+            }
+            i++
+        }
+        return found
+    }
+
+    private fun decodeWithImageDecoder(bytes: ByteArray, sample: Int = 1): Bitmap? {
+        if (Build.VERSION.SDK_INT < 31) return null
+        return runCatching {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                val edge = max(info.size.width, info.size.height)
+                var target = sample
+                while (edge / (target * 2) >= MAX_EDGE_PX) target *= 2
+                if (target > 1) decoder.setTargetSampleSize(target)
+            }
+        }.getOrNull()
     }
 
     /** The offset just past a PNG's `IEND` chunk, walking each `length · type · data · CRC` chunk from the signature. */
