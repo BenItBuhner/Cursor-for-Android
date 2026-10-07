@@ -47,9 +47,11 @@ import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.FlatIconButton
 import com.cursorforandroid.ui.components.HairlineDivider
 import com.cursorforandroid.ui.components.SpinnerRing
+import com.cursorforandroid.ui.components.StylusTextInput
 import com.cursorforandroid.ui.components.contentColumn
 import com.cursorforandroid.ui.components.fadingVerticalScroll
 import com.cursorforandroid.ui.components.pressable
+import com.cursorforandroid.ui.components.stylusWriting
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
 import kotlinx.coroutines.delay
@@ -371,22 +373,25 @@ private fun MessageField(value: String, onValueChange: (String) -> Unit, tag: St
         Modifier
             .fillMaxWidth()
             .heightIn(min = 44.dp)
+            .stylusWriting()
             .background(colors.fillFaint, shape)
             .border(CursorDimens.hairline, colors.strokeSubtle, shape)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = type.base.copy(color = colors.textPrimary),
-            cursorBrush = SolidColor(colors.textPrimary),
-            modifier = Modifier.fillMaxWidth().testTag(tag),
-            decorationBox = { inner ->
-                Box {
-                    if (value.isEmpty()) Text(ComputersCopy.MESSAGE, style = type.base, color = colors.textQuaternary)
-                    inner()
-                }
-            },
-        )
+        StylusTextInput {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                textStyle = type.base.copy(color = colors.textPrimary),
+                cursorBrush = SolidColor(colors.textPrimary),
+                modifier = Modifier.fillMaxWidth().testTag(tag),
+                decorationBox = { inner ->
+                    Box {
+                        if (value.isEmpty()) Text(ComputersCopy.MESSAGE, style = type.base, color = colors.textQuaternary)
+                        inner()
+                    }
+                },
+            )
+        }
     }
 }
