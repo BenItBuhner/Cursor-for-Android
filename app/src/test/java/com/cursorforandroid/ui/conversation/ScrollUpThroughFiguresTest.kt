@@ -120,6 +120,22 @@ class ScrollUpThroughFiguresTest {
         Thread.sleep(50)
     }
 
+    /** Bytes on the wire are not the composed figure: the load runs on wall time while the harness clock is paused. */
+    private fun figureNode(n: Int) = described("Figure ", substring = true).firstOrNull { node ->
+        node.config[SemanticsProperties.ContentDescription].single().removePrefix("Figure ").toIntOrNull() == n
+    }
+
+    private fun awaitFigureVisible(n: Int): SemanticsNode? {
+        val deadline = System.nanoTime() + 8_000_000_000L
+        while (System.nanoTime() < deadline) {
+            shadowOf(Looper.getMainLooper()).idle()
+            compose.waitForIdle()
+            figureNode(n)?.let { return it }
+            Thread.sleep(16)
+        }
+        return figureNode(n)
+    }
+
     private fun figureUrl(n: Int) = server.url("/fig/$n.png").toString()
 
     private fun reply(n: Int) = buildString {
@@ -271,6 +287,11 @@ class ScrollUpThroughFiguresTest {
                     release(figure)
                     released = figure
                     awaitDecoded(figure)
+                    awaitFigureVisible(figure)?.let { node ->
+                        figureHeights[figure] = node.size.height
+                        landedAcrossTop++
+                        seenFigures = seenFigures + figure
+                    }
                     break
                 }
             }
