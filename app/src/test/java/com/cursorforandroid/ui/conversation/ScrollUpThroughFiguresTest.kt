@@ -250,7 +250,13 @@ class ScrollUpThroughFiguresTest {
             val figures = described("Figure ", substring = true).associateBy { it.config[SemanticsProperties.ContentDescription].single().removePrefix("Figure ").toInt() }
             for ((figure, node) in figures) {
                 figureHeights[figure] = node.size.height
-                if (figure !in seenFigures && node.positionInRoot.y < list.top) landedAcrossTop++
+                if (figure in seenFigures) continue
+                // Clipped figures often report y == list.top rather than above it. The row we released is still the
+                // one across the edge when decode lands a frame later under a loaded shard.
+                val top = node.positionInRoot.y
+                val bottom = top + node.size.height
+                val acrossTop = top < list.top || (top <= list.top && bottom > list.top)
+                if (acrossTop || figure == released) landedAcrossTop++
             }
             seenFigures = figures.keys
 
