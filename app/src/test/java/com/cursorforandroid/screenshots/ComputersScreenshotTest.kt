@@ -18,6 +18,8 @@ import com.cursorforandroid.domain.Computer
 import com.cursorforandroid.domain.ComputerPairing
 import com.cursorforandroid.domain.ComputerPresence
 import com.cursorforandroid.domain.ControllerTrust
+import com.cursorforandroid.domain.LocalAgentLine
+import com.cursorforandroid.domain.LocalAgentLineKind
 import com.cursorforandroid.domain.LocalAgentSession
 import com.cursorforandroid.domain.LocalAgentStatus
 import com.cursorforandroid.domain.LocalWorkspace
@@ -137,5 +139,34 @@ class ComputersScreenshotTest {
         }
         compose.onNodeWithText("Fix the nav").assertIsDisplayed()
         capture("1203_computer_inbox")
+    }
+
+    @Test
+    fun localTranscript() {
+        scene {
+            ComputerDetail(
+                state = ComputerRepository.DetailState(
+                    allowed = true,
+                    computer = Computer("desk-1", "Bennett's Mac", presence = ComputerPresence.ONLINE, pairing = ComputerPairing.PAIRED),
+                    challenge = PairingChallenge(ControllerTrust.TRUSTED, "thumb", "1234-5678"),
+                    sessions = listOf(
+                        LocalAgentSession("sess-1", "Fix the nav", status = LocalAgentStatus.RUNNING, workspace = LocalWorkspace("/workspace")),
+                    ),
+                    workspaces = listOf(LocalWorkspace("/workspace", listOf("/workspace"))),
+                    attachedSessionId = "sess-1",
+                    transcript = listOf(
+                        LocalAgentLine(LocalAgentLineKind.USER, "Fix the nav"),
+                        LocalAgentLine(LocalAgentLineKind.ASSISTANT, "Looking at NavStack.kt"),
+                        LocalAgentLine(LocalAgentLineKind.STATUS, "Working…"),
+                    ),
+                ),
+                onPair = {},
+                onReply = { _, _ -> },
+                onStart = { _, _ -> },
+                selectedSessionId = "sess-1",
+            )
+        }
+        compose.onNodeWithText("Looking at NavStack.kt").assertIsDisplayed()
+        capture("1204_computer_transcript")
     }
 }

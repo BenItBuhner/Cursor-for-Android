@@ -9,6 +9,7 @@ import com.cursorforandroid.domain.ComputerPresence
 import com.cursorforandroid.domain.ControllerTrust
 import com.cursorforandroid.domain.LocalAgentSession
 import com.cursorforandroid.domain.LocalAgentStatus
+import com.cursorforandroid.domain.LocalSessionEvent
 import com.cursorforandroid.domain.LocalWorkspace
 import com.cursorforandroid.domain.PairingChallenge
 import kotlinx.serialization.KSerializer
@@ -16,12 +17,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.util.Base64
 import java.util.UUID
@@ -30,9 +32,10 @@ import java.util.UUID
  * The phone side of Oct 6 remote control: `aiserver.v1.RemoteAgentHostPresenceService` on api2. Documented Cloud
  * Agents v1 has none of this — SDK-only never constructs the implementation.
  *
- * Inner agent-host calls are unary `CallAgentHost` wrapping protobuf `data` of `agent.v1.AgentHostService` methods
- * (`LIST_SESSIONS`, `SEND_MESSAGE`, `CREATE_SESSION`, `LIST_WORKSPACES`). The Connect JSON body uses the same session
- * token and headers as every other account RPC; no iOS client identity is faked.
+ * Inner agent-host calls wrap protobuf `data` of `agent.v1.AgentHostService`: unary `CallAgentHost` for list / send /
+ * create / workspaces / blobs, and server-streaming `StreamAgentHost` for `WATCH_SESSIONS` and `ATTACH_SESSION`.
+ * The Connect JSON body uses the same session token and headers as every other account RPC; no iOS client identity
+ * is faked.
  */
 interface RemoteAgentHostApi {
     suspend fun listComputers(controllerThumbprint: String): List<Computer>
@@ -48,6 +51,27 @@ interface RemoteAgentHostApi {
     suspend fun sendMessage(targetId: String, sessionId: String, text: String): String?
 
     suspend fun createSession(targetId: String, clientInstanceId: String, workspacePaths: List<String>): String
+
+    /**
+     * Live inbox. [onSessions] is the current session list after each snapshot/add/update/delete; returning false
+     * closes the stream. Keepalives are swallowed. A missing RPC throws [ConnectRpcException] (404 / unimplemented).
+     */
+    suspend fun watchSessions(targetId: String, onSessions: (List<LocalAgentSession>) -> Boolean)
+
+    /**
+     * Live transcript of one local session. [onEvent] returning false closes the stream. [lastEventId] resumes after
+     * a drop; omit it on the first attach so the host sends `conversation_state`.
+     */
+    suspend fun attachSession(
+        targetId: String,
+        sessionId: String,
+        lastEventId: Long?,
+        clientInstanceId: String,
+        onEvent: (LocalSessionEvent) -> Boolean,
+    )
+
+    /** Historical turn / step blobs named by an ATTACH `conversation_state`. Keys are the proto3-JSON blob ids. */
+    suspend fun getSessionBlobs(targetId: String, sessionId: String, blobIds: List<String>): Map<String, ByteArray>
 }
 
 class ConnectRemoteAgentHostApi(
@@ -94,17 +118,7 @@ class ConnectRemoteAgentHostApi(
     override suspend fun listSessions(targetId: String): List<LocalAgentSession> {
         val decoded = callAgentHost(targetId, METHOD_LIST_SESSIONS, ByteArray(0), AgentHostSchemas.LIST_SESSIONS_RESPONSE)
         val sessions = decoded["sessions"] as? JsonArray ?: return emptyList()
-        return sessions.mapNotNull { el ->
-            val obj = el as? JsonObject ?: return@mapNotNull null
-            val id = obj.str("sessionId") ?: return@mapNotNull null
-            LocalAgentSession(
-                sessionId = id,
-                title = obj.str("title") ?: "Untitled agent",
-                status = LocalAgentStatus.parse(obj.raw("status")),
-                workspace = workspaceOf(obj["workspace"] as? JsonObject),
-                runningTurnId = obj.str("runningTurnId"),
-            )
-        }
+        return sessions.mapNotNull { el -> sessionOf(el as? JsonObject) }
     }
 
     override suspend fun listWorkspaces(targetId: String): List<LocalWorkspace> {
@@ -146,6 +160,80 @@ class ConnectRemoteAgentHostApi(
         return sessionId
     }
 
+    override suspend fun watchSessions(targetId: String, onSessions: (List<LocalAgentSession>) -> Boolean) {
+        val current = LinkedHashMap<String, LocalAgentSession>()
+        streamAgentHost(targetId, METHOD_WATCH_SESSIONS, ByteArray(0), AgentHostSchemas.WATCH_EVENT) { event ->
+            if (event.bool("keepalive") && event["snapshot"] == null && event["added"] == null &&
+                event["updated"] == null && event["deleted"] == null
+            ) {
+                return@streamAgentHost true
+            }
+            (event["snapshot"] as? JsonObject)?.let { snap ->
+                current.clear()
+                (snap["sessions"] as? JsonArray)?.forEach { el ->
+                    val session = sessionOf(el as? JsonObject) ?: return@forEach
+                    current[session.sessionId] = session
+                }
+            }
+            (event["added"] as? JsonObject)?.let { added ->
+                sessionOf(added["session"] as? JsonObject)?.let { current[it.sessionId] = it }
+            }
+            (event["updated"] as? JsonObject)?.let { updated ->
+                sessionOf(updated["session"] as? JsonObject)?.let { current[it.sessionId] = it }
+            }
+            (event["deleted"] as? JsonObject)?.str("sessionId")?.let { current.remove(it) }
+            onSessions(current.values.toList())
+        }
+    }
+
+    override suspend fun attachSession(
+        targetId: String,
+        sessionId: String,
+        lastEventId: Long?,
+        clientInstanceId: String,
+        onEvent: (LocalSessionEvent) -> Boolean,
+    ) {
+        val payload = ProtoWire.encode(
+            buildJsonObject {
+                put("sessionId", sessionId)
+                if (lastEventId != null && lastEventId > 0L) put("lastEventId", lastEventId.toString())
+                put("clientInstanceId", clientInstanceId)
+            },
+            AgentHostSchemas.ATTACH_REQUEST,
+        )
+        streamAgentHost(targetId, METHOD_ATTACH_SESSION, payload, AgentHostSchemas.SESSION_EVENT) { event ->
+            onEvent(sessionEventOf(event))
+        }
+    }
+
+    override suspend fun getSessionBlobs(targetId: String, sessionId: String, blobIds: List<String>): Map<String, ByteArray> {
+        if (blobIds.isEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, ByteArray>()
+        var pending = blobIds.distinct().filter { it.isNotEmpty() }
+        var rounds = 0
+        while (pending.isNotEmpty() && rounds < BLOBS_ROUNDS) {
+            rounds++
+            val payload = ProtoWire.encode(
+                buildJsonObject {
+                    put("sessionId", sessionId)
+                    put("blobIds", JsonArray(pending.map { JsonPrimitive(it) }))
+                },
+                AgentHostSchemas.GET_BLOBS_REQUEST,
+            )
+            val decoded = callAgentHost(targetId, METHOD_GET_SESSION_BLOBS, payload, AgentHostSchemas.GET_BLOBS_RESPONSE)
+            (decoded["blobs"] as? JsonArray)?.forEach { el ->
+                val obj = el as? JsonObject ?: return@forEach
+                val id = obj.str("blobId") ?: return@forEach
+                val data = obj.str("data")?.let { encoded -> runCatching { Base64.getDecoder().decode(encoded) }.getOrNull() } ?: return@forEach
+                out[id] = data
+            }
+            pending = (decoded["remainingBlobIds"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf { id -> id.isNotEmpty() && id !in out } }
+                .orEmpty()
+        }
+        return out
+    }
+
     private suspend fun callAgentHost(
         targetId: String,
         method: String,
@@ -172,6 +260,84 @@ class ConnectRemoteAgentHostApi(
 
     private suspend fun <I, O> call(method: String, body: I, requestSerializer: KSerializer<I>, responseSerializer: KSerializer<O>): O =
         rpc.unaryWithSession(SERVICE, method, tokens, body, requestSerializer, responseSerializer)
+
+    private suspend fun streamAgentHost(
+        targetId: String,
+        method: String,
+        data: ByteArray,
+        schema: com.cursorforandroid.data.api.proto.ProtoWire.Schema,
+        onPayload: (JsonObject) -> Boolean,
+    ) {
+        val body = CallAgentHostDto(
+            targetId = targetId,
+            method = method,
+            data = data.takeIf { it.isNotEmpty() }?.let { Base64.getEncoder().encodeToString(it) },
+        )
+        rpc.serverStreamWithSession(
+            SERVICE,
+            "StreamAgentHost",
+            tokens,
+            body,
+            CallAgentHostDto.serializer(),
+            retryRefusals = false,
+            lane = ApiThrottle.Lane.WATCH,
+            silenceMs = ConversationStateReader.WATCH_SILENCE_MS,
+        ) { message ->
+            val encoded = (message["data"] as? JsonPrimitive)?.contentOrNull
+            if (encoded.isNullOrEmpty()) return@serverStreamWithSession true
+            val bytes = runCatching { Base64.getDecoder().decode(encoded) }.getOrElse {
+                throw ConnectRpcException(
+                    200,
+                    ConnectRpcException.UNREADABLE_ANSWER,
+                    "Cursor's StreamAgentHost answer for $method could not be read.",
+                    path = ConnectRpc.path(SERVICE, "StreamAgentHost"),
+                )
+            }
+            if (bytes.isEmpty()) return@serverStreamWithSession true
+            val decoded = ProtoWire.decode(bytes, schema)
+            onPayload(decoded)
+        }
+    }
+
+    private fun sessionOf(obj: JsonObject?): LocalAgentSession? {
+        if (obj == null) return null
+        val id = obj.str("sessionId") ?: return null
+        return LocalAgentSession(
+            sessionId = id,
+            title = obj.str("title") ?: "Untitled agent",
+            status = LocalAgentStatus.parse(obj.raw("status")),
+            workspace = workspaceOf(obj["workspace"] as? JsonObject),
+            runningTurnId = obj.str("runningTurnId"),
+            lastEventId = obj.u64("lastEventId"),
+        )
+    }
+
+    private fun sessionEventOf(event: JsonObject): LocalSessionEvent {
+        val eventId = event.u64("eventId")
+        if (event.bool("keepalive")) return LocalSessionEvent.Keepalive(eventId)
+        val state = event["conversationState"] as? JsonObject
+        if (state != null) {
+            val turns = (state["turns"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf { id -> id.isNotEmpty() } }.orEmpty()
+            return LocalSessionEvent.History(turns, eventId)
+        }
+        val interaction = event["interactionUpdate"] as? JsonObject
+        if (interaction != null) {
+            val delta = interaction["textDelta"] as? JsonObject
+            val text = delta?.str("text")
+            if (!text.isNullOrEmpty()) {
+                return LocalSessionEvent.AssistantDelta(text, notice = delta.bool("isServerNotice"), eventId)
+            }
+            val user = (interaction["userMessageAppended"] as? JsonObject)?.get("userMessage") as? JsonObject
+            val said = user?.str("text") ?: user?.str("richText")
+            if (!said.isNullOrEmpty()) return LocalSessionEvent.UserSaid(said, eventId)
+            return LocalSessionEvent.Keepalive(eventId)
+        }
+        if (event["turnStarted"] is JsonObject) return LocalSessionEvent.Working(eventId)
+        if (event["turnAwaitingInput"] is JsonObject) return LocalSessionEvent.Waiting(eventId)
+        val settled = event["turnSettled"] as? JsonObject
+        if (settled != null) return LocalSessionEvent.Settled(settled.str("detail"), eventId)
+        return LocalSessionEvent.Keepalive(eventId)
+    }
 
     private fun computerOf(dto: SharedTargetDto): Computer? {
         val id = dto.targetId?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -227,6 +393,13 @@ class ConnectRemoteAgentHostApi(
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
 
+    private fun JsonObject.bool(key: String): Boolean = (this[key] as? JsonPrimitive)?.booleanOrNull == true
+
+    private fun JsonObject.u64(key: String): Long? {
+        val primitive = this[key] as? JsonPrimitive ?: return null
+        return primitive.longOrNull ?: primitive.contentOrNull?.toLongOrNull()
+    }
+
     private fun JsonObject.raw(key: String): String? {
         val value = this[key] ?: return null
         val primitive = value as? JsonPrimitive ?: return null
@@ -279,9 +452,13 @@ class ConnectRemoteAgentHostApi(
     companion object {
         const val SERVICE = "aiserver.v1.RemoteAgentHostPresenceService"
         const val METHOD_LIST_SESSIONS = "REMOTE_AGENT_HOST_CONTROLLER_METHOD_LIST_SESSIONS"
+        const val METHOD_WATCH_SESSIONS = "REMOTE_AGENT_HOST_CONTROLLER_METHOD_WATCH_SESSIONS"
+        const val METHOD_ATTACH_SESSION = "REMOTE_AGENT_HOST_CONTROLLER_METHOD_ATTACH_SESSION"
+        const val METHOD_GET_SESSION_BLOBS = "REMOTE_AGENT_HOST_CONTROLLER_METHOD_GET_SESSION_BLOBS"
         const val METHOD_SEND_MESSAGE = "REMOTE_AGENT_HOST_CONTROLLER_METHOD_SEND_MESSAGE"
         const val METHOD_CREATE_SESSION = "REMOTE_AGENT_HOST_CONTROLLER_METHOD_CREATE_SESSION"
         const val METHOD_LIST_WORKSPACES = "REMOTE_AGENT_HOST_CONTROLLER_METHOD_LIST_WORKSPACES"
         private const val PAGE_SIZE = 100
+        private const val BLOBS_ROUNDS = 8
     }
 }

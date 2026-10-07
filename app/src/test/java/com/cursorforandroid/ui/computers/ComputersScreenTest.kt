@@ -15,6 +15,8 @@ import com.cursorforandroid.domain.Computer
 import com.cursorforandroid.domain.ComputerPairing
 import com.cursorforandroid.domain.ComputerPresence
 import com.cursorforandroid.domain.ControllerTrust
+import com.cursorforandroid.domain.LocalAgentLine
+import com.cursorforandroid.domain.LocalAgentLineKind
 import com.cursorforandroid.domain.LocalAgentSession
 import com.cursorforandroid.domain.LocalAgentStatus
 import com.cursorforandroid.domain.LocalWorkspace
@@ -150,5 +152,33 @@ class ComputersScreenTest {
         compose.onNodeWithTag(ComputersTags.PAIR_BUTTON).performClick()
         assertThat(paired).isEqualTo(1)
         compose.onAllNodesWithText(ComputersCopy.INBOX).let { assertThat(it.fetchSemanticsNodes()).isEmpty() }
+    }
+
+    @Test
+    fun `a selected local session shows the computer transcript, never a cloud chat id`() {
+        compose.setContent {
+            CursorTheme(mode = ThemeMode.Dark) {
+                ComputerDetail(
+                    state = ComputerRepository.DetailState(
+                        allowed = true,
+                        computer = Computer("desk-1", "Bennett's Mac", presence = ComputerPresence.ONLINE, pairing = ComputerPairing.PAIRED),
+                        challenge = PairingChallenge(ControllerTrust.TRUSTED, "thumb", "1234-5678"),
+                        sessions = listOf(LocalAgentSession("sess-1", "Fix the nav", status = LocalAgentStatus.RUNNING)),
+                        attachedSessionId = "sess-1",
+                        transcript = listOf(
+                            LocalAgentLine(LocalAgentLineKind.USER, "Fix the nav"),
+                            LocalAgentLine(LocalAgentLineKind.ASSISTANT, "Looking at NavStack.kt"),
+                        ),
+                    ),
+                    onPair = {},
+                    onReply = { _, _ -> },
+                    onStart = { _, _ -> },
+                    selectedSessionId = "sess-1",
+                )
+            }
+        }
+        compose.onNodeWithTag(ComputersTags.TRANSCRIPT).assertIsDisplayed()
+        compose.onNodeWithText("Looking at NavStack.kt").assertIsDisplayed()
+        compose.onAllNodesWithText("bc-", substring = true).let { assertThat(it.fetchSemanticsNodes()).isEmpty() }
     }
 }

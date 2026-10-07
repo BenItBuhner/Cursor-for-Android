@@ -7,6 +7,7 @@ import com.cursorforandroid.domain.ComputerPairing
 import com.cursorforandroid.domain.ComputerPresence
 import com.cursorforandroid.domain.ControllerTrust
 import com.cursorforandroid.domain.LocalAgentStatus
+import com.cursorforandroid.domain.LocalSessionEvent
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonArray
@@ -153,5 +154,105 @@ class RemoteAgentHostApiTest {
         val create = server.takeRequest().body.readUtf8()
         assertThat(create).contains("REMOTE_AGENT_HOST_CONTROLLER_METHOD_CREATE_SESSION")
         assertThat(create).contains("\"data\":")
+    }
+
+    @Test
+    fun `StreamAgentHost WATCH_SESSIONS and ATTACH_SESSION decode inner protobuf and do not spoof iOS`() = runBlocking<Unit> {
+        val snapshot = ProtoWire.encode(
+            buildJsonObject {
+                put(
+                    "snapshot",
+                    buildJsonObject {
+                        put(
+                            "sessions",
+                            buildJsonArray {
+                                add(
+                                    buildJsonObject {
+                                        put("sessionId", "sess-1")
+                                        put("title", "Fix the nav")
+                                        put("status", 2)
+                                        put("lastEventId", "9")
+                                    },
+                                )
+                            },
+                        )
+                    },
+                )
+            },
+            AgentHostSchemas.WATCH_EVENT,
+        )
+        server.enqueue(
+            ConnectStreamFixtures.streamResponse(
+                listOf("""{"data":"${Base64.getEncoder().encodeToString(snapshot)}"}"""),
+            ),
+        )
+        var watched = emptyList<com.cursorforandroid.domain.LocalAgentSession>()
+        api.watchSessions("desk-1") { sessions ->
+            watched = sessions
+            false
+        }
+        server.takeRequest()
+        val watch = server.takeRequest()
+        assertThat(watch.path).isEqualTo("/aiserver.v1.RemoteAgentHostPresenceService/StreamAgentHost")
+        assertThat(watch.getHeader("Connect-Protocol-Version")).isEqualTo("1")
+        assertThat(watch.getHeader("User-Agent").orEmpty()).doesNotContain("iPhone")
+        assertThat(watch.getHeader("User-Agent").orEmpty()).doesNotContain("Darwin")
+        assertThat(ConnectStreamFixtures.requestJson(watch)).contains("REMOTE_AGENT_HOST_CONTROLLER_METHOD_WATCH_SESSIONS")
+        assertThat(watched).hasSize(1)
+        assertThat(watched[0].sessionId).isEqualTo("sess-1")
+        assertThat(watched[0].lastEventId).isEqualTo(9L)
+
+        val delta = ProtoWire.encode(
+            buildJsonObject {
+                put("eventId", "3")
+                put("interactionUpdate", buildJsonObject {
+                    put("textDelta", buildJsonObject { put("text", "Looking at NavStack.kt") })
+                })
+            },
+            AgentHostSchemas.SESSION_EVENT,
+        )
+        server.enqueue(
+            ConnectStreamFixtures.streamResponse(
+                listOf("""{"data":"${Base64.getEncoder().encodeToString(delta)}"}"""),
+            ),
+        )
+        var event: LocalSessionEvent? = null
+        api.attachSession("desk-1", "sess-1", lastEventId = 2, clientInstanceId = "phone-1") {
+            event = it
+            false
+        }
+        val attach = server.takeRequest()
+        assertThat(attach.path).isEqualTo("/aiserver.v1.RemoteAgentHostPresenceService/StreamAgentHost")
+        val attachBody = ConnectStreamFixtures.requestJson(attach)
+        assertThat(attachBody).contains("REMOTE_AGENT_HOST_CONTROLLER_METHOD_ATTACH_SESSION")
+        assertThat(attachBody).contains("\"data\":")
+        assertThat(event).isEqualTo(LocalSessionEvent.AssistantDelta("Looking at NavStack.kt", false, 3))
+    }
+
+    @Test
+    fun `GET_SESSION_BLOBS is a unary CallAgentHost of blob ids`() = runBlocking<Unit> {
+        val blobId = Base64.getEncoder().encodeToString("turn-1".toByteArray())
+        val payload = ProtoWire.encode(
+            buildJsonObject {
+                put(
+                    "blobs",
+                    buildJsonArray {
+                        add(
+                            buildJsonObject {
+                                put("blobId", blobId)
+                                put("data", Base64.getEncoder().encodeToString("hello".toByteArray()))
+                            },
+                        )
+                    },
+                )
+            },
+            AgentHostSchemas.GET_BLOBS_RESPONSE,
+        )
+        server.enqueue(MockResponse().setBody("""{"data":"${Base64.getEncoder().encodeToString(payload)}"}"""))
+        val blobs = api.getSessionBlobs("desk-1", "sess-1", listOf(blobId))
+        server.takeRequest()
+        val request = server.takeRequest().body.readUtf8()
+        assertThat(request).contains("REMOTE_AGENT_HOST_CONTROLLER_METHOD_GET_SESSION_BLOBS")
+        assertThat(blobs[blobId]!!.decodeToString()).isEqualTo("hello")
     }
 }

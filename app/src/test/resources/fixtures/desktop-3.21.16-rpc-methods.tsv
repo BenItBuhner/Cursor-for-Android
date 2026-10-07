@@ -1145,3 +1145,10 @@ aiserver.v1.AiService/MintDesktopRealtimeVoiceSecret	mintDesktopRealtimeVoiceSec
 aiserver.v1.AiService/NameAgent	nameAgent	Unary
 aiserver.v1.AiService/EvaluatePromptHook	evaluatePromptHook	Unary
 aiserver.v1.AiService/GetCloudSetupBlockers	getCloudSetupBlockers	Unary
+# Cursor 3.23.23 glass (workbench.glass.main.js): Oct 6 phone-to-computer RemoteAgentHostPresenceService.
+# Not in 3.21.16 desktop; the path names are still PascalCase typeName/name.
+aiserver.v1.RemoteAgentHostPresenceService/ListSharedTargets	listSharedTargets	Unary
+aiserver.v1.RemoteAgentHostPresenceService/CallAgentHost	callAgentHost	Unary
+aiserver.v1.RemoteAgentHostPresenceService/StreamAgentHost	streamAgentHost	ServerStreaming
+aiserver.v1.RemoteAgentHostPresenceService/TrustController	trustController	Unary
+aiserver.v1.RemoteAgentHostPresenceService/GetControllerTrustStatus	getControllerTrustStatus	Unary

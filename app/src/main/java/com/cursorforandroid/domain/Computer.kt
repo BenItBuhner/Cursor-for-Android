@@ -108,8 +108,8 @@ enum class LocalAgentStatus(val number: Int) {
 }
 
 /**
- * One in-place local agent on a paired computer (`agent.v1.AgentHostSession` via `CallAgentHost` LIST_SESSIONS).
- * [sessionId] is the desktop's id, not a cloud `bc-…` composer.
+ * One in-place local agent on a paired computer (`agent.v1.AgentHostSession` via `CallAgentHost` LIST_SESSIONS
+ * or `StreamAgentHost` WATCH_SESSIONS). [sessionId] is the desktop's id, not a cloud `bc-…` composer.
  */
 data class LocalAgentSession(
     val sessionId: String,
@@ -117,6 +117,7 @@ data class LocalAgentSession(
     val status: LocalAgentStatus = LocalAgentStatus.UNKNOWN,
     val workspace: LocalWorkspace? = null,
     val runningTurnId: String? = null,
+    val lastEventId: Long? = null,
 )
 
 data class LocalWorkspace(
@@ -124,3 +125,27 @@ data class LocalWorkspace(
     val workspacePaths: List<String> = emptyList(),
     val worktreeMainPath: String? = null,
 )
+
+/** One visible line of a local agent's transcript on the paired computer — never a cloud `bc-…` chat. */
+data class LocalAgentLine(
+    val kind: LocalAgentLineKind,
+    val text: String,
+)
+
+enum class LocalAgentLineKind { USER, ASSISTANT, NOTICE, STATUS }
+
+/**
+ * A decoded `agent.v1.AgentHostSessionEvent` from `StreamAgentHost` ATTACH_SESSION. Keepalives carry no text;
+ * [History] names conversation-state turn blobs for `GET_SESSION_BLOBS`.
+ */
+sealed interface LocalSessionEvent {
+    val eventId: Long?
+
+    data class Keepalive(override val eventId: Long? = null) : LocalSessionEvent
+    data class History(val turnBlobIds: List<String>, override val eventId: Long?) : LocalSessionEvent
+    data class AssistantDelta(val text: String, val notice: Boolean, override val eventId: Long?) : LocalSessionEvent
+    data class UserSaid(val text: String, override val eventId: Long?) : LocalSessionEvent
+    data class Working(override val eventId: Long?) : LocalSessionEvent
+    data class Waiting(override val eventId: Long?) : LocalSessionEvent
+    data class Settled(val detail: String?, override val eventId: Long?) : LocalSessionEvent
+}

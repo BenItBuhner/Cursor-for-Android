@@ -32,4 +32,11 @@ class ComputerTest {
         assertThat(LocalAgentStatus.parse("AWAITING_INPUT")).isEqualTo(LocalAgentStatus.AWAITING_INPUT)
         assertThat(LocalAgentStatus.parse("1")).isEqualTo(LocalAgentStatus.IDLE)
     }
+
+    @Test
+    fun `a local session id is not a cloud composer id`() {
+        val session = LocalAgentSession("sess-1", "Fix the nav", lastEventId = 9)
+        assertThat(session.sessionId.startsWith("bc-")).isFalse()
+        assertThat(session.lastEventId).isEqualTo(9L)
+    }
 }

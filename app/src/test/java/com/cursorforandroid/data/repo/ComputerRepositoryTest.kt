@@ -12,11 +12,16 @@ import com.cursorforandroid.domain.Computer
 import com.cursorforandroid.domain.ComputerPairing
 import com.cursorforandroid.domain.ComputerPresence
 import com.cursorforandroid.domain.ControllerTrust
+import com.cursorforandroid.domain.LocalAgentLineKind
 import com.cursorforandroid.domain.LocalAgentSession
+import com.cursorforandroid.domain.LocalSessionEvent
 import com.cursorforandroid.domain.LocalWorkspace
 import com.cursorforandroid.domain.PairingChallenge
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -43,6 +48,8 @@ class ComputerRepositoryTest {
         repo.requestPairing("desk-1")
         assertThat(host.calls).isEmpty()
         assertThat(repo.reply("desk-1", "s1", "hi").isFailure).isTrue()
+        repo.watchInbox("desk-1")
+        repo.attach("desk-1", "sess-1")
         assertThat(host.calls).isEmpty()
     }
 
@@ -98,6 +105,45 @@ class ComputerRepositoryTest {
         assertThat(repo.list.value.error).isEqualTo(ComputerRepository.ENDPOINT_MISSING)
     }
 
+    @Test
+    fun `Extended watch and attach update the inbox and transcript, and a missing stream is honest`() = runBlocking<Unit> {
+        val host = FakeHost()
+        host.sessions = listOf(LocalAgentSession("sess-1", "Fix the nav"))
+        host.attachEvents = listOf(
+            LocalSessionEvent.UserSaid("Fix the nav", 1),
+            LocalSessionEvent.AssistantDelta("Looking at NavStack.kt", false, 2),
+        )
+        val repo = repo(host, Capabilities.EXTENDED)
+        val watch = launch { repo.watchInbox("desk-1") }
+        withTimeout(5_000) {
+            while (repo.detail("desk-1").value.sessions.isEmpty()) kotlinx.coroutines.yield()
+        }
+        watch.cancel()
+        assertThat(host.calls).contains("watch:desk-1")
+        assertThat(repo.detail("desk-1").value.sessions.map { it.sessionId }).containsExactly("sess-1")
+
+        val attached = launch { repo.attach("desk-1", "sess-1") }
+        withTimeout(5_000) {
+            while (repo.detail("desk-1").value.transcript.size < 2) kotlinx.coroutines.yield()
+        }
+        attached.cancel()
+        assertThat(host.calls).contains("attach:desk-1:sess-1")
+        assertThat(repo.detail("desk-1").value.transcript.map { it.kind to it.text }).containsExactly(
+            LocalAgentLineKind.USER to "Fix the nav",
+            LocalAgentLineKind.ASSISTANT to "Looking at NavStack.kt",
+        ).inOrder()
+
+        val missing = FakeHost()
+        missing.watchFail = ConnectRpcException(404, "unimplemented", "not found", path = "/aiserver.v1.RemoteAgentHostPresenceService/StreamAgentHost")
+        missing.attachFail = missing.watchFail
+        val repoMissing = repo(missing, Capabilities.EXTENDED)
+        repoMissing.watchInbox("desk-1")
+        assertThat(repoMissing.detail("desk-1").value.watchError).isEqualTo(ComputerRepository.STREAM_MISSING)
+        assertThat(repoMissing.detail("desk-1").value.sessions).isEmpty()
+        repoMissing.attach("desk-1", "sess-1")
+        assertThat(repoMissing.detail("desk-1").value.attachError).isEqualTo(ComputerRepository.ATTACH_MISSING)
+    }
+
     private fun repo(host: FakeHost, capabilities: Capabilities, demo: Boolean = false) = ComputerRepository(
         api = { host },
         identity = ControllerIdentity(
@@ -114,6 +160,9 @@ class ComputerRepositoryTest {
         var sessions: List<LocalAgentSession> = emptyList()
         var workspaces: List<LocalWorkspace> = emptyList()
         var failList: Throwable? = null
+        var watchFail: Throwable? = null
+        var attachFail: Throwable? = null
+        var attachEvents: List<LocalSessionEvent> = emptyList()
         val calls = mutableListOf<String>()
         val sent = mutableListOf<Triple<String, String, String>>()
         val created = mutableListOf<Triple<String, String, List<String>>>()
@@ -155,6 +204,31 @@ class ComputerRepositoryTest {
             val id = "sess-new"
             created += Triple(targetId, clientInstanceId, workspacePaths)
             return id
+        }
+
+        override suspend fun watchSessions(targetId: String, onSessions: (List<LocalAgentSession>) -> Boolean) {
+            calls += "watch:$targetId"
+            watchFail?.let { throw it }
+            onSessions(sessions)
+            awaitCancellation()
+        }
+
+        override suspend fun attachSession(
+            targetId: String,
+            sessionId: String,
+            lastEventId: Long?,
+            clientInstanceId: String,
+            onEvent: (LocalSessionEvent) -> Boolean,
+        ) {
+            calls += "attach:$targetId:$sessionId"
+            attachFail?.let { throw it }
+            attachEvents.forEach { onEvent(it) }
+            awaitCancellation()
+        }
+
+        override suspend fun getSessionBlobs(targetId: String, sessionId: String, blobIds: List<String>): Map<String, ByteArray> {
+            calls += "blobs:$targetId:$sessionId"
+            return emptyMap()
         }
     }
 }

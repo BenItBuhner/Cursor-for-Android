@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +35,8 @@ import com.cursorforandroid.data.repo.ComputerRepository
 import com.cursorforandroid.domain.ComputerPairing
 import com.cursorforandroid.domain.ComputerPresence
 import com.cursorforandroid.domain.ControllerTrust
+import com.cursorforandroid.domain.LocalAgentLine
+import com.cursorforandroid.domain.LocalAgentLineKind
 import com.cursorforandroid.domain.LocalAgentSession
 import com.cursorforandroid.domain.LocalAgentStatus
 import com.cursorforandroid.domain.LocalWorkspace
@@ -65,12 +66,30 @@ fun ComputerScreen(
     val scope = rememberCoroutineScope()
     LaunchedEffect(targetId) { graph.computers.refreshDetail(targetId) }
     val pending = state.challenge?.status?.awaitingDesktop == true
+    val trustedOnline =
+        state.challenge?.status == ControllerTrust.TRUSTED && state.computer?.presence == ComputerPresence.ONLINE
+    var selected by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(targetId, pending) {
         if (!pending) return@LaunchedEffect
         while (true) {
             delay(2_000)
             graph.computers.refreshDetail(targetId)
         }
+    }
+    LaunchedEffect(targetId, trustedOnline) {
+        if (!trustedOnline) return@LaunchedEffect
+        graph.computers.watchInbox(targetId)
+    }
+    LaunchedEffect(state.sessions) {
+        if (selected != null && state.sessions.none { it.sessionId == selected }) {
+            selected = state.sessions.firstOrNull()?.sessionId
+        }
+        if (selected == null) selected = state.sessions.firstOrNull()?.sessionId
+    }
+    LaunchedEffect(targetId, selected, trustedOnline) {
+        val sessionId = selected ?: return@LaunchedEffect
+        if (!trustedOnline) return@LaunchedEffect
+        graph.computers.attach(targetId, sessionId)
     }
     val title = state.computer?.displayName ?: ComputersCopy.HEADER
     Column(modifier.fillMaxSize().background(CursorTheme.colors.canvas).testTag(ComputersTags.DETAIL)) {
@@ -88,6 +107,8 @@ fun ComputerScreen(
             onPair = { scope.launch { graph.computers.requestPairing(targetId) } },
             onReply = { sessionId, text -> scope.launch { graph.computers.reply(targetId, sessionId, text) } },
             onStart = { text, paths -> scope.launch { graph.computers.start(targetId, text, paths) } },
+            selectedSessionId = selected,
+            onSelectSession = { selected = it },
             modifier = Modifier.fillMaxSize().navigationBarsPadding(),
         )
     }
@@ -99,6 +120,8 @@ fun ComputerDetail(
     onPair: () -> Unit,
     onReply: (sessionId: String, text: String) -> Unit,
     onStart: (text: String, workspacePaths: List<String>) -> Unit,
+    selectedSessionId: String? = null,
+    onSelectSession: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = CursorTheme.colors
@@ -150,6 +173,11 @@ fun ComputerDetail(
                     sessions = state.sessions,
                     workspaces = state.workspaces,
                     sending = state.sending,
+                    selectedSessionId = selectedSessionId,
+                    onSelectSession = onSelectSession,
+                    transcript = state.transcript,
+                    attachError = state.attachError,
+                    watchError = state.watchError,
                     onReply = onReply,
                     onStart = onStart,
                 )
@@ -183,12 +211,18 @@ private fun Inbox(
     sessions: List<LocalAgentSession>,
     workspaces: List<LocalWorkspace>,
     sending: Boolean,
+    selectedSessionId: String?,
+    onSelectSession: (String) -> Unit,
+    transcript: List<LocalAgentLine>,
+    attachError: String?,
+    watchError: String?,
     onReply: (sessionId: String, text: String) -> Unit,
     onStart: (text: String, workspacePaths: List<String>) -> Unit,
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
-    var selected by rememberSaveable { mutableStateOf(sessions.firstOrNull()?.sessionId) }
+    var selected by rememberSaveable { mutableStateOf(selectedSessionId ?: sessions.firstOrNull()?.sessionId) }
+    if (selectedSessionId != null) selected = selectedSessionId
     if (selected != null && sessions.none { it.sessionId == selected }) selected = sessions.firstOrNull()?.sessionId
     var reply by rememberSaveable { mutableStateOf("") }
     var start by rememberSaveable { mutableStateOf("") }
@@ -196,13 +230,45 @@ private fun Inbox(
     Spacer(Modifier.height(16.dp))
     Text(ComputersCopy.INBOX, style = type.small, color = colors.textTertiary)
     Spacer(Modifier.height(6.dp))
+    if (watchError != null) {
+        Spacer(Modifier.height(6.dp))
+        Text(watchError, style = type.small, color = colors.textTertiary)
+    }
     if (sessions.isEmpty()) {
         Text(ComputersCopy.NO_AGENTS, style = type.base, color = colors.textSecondary)
     } else {
         CursorCard(Modifier.fillMaxWidth()) {
             sessions.forEachIndexed { index, session ->
                 if (index > 0) HairlineDivider()
-                SessionRow(session, selected = session.sessionId == selected, onClick = { selected = session.sessionId })
+                SessionRow(
+                    session,
+                    selected = session.sessionId == selected,
+                    onClick = {
+                        selected = session.sessionId
+                        onSelectSession(session.sessionId)
+                    },
+                )
+            }
+        }
+        if (transcript.isNotEmpty() || attachError != null) {
+            Spacer(Modifier.height(16.dp))
+            Text(ComputersCopy.TRANSCRIPT, style = type.small, color = colors.textTertiary)
+            Spacer(Modifier.height(6.dp))
+            if (attachError != null) {
+                Text(attachError, style = type.small, color = colors.textTertiary)
+                Spacer(Modifier.height(6.dp))
+            }
+            Column(Modifier.fillMaxWidth().testTag(ComputersTags.TRANSCRIPT)) {
+                transcript.forEach { line ->
+                    val color = when (line.kind) {
+                        LocalAgentLineKind.USER -> colors.textPrimary
+                        LocalAgentLineKind.ASSISTANT -> colors.textSecondary
+                        LocalAgentLineKind.NOTICE -> colors.textTertiary
+                        LocalAgentLineKind.STATUS -> colors.textQuaternary
+                    }
+                    Text(line.text, style = type.base, color = color)
+                    Spacer(Modifier.height(6.dp))
+                }
             }
         }
         Spacer(Modifier.height(12.dp))

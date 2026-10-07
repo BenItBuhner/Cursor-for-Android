@@ -123,6 +123,34 @@ class ProtoWireTest {
         assertThat(ProtoWire.encode(JsonObject(emptyMap()), AgentHostSchemas.LIST_SESSIONS_REQUEST)).isEmpty()
     }
 
+    @Test
+    fun `an attach session event and a watch snapshot round-trip`() {
+        val event = buildJsonObject {
+            put("eventId", "4")
+            put("interactionUpdate", buildJsonObject {
+                put("textDelta", buildJsonObject {
+                    put("text", "Looking at NavStack.kt")
+                    put("isServerNotice", false)
+                })
+            })
+        }
+        val decoded = ProtoWire.decode(ProtoWire.encode(event, AgentHostSchemas.SESSION_EVENT), AgentHostSchemas.SESSION_EVENT)
+        assertThat(decoded["eventId"]!!.jsonPrimitive.content).isEqualTo("4")
+        assertThat(decoded["interactionUpdate"]!!.jsonObject["textDelta"]!!.jsonObject["text"]!!.jsonPrimitive.content)
+            .isEqualTo("Looking at NavStack.kt")
+
+        val watch = buildJsonObject {
+            put("snapshot", buildJsonObject {
+                put("sessions", buildJsonArray {
+                    add(buildJsonObject { put("sessionId", "sess-1"); put("title", "Fix the nav") })
+                })
+            })
+        }
+        val listed = ProtoWire.decode(ProtoWire.encode(watch, AgentHostSchemas.WATCH_EVENT), AgentHostSchemas.WATCH_EVENT)
+        assertThat(listed["snapshot"]!!.jsonObject["sessions"]!!.jsonArray.single().jsonObject["sessionId"]!!.jsonPrimitive.content)
+            .isEqualTo("sess-1")
+    }
+
     private object BlobIds {
         fun id(name: String): String = java.util.Base64.getEncoder().encodeToString(name.toByteArray())
     }

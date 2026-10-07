@@ -25,6 +25,7 @@ object ComputersCopy {
     const val MACHINES_HINT =
         "Cloud agents can still run tools on a connected machine from New Chat's device picker. That is My Machines, not this pairing, and the agent loop stays in Cursor's cloud."
     const val CODE_LABEL = "Verification code"
+    const val TRANSCRIPT = "On this computer"
 }
 
 object ComputersTags {
@@ -39,4 +40,5 @@ object ComputersTags {
     const val START_SEND = "computer_start_send"
     fun computerRow(targetId: String): String = "computer_row_$targetId"
     fun sessionRow(sessionId: String): String = "computer_session_$sessionId"
+    const val TRANSCRIPT = "computer_transcript"
 }

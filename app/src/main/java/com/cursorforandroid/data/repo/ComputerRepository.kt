@@ -2,6 +2,7 @@ package com.cursorforandroid.data.repo
 
 import com.cursorforandroid.data.api.ConnectRpcException
 import com.cursorforandroid.data.api.ControllerIdentity
+import com.cursorforandroid.data.api.LocalAgentTranscript
 import com.cursorforandroid.data.api.RemoteAgentHostApi
 import com.cursorforandroid.data.auth.SessionUnavailableException
 import com.cursorforandroid.domain.Capabilities
@@ -9,10 +10,18 @@ import com.cursorforandroid.domain.Computer
 import com.cursorforandroid.domain.ComputerPairing
 import com.cursorforandroid.domain.ComputerPresence
 import com.cursorforandroid.domain.ControllerTrust
+import com.cursorforandroid.domain.LocalAgentLine
 import com.cursorforandroid.domain.LocalAgentSession
+import com.cursorforandroid.domain.LocalSessionEvent
 import com.cursorforandroid.domain.LocalWorkspace
 import com.cursorforandroid.domain.PairingChallenge
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -47,6 +56,10 @@ class ComputerRepository(
         val sending: Boolean = false,
         val error: String? = null,
         val notice: String? = null,
+        val attachedSessionId: String? = null,
+        val transcript: List<LocalAgentLine> = emptyList(),
+        val attachError: String? = null,
+        val watchError: String? = null,
     )
 
     private val listFlow = MutableStateFlow(ListState())
@@ -162,6 +175,92 @@ class ComputerRepository(
         refreshDetail(targetId)
     }
 
+    /**
+     * Live inbox via `StreamAgentHost` WATCH_SESSIONS. Reconnects immediately on drop. A missing stream is
+     * [STREAM_MISSING] and the unary session list stays as the fallback.
+     */
+    suspend fun watchInbox(targetId: String) {
+        if (isDemo() || !capabilities().computerControl) return
+        val flow = detailFlow(targetId)
+        while (currentCoroutineContext().isActive) {
+            try {
+                api().watchSessions(targetId) { sessions ->
+                    flow.update { it.copy(sessions = sessions, watchError = null) }
+                    true
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (missing(e)) {
+                    flow.update { it.copy(watchError = STREAM_MISSING) }
+                    return
+                }
+                currentCoroutineContext().ensureActive()
+            }
+        }
+    }
+
+    /**
+     * Live transcript via `StreamAgentHost` ATTACH_SESSION. Reconnects immediately on drop, resuming from the last
+     * event id. A missing stream is [ATTACH_MISSING]; reply and start still use unary calls.
+     */
+    suspend fun attach(targetId: String, sessionId: String) {
+        if (isDemo() || !capabilities().computerControl) return
+        if (sessionId.isBlank()) return
+        val flow = detailFlow(targetId)
+        flow.update {
+            it.copy(
+                attachedSessionId = sessionId,
+                transcript = if (it.attachedSessionId == sessionId) it.transcript else emptyList(),
+                attachError = null,
+            )
+        }
+        var lastEventId = flow.value.sessions.firstOrNull { it.sessionId == sessionId }?.lastEventId
+        while (currentCoroutineContext().isActive) {
+            try {
+                val me = identity.loadOrCreate()
+                coroutineScope {
+                    val events = Channel<LocalSessionEvent>(Channel.UNLIMITED)
+                    val stream = async {
+                        try {
+                            api().attachSession(targetId, sessionId, lastEventId, me.clientInstanceId) { event ->
+                                events.trySend(event)
+                                true
+                            }
+                        } finally {
+                            events.close()
+                        }
+                    }
+                    for (event in events) {
+                        lastEventId = event.eventId ?: lastEventId
+                        when (event) {
+                            is LocalSessionEvent.History -> {
+                                val lines = runCatching {
+                                    LocalAgentTranscript.history(event.turnBlobIds, emptyMap()) { ids ->
+                                        api().getSessionBlobs(targetId, sessionId, ids)
+                                    }
+                                }.getOrDefault(emptyList())
+                                flow.update { it.copy(transcript = lines, attachError = null) }
+                            }
+                            else -> flow.update {
+                                it.copy(transcript = LocalAgentTranscript.apply(it.transcript, event), attachError = null)
+                            }
+                        }
+                    }
+                    stream.await()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (missing(e)) {
+                    flow.update { it.copy(attachError = ATTACH_MISSING) }
+                    return
+                }
+                currentCoroutineContext().ensureActive()
+            }
+        }
+    }
+
     private suspend fun send(targetId: String, block: suspend (RemoteAgentHostApi, ControllerIdentity.Public) -> Unit): Result<Unit> {
         val flow = detailFlow(targetId)
         if (!capabilities().computerControl) return Result.failure(IllegalStateException(NEEDS_EXTENDED_MODE))
@@ -188,12 +287,18 @@ class ComputerRepository(
             if (error.code == SessionUnavailableException.EXTENDED_MODE_OFF) NEEDS_EXTENDED_MODE
             else error.message ?: NO_SESSION
         is ConnectRpcException -> when {
-            error.code == "unimplemented" || error.httpCode == 404 -> ENDPOINT_MISSING
+            missing(error) && error.path?.contains("StreamAgentHost") == true -> STREAM_MISSING
+            missing(error) -> ENDPOINT_MISSING
             error.isUnreadableAnswer -> ENDPOINT_CHANGED
             else -> error.message ?: ENDPOINT_CHANGED
         }
         is IOException -> error.message ?: "Couldn't reach Cursor."
         else -> error.message ?: ENDPOINT_CHANGED
+    }
+
+    private fun missing(error: Throwable): Boolean {
+        val rpc = error as? ConnectRpcException ?: return false
+        return rpc.code == "unimplemented" || rpc.httpCode == 404
     }
 
     companion object {
@@ -203,6 +308,10 @@ class ComputerRepository(
         const val NO_SESSION = "Not signed in."
         const val ENDPOINT_MISSING =
             "This account's Cursor service does not offer computer pairing yet (the Oct 6 Remote Control RPC is missing)."
+        const val STREAM_MISSING =
+            "Live local-agent updates are missing on this account (StreamAgentHost). The session list still loads; reply and start still send."
+        const val ATTACH_MISSING =
+            "This account cannot attach to a local agent's transcript (StreamAgentHost ATTACH_SESSION is missing). Reply and start still send."
         const val ENDPOINT_CHANGED = "Cursor's computer-pairing API changed underneath this build."
         const val SENT = "Sent to the computer."
     }
