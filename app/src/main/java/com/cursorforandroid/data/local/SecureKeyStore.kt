@@ -287,6 +287,14 @@ class SecureKeyStore(
 
     fun setMcpServersJson(json: String?): Boolean = write(KEY_MCP_SERVERS, json)
 
+    /**
+     * This phone's Remote Control controller key (P-256 JWK plus a client instance id). Pairing identity for the
+     * Oct 6 computer list; not an API key, and not wiped on a normal sign-out.
+     */
+    fun controllerKeyJson(): String? = read(KEY_CONTROLLER)
+
+    fun setControllerKeyJson(json: String?): Boolean = write(KEY_CONTROLLER, json)
+
     private fun read(key: String): String? {
         val prefs = prefs() ?: return memory[key]
         runCatching { prefs.getString(key, null) }
@@ -378,6 +386,7 @@ class SecureKeyStore(
         const val TAG = "SecureKeyStore"
         const val KEY_API_KEY = "api_key"
         const val KEY_MCP_SERVERS = "mcp_servers"
+        const val KEY_CONTROLLER = "controller_p256"
         const val LEGACY_KEY_GITHUB_TOKEN = "github_token"
         const val LEGACY_FALLBACK_FILE = "cursor_prefs_fallback"
         const val ANDROID_KEY_STORE = "AndroidKeyStore"

@@ -35,6 +35,18 @@ sealed interface Screen {
         override val route: String get() = "keyboard-shortcuts"
     }
 
+    /**
+     * Oct 6 computers on the account (pairing + local-agent inbox). Pushed over Settings, never mixed into the
+     * My Machines device picker.
+     */
+    data object Computers : Screen {
+        override val route: String get() = "computers"
+    }
+
+    data class Computer(val targetId: String) : Screen {
+        override val route: String get() = "computer/$targetId"
+    }
+
     data class Agent(val id: String) : Screen {
         override val route: String get() = "agent/$id"
     }
@@ -48,6 +60,8 @@ sealed interface Screen {
             route == Settings.route -> Settings
             route == WhatsNew.route -> WhatsNew
             route == KeyboardShortcuts.route -> KeyboardShortcuts
+            route == Computers.route -> Computers
+            route.startsWith("computer/") -> route.removePrefix("computer/").takeIf { it.isNotBlank() }?.let(::Computer)
             route.startsWith("agent/") -> route.removePrefix("agent/").takeIf { it.isNotBlank() }?.let(::Agent)
             route.startsWith(LEGACY_PROJECT_PREFIX) -> route.removePrefix(LEGACY_PROJECT_PREFIX).takeIf { it.isNotBlank() }?.let(::Agent)
             else -> null

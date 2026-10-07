@@ -124,6 +124,8 @@ fun SettingsScreen(
     newChatList: AgentListUiState = AgentListUiState(),
     /** Opens the Keyboard shortcuts page. */
     onOpenKeyboardShortcuts: () -> Unit = {},
+    /** Opens the Computers page (Oct 6 local-agent remote control). Demo has no Advanced group, so nothing calls this. */
+    onOpenComputers: () -> Unit = {},
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
@@ -223,6 +225,14 @@ fun SettingsScreen(
                 Group(SettingsCopy.GROUP_ADVANCED)
                 SettingsCard {
                     ExtendedModeRow(graph, enabled = extendedMode)
+                    HairlineDivider()
+                    SettingsRow(
+                        title = com.cursorforandroid.ui.computers.ComputersCopy.TITLE,
+                        description = com.cursorforandroid.ui.computers.ComputersCopy.SETTING_DETAIL,
+                        modifier = Modifier.testTag(com.cursorforandroid.ui.computers.ComputersTags.SETTINGS_ROW),
+                        onClick = onOpenComputers,
+                        trailing = { RowGlyph(CursorIcons.ChevronRight) },
+                    )
                 }
             }
 

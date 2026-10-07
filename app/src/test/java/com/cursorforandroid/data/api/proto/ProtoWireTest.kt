@@ -101,6 +101,28 @@ class ProtoWireTest {
         assertThat(AgentSchemas.TOOL_CALL.fields[74]!!.name).isEqualTo("sendToAgentToolCall")
     }
 
+    @Test
+    fun `an agent-host session list round-trips through protobuf data`() {
+        val listed = buildJsonObject {
+            put(
+                "sessions",
+                buildJsonArray {
+                    add(buildJsonObject {
+                        put("sessionId", "sess-1")
+                        put("title", "Fix the nav")
+                        put("status", 2)
+                    })
+                },
+            )
+        }
+        val decoded = ProtoWire.decode(ProtoWire.encode(listed, AgentHostSchemas.LIST_SESSIONS_RESPONSE), AgentHostSchemas.LIST_SESSIONS_RESPONSE)
+        val session = decoded["sessions"]!!.jsonArray.single().jsonObject
+        assertThat(session["sessionId"]!!.jsonPrimitive.content).isEqualTo("sess-1")
+        assertThat(session["title"]!!.jsonPrimitive.content).isEqualTo("Fix the nav")
+        assertThat(session["status"]!!.jsonPrimitive.content).isEqualTo("2")
+        assertThat(ProtoWire.encode(JsonObject(emptyMap()), AgentHostSchemas.LIST_SESSIONS_REQUEST)).isEmpty()
+    }
+
     private object BlobIds {
         fun id(name: String): String = java.util.Base64.getEncoder().encodeToString(name.toByteArray())
     }

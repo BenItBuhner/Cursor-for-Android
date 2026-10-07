@@ -108,7 +108,7 @@ class SettingsScreenTest {
             SettingsCopy.GROUP_ACCOUNT, SettingsCopy.SIGN_OUT, SettingsCopy.GROUP_APPEARANCE, ThemeSwitchCopy.TITLE, SettingsCopy.OLED_BLACK,
             NewChatHomePickerCopy.GROUP, NewChatHomePickerCopy.NEEDS_MODE, SettingsCopy.GROUP_CHATS,
             SettingsCopy.UNREAD_THIS_PHONE, SettingsCopy.SHORTEN_PROJECTS, ShortcutsCopy.TITLE, SettingsCopy.GROUP_NOTIFICATIONS,
-            SettingsCopy.GROUP_ADVANCED, ExtendedModeCopy.SETTING_TITLE,
+            SettingsCopy.GROUP_ADVANCED, ExtendedModeCopy.SETTING_TITLE, com.cursorforandroid.ui.computers.ComputersCopy.TITLE,
             SettingsCopy.GROUP_UPDATES, "Version ${BuildConfig.VERSION_NAME}", "Check for updates automatically", SettingsCopy.DISCLAIMER,
         )
         val tops = order.map(::top)
@@ -185,7 +185,13 @@ class SettingsScreenTest {
 
         compose.onNodeWithText(SettingsCopy.LEAVE_DEMO).assertExists()
         // Every chat in the demo is this phone's own: the unread switch would change nothing, so it is not offered.
-        assertAbsent(SettingsCopy.SIGN_OUT, SettingsCopy.GROUP_ADVANCED, ExtendedModeCopy.SETTING_TITLE, SettingsCopy.UNREAD_THIS_PHONE)
+        assertAbsent(
+            SettingsCopy.SIGN_OUT,
+            SettingsCopy.GROUP_ADVANCED,
+            ExtendedModeCopy.SETTING_TITLE,
+            com.cursorforandroid.ui.computers.ComputersCopy.TITLE,
+            SettingsCopy.UNREAD_THIS_PHONE,
+        )
         compose.onNodeWithText(SettingsCopy.SHORTEN_PROJECTS).assertExists()
         compose.onAllNodes(hasTestTag(ExtendedModeTags.TOGGLE)).assertCountEquals(0)
         // The way out is the button at the row's end; the row itself is not a control.
@@ -324,6 +330,23 @@ class SettingsScreenTest {
         assertThat(send.action).isEqualTo(Intent.ACTION_SEND)
         assertThat(send.getStringExtra(Intent.EXTRA_TEXT)).startsWith("Cursor for Android ")
         assertThat(send.getStringExtra(Intent.EXTRA_TEXT)).contains("Project diagnostics")
+    }
+
+    @Test
+    fun `Computers sits under Extended mode and opens from the Advanced card`() {
+        var opened = 0
+        compose.setContent {
+            CursorTheme(mode = ThemeMode.Dark) {
+                view = LocalView.current
+                SettingsScreen(graph, USER, isDemo = false, onOpenSidebar = null, onBack = {}, onOpenComputers = { opened++ })
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag(com.cursorforandroid.ui.computers.ComputersTags.SETTINGS_ROW).assertHasClickAction()
+        assertThat(top(ExtendedModeCopy.SETTING_TITLE)).isLessThan(top(com.cursorforandroid.ui.computers.ComputersCopy.TITLE))
+        assertThat(top(com.cursorforandroid.ui.computers.ComputersCopy.TITLE)).isLessThan(top(SettingsCopy.GROUP_UPDATES))
+        compose.onNodeWithTag(com.cursorforandroid.ui.computers.ComputersTags.SETTINGS_ROW).performScrollTo().performClick()
+        assertThat(opened).isEqualTo(1)
     }
 
     private companion object {

@@ -5,6 +5,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 import java.util.Base64
 
 /**
@@ -51,6 +54,81 @@ object ProtoWire {
 
     /** [bytes] read as a [schema] message. Throws [MalformedException] when the bytes are not a protobuf message at all. */
     fun decode(bytes: ByteArray, schema: Schema): JsonObject = decodeMessage(bytes, 0, bytes.size, schema, depth = 0)
+
+    /**
+     * The inverse of [decode]: a proto3-JSON object written as protobuf binary against a [schema]. A key the schema
+     * does not name is left out. [unknown] writes extra fields the schema does not know, for drift tests.
+     */
+    fun encode(json: JsonObject, schema: Schema, unknown: List<Triple<Int, Kind, JsonElement>> = emptyList()): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val byName = schema.fields.values.associateBy { it.name }
+        for ((key, value) in json) {
+            val field = byName[key] ?: continue
+            if (value is JsonNull) continue
+            if (field.repeated) {
+                (value as? JsonArray)?.forEach { writeField(out, field, it) }
+            } else if (field.kind == Kind.MAP) {
+                val entry = field.message ?: continue
+                (value as? JsonObject)?.forEach { (k, v) ->
+                    val bytes = encode(JsonObject(mapOf("key" to JsonPrimitive(k), "value" to v)), entry)
+                    writeTag(out, field.number, WIRE_LENGTH); writeVarint(out, bytes.size.toLong()); out.write(bytes)
+                }
+            } else {
+                writeField(out, field, value)
+            }
+        }
+        for ((number, kind, value) in unknown) writeField(out, Field(number, "unknown$number", kind), value)
+        return out.toByteArray()
+    }
+
+    private fun writeField(out: java.io.ByteArrayOutputStream, field: Field, value: JsonElement) {
+        when (field.kind) {
+            Kind.STRING -> {
+                val bytes = (value as JsonPrimitive).content.toByteArray(Charsets.UTF_8)
+                writeTag(out, field.number, WIRE_LENGTH); writeVarint(out, bytes.size.toLong()); out.write(bytes)
+            }
+            Kind.BYTES -> {
+                val bytes = Base64.getDecoder().decode((value as JsonPrimitive).content)
+                writeTag(out, field.number, WIRE_LENGTH); writeVarint(out, bytes.size.toLong()); out.write(bytes)
+            }
+            Kind.BOOL -> {
+                writeTag(out, field.number, WIRE_VARINT)
+                writeVarint(out, if ((value as JsonPrimitive).booleanOrNull == true) 1L else 0L)
+            }
+            Kind.INT32, Kind.UINT32, Kind.INT64, Kind.UINT64, Kind.ENUM -> {
+                writeTag(out, field.number, WIRE_VARINT)
+                val primitive = value as JsonPrimitive
+                writeVarint(out, primitive.longOrNull ?: primitive.content.toLong())
+            }
+            Kind.DOUBLE -> {
+                writeTag(out, field.number, WIRE_FIXED64)
+                val bits = java.lang.Double.doubleToLongBits((value as JsonPrimitive).doubleOrNull ?: 0.0)
+                for (i in 0 until 8) out.write(((bits ushr (8 * i)) and 0xFF).toInt())
+            }
+            Kind.FLOAT -> {
+                writeTag(out, field.number, WIRE_FIXED32)
+                val bits = java.lang.Float.floatToIntBits(((value as JsonPrimitive).doubleOrNull ?: 0.0).toFloat())
+                for (i in 0 until 4) out.write(((bits ushr (8 * i)) and 0xFF).toInt())
+            }
+            Kind.MESSAGE -> {
+                val bytes = encode(value as JsonObject, field.message!!)
+                writeTag(out, field.number, WIRE_LENGTH); writeVarint(out, bytes.size.toLong()); out.write(bytes)
+            }
+            Kind.MAP -> error("maps are written by encode")
+        }
+    }
+
+    private fun writeTag(out: java.io.ByteArrayOutputStream, number: Int, wireType: Int) =
+        writeVarint(out, (number.toLong() shl 3) or wireType.toLong())
+
+    private fun writeVarint(out: java.io.ByteArrayOutputStream, value: Long) {
+        var v = value
+        while (true) {
+            if (v and 0x7FL.inv() == 0L) { out.write(v.toInt()); return }
+            out.write(((v and 0x7F) or 0x80).toInt())
+            v = v ushr 7
+        }
+    }
 
     private fun decodeMessage(bytes: ByteArray, start: Int, end: Int, schema: Schema, depth: Int): JsonObject {
         if (depth > MAX_DEPTH) throw MalformedException("${schema.name}: nested deeper than $MAX_DEPTH")

@@ -95,12 +95,18 @@ data class Capabilities(
      * this app, sent inline as the documented `mcpServers[]`.
      */
     val accountConnectors: Boolean = false,
+    /**
+     * Phone-to-computer remote control of **local** agents (`aiserver.v1.RemoteAgentHostPresenceService`: the
+     * computer list, `TrustController` pairing, `CallAgentHost` inbox / reply / start). Off: the documented Cloud
+     * Agents API, including My Machines (`env.type: machine|pool`). There is no public computers/pairing endpoint.
+     */
+    val computerControl: Boolean = false,
 ) {
     /** True when any private surface is on: what the persistent indicator and the default-mode explanations go by. */
     val anyExtended: Boolean
         get() = accountSession || accountProfile || pinSync || accountLifecycle || accountSlashCommands || accountPullRequests || projects || steering ||
             workspaceFiles || diffDetails || scmPullRequests || remoteDesktop || interactions || accountQueue || agentModes || accountTranscript || accountGoal ||
-            promptFiles || machineStart || accountConnectors
+            promptFiles || machineStart || accountConnectors || computerControl
 
     companion object {
         /** The default: the documented API only. */
@@ -125,6 +131,7 @@ data class Capabilities(
             promptFiles = false,
             machineStart = false,
             accountConnectors = false,
+            computerControl = false,
         )
 
         /** Extended mode: every private surface, exactly as the app used them before the setting existed. */
@@ -149,6 +156,7 @@ data class Capabilities(
             promptFiles = true,
             machineStart = true,
             accountConnectors = true,
+            computerControl = true,
         )
 
         /** Extended mode's Stable transcript engine: every private surface but the record read and the goal it carries (see [TranscriptEngine]). */

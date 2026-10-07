@@ -52,6 +52,8 @@ import com.cursorforandroid.ui.agents.SidebarDestination
 import com.cursorforandroid.ui.components.rememberPopoverAnchor
 import com.cursorforandroid.ui.components.CursorDrawer
 import com.cursorforandroid.ui.components.rememberCursorDrawerState
+import com.cursorforandroid.ui.computers.ComputerScreen
+import com.cursorforandroid.ui.computers.ComputersScreen
 import com.cursorforandroid.ui.conversation.ConversationScreen
 import com.cursorforandroid.ui.customize.CustomizeSheet
 import com.cursorforandroid.share.ShareTarget
@@ -372,6 +374,12 @@ private fun AppShell(
         stack.open(Screen.KeyboardShortcuts)
     }
 
+    /** Settings › Computers, over Settings: Oct 6 pairing + local-agent inbox. */
+    fun openComputers() {
+        closeDrawer()
+        stack.open(Screen.Computers)
+    }
+
     /** A chat opened on its launch that did not go through: back to the composer, if the user is still looking at it. */
     fun leaveFailedLaunch(agentId: String) {
         if ((stack.top.screen as? Screen.Agent)?.id == agentId) stack.pop()
@@ -487,7 +495,7 @@ private fun AppShell(
     val destination = when (topScreen) {
         Screen.Home -> SidebarDestination.NewChat
         Screen.Settings -> SidebarDestination.Settings
-        Screen.WhatsNew, Screen.KeyboardShortcuts, is Screen.Agent -> null
+        Screen.WhatsNew, Screen.KeyboardShortcuts, Screen.Computers, is Screen.Computer, is Screen.Agent -> null
     }
     val updateState by graph.updateState.collectAsStateWithLifecycle(initialValue = graph.currentUpdateState())
     // The one place an update is raised with the user; the row leads to Settings, where it is installed.
@@ -584,12 +592,23 @@ private fun AppShell(
                         onOpenWhatsNew = ::openWhatsNew,
                         newChatList = pane.listState,
                         onOpenKeyboardShortcuts = ::openKeyboardShortcuts,
+                        onOpenComputers = ::openComputers,
                     )
                     // A page of its own under Settings (or the sidebar's card); back is the stack's in either layout.
                     Screen.WhatsNew -> WhatsNewScreen(graph = graph, onBack = { stack.pop() })
                     Screen.KeyboardShortcuts -> KeyboardShortcutsScreen(
                         bindings = LocalShortcutBindings.current,
                         onChange = { bindings -> scope.launch { graph.prefs.setShortcutBindings(bindings) } },
+                        onBack = { stack.pop() },
+                    )
+                    Screen.Computers -> ComputersScreen(
+                        graph = graph,
+                        onBack = { stack.pop() },
+                        onOpenComputer = { id -> stack.open(Screen.Computer(id)) },
+                    )
+                    is Screen.Computer -> ComputerScreen(
+                        graph = graph,
+                        targetId = screen.targetId,
                         onBack = { stack.pop() },
                     )
                     is Screen.Agent -> ConversationScreen(

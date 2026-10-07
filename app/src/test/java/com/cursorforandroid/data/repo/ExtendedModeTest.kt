@@ -71,7 +71,10 @@ class ExtendedModeTest {
         assertThat(stable.steering).isTrue()
         assertThat(stable.projects).isTrue()
         assertThat(stable.pinSync).isTrue()
+        assertThat(stable.computerControl).isTrue()
         assertThat(stable.anyExtended).isTrue()
+        assertThat(Capabilities.DOCUMENTED.computerControl).isFalse()
+        assertThat(Capabilities.EXTENDED.computerControl).isTrue()
         assertThat(stable.copy(accountTranscript = true, accountGoal = true)).isEqualTo(Capabilities.EXTENDED)
         assertThat(mode.capabilities.first()).isEqualTo(Capabilities.EXTENDED_STABLE)
         // Never stored: another process is on Beta.

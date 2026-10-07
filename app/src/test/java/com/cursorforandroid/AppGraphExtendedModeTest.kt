@@ -47,9 +47,14 @@ class AppGraphExtendedModeTest {
         assertThat(graph.steering.pause("bc-1").isFailure).isTrue()
         assertThat(graph.steering.state("bc-1").value.queueLoad).isEqualTo(QueueLoad.Unavailable(SteeringRepository.NEEDS_EXTENDED_MODE))
 
+        assertThat(graph.computers.list.value.allowed).isFalse()
+        graph.computers.refreshList()
+        assertThat(graph.computers.list.value.error).isEqualTo(com.cursorforandroid.data.repo.ComputerRepository.NEEDS_EXTENDED_MODE)
+        assertThat(graph.computers.list.value.computers).isEmpty()
+
         val built = graph.builtParts()
-        assertThat(built).containsNoneOf("accountClient", "accountRpc", "sessionTokens", "accountAgents", "accountPullRequests", "accountSlashCommands", "projectApi", "steeringApi")
-        assertThat(built).containsAtLeast("projects", "steering")
+        assertThat(built).containsNoneOf("accountClient", "accountRpc", "sessionTokens", "accountAgents", "accountPullRequests", "accountSlashCommands", "projectApi", "steeringApi", "remoteAgentHost")
+        assertThat(built).containsAtLeast("projects", "steering", "computers")
         // What stands in: GitHub's client, built by the catalog load (the tree read is decided per host, so nothing was asked of it here).
         assertThat(built).contains("gitHubSlashCommands")
     }
@@ -64,9 +69,11 @@ class AppGraphExtendedModeTest {
         graph.slashCommands.load(repoScope)
         // The chat's controls reach for the account too, and its refusal (no key) is the words the screen shows.
         assertThat(graph.steering.steer("bc-1", "go").exceptionOrNull()?.message).isEqualTo("Not signed in.")
+        graph.computers.refreshList()
+        assertThat(graph.computers.list.value.allowed).isTrue()
 
         val built = graph.builtParts()
-        assertThat(built).containsAtLeast("accountClient", "accountRpc", "sessionTokens", "accountSlashCommands", "steeringApi")
+        assertThat(built).containsAtLeast("accountClient", "accountRpc", "sessionTokens", "accountSlashCommands", "steeringApi", "remoteAgentHost", "computers")
         assertThat(built).containsNoneOf("gitHub", "gitHubSlashCommands", "gitHubPullRequests")
     }
 

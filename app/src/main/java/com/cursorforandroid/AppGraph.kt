@@ -27,6 +27,8 @@ import com.cursorforandroid.data.api.HostPause
 import com.cursorforandroid.data.api.ConnectJsonClient
 import com.cursorforandroid.data.api.ConnectProjectCreationApi
 import com.cursorforandroid.data.api.ConnectPromptUploadApi
+import com.cursorforandroid.data.api.ConnectRemoteAgentHostApi
+import com.cursorforandroid.data.api.ControllerIdentity
 import com.cursorforandroid.data.api.ConversationRecordApi
 import com.cursorforandroid.data.api.CreatedPullRequest
 import com.cursorforandroid.data.api.CursorApiFactory
@@ -57,6 +59,7 @@ import com.cursorforandroid.data.api.ProjectApi
 import com.cursorforandroid.data.api.ProjectLineageApi
 import com.cursorforandroid.data.api.PromptUploadApi
 import com.cursorforandroid.data.api.PullRequestApi
+import com.cursorforandroid.data.api.RemoteAgentHostApi
 import com.cursorforandroid.data.api.PullRequestCreationApi
 import com.cursorforandroid.data.api.RecordState
 import com.cursorforandroid.data.api.RootScan
@@ -102,6 +105,7 @@ import com.cursorforandroid.data.repo.AttachmentUploads
 import com.cursorforandroid.data.repo.CapabilityGatedPullRequestSource
 import com.cursorforandroid.data.repo.CatalogRepository
 import com.cursorforandroid.data.repo.ChatLauncher
+import com.cursorforandroid.data.repo.ComputerRepository
 import com.cursorforandroid.data.repo.ConversationRepository
 import com.cursorforandroid.data.repo.LiveSync
 import com.cursorforandroid.data.repo.CursorBackend
@@ -254,6 +258,12 @@ class AppGraph(
      * screen on the state before it.
      */
     val agentListDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /**
+     * Injectable for tests only: Oct 6 computer pairing (`RemoteAgentHostPresenceService`), so the Computers screens
+     * can be driven without api2. Production builds the Connect client on first use, and only after
+     * [Capabilities.computerControl] allows it.
+     */
+    remoteAgentHostApi: RemoteAgentHostApi? = null,
 ) {
     private val app = context.applicationContext
 
@@ -518,6 +528,23 @@ class AppGraph(
         )
     }
     val remote: RemoteRepository get() = lazyRemote.value
+
+    /**
+     * Phone-to-computer remote control of **local** agents (Oct 6): the computer list, desktop pairing, inbox / reply
+     * / start on the machine. Gated on [Capabilities.computerControl]; SDK-only never builds the Connect client.
+     */
+    private val lazyRemoteAgentHost = lazy {
+        remoteAgentHostApi ?: ConnectRemoteAgentHostApi(lazyAccountRpc.value, lazySessionTokens.value)
+    }
+    private val lazyComputers = lazy {
+        ComputerRepository(
+            api = { lazyRemoteAgentHost.value },
+            identity = ControllerIdentity(keyStore, Build.MODEL.orEmpty()),
+            capabilities = capabilities,
+            isDemo = { session.isDemo },
+        )
+    }
+    val computers: ComputerRepository get() = lazyComputers.value
 
     // The repositories take their sources by value, so the account's and GitHub's are handed over behind these
     // shims: a graph in default mode never builds the api2 client, and one in Extended mode never builds GitHub's.
@@ -1206,6 +1233,7 @@ class AppGraph(
             if (lazyWorkspace.isInitialized()) workspace.reset()
             if (lazyAgentStores.isInitialized()) agentStores.reset()
             if (lazyRemote.isInitialized()) remote.reset()
+            if (lazyComputers.isInitialized()) computers.reset()
             if (lazyArtifacts.isInitialized()) artifacts.resetAll()
             if (lazyStoreFiles.isInitialized()) storeFiles.resetAll()
             if (lazyTranscriptSearch.isInitialized()) transcriptSearch.clear()
@@ -1245,6 +1273,7 @@ class AppGraph(
             if (lazyWorkspace.isInitialized()) workspace.reset()
             if (lazyAgentStores.isInitialized()) agentStores.reset()
             if (lazyRemote.isInitialized()) remote.reset()
+            if (lazyComputers.isInitialized()) computers.reset()
             if (lazyAgents.isInitialized()) agents.forgetAccountSources(prefs.localAgentState.first().launchedHereIds)
             session.forgetAccountProfile()
         }
@@ -1295,6 +1324,8 @@ class AppGraph(
             "workspace" to lazyWorkspace,
             "agentStores" to lazyAgentStores,
             "remote" to lazyRemote,
+            "remoteAgentHost" to lazyRemoteAgentHost,
+            "computers" to lazyComputers,
             "agents" to lazyAgents,
             "pullRequests" to lazyPullRequests,
             "pins" to lazyPins,

@@ -114,6 +114,24 @@ class NavStackTest {
     }
 
     @Test
+    fun `Computers opens over Settings and a computer over Computers, and the routes round-trip`() {
+        val stack = NavStack(Screen.Home)
+        stack.open(Screen.Settings)
+        stack.open(Screen.Computers)
+        stack.open(Screen.Computer("desk-1"))
+        assertThat(stack.screens).containsExactly(Screen.Home, Screen.Settings, Screen.Computers, Screen.Computer("desk-1")).inOrder()
+        stack.pop()
+        assertThat(stack.top.screen).isEqualTo(Screen.Computers)
+        assertThat(Screen.fromRoute("computers")).isEqualTo(Screen.Computers)
+        assertThat(Screen.fromRoute("computer/desk-1")).isEqualTo(Screen.Computer("desk-1"))
+        assertThat(Screen.fromRoute("computer/")).isNull()
+        assertThat(Screen.fromRoute(Screen.Computer("desk-1").route)).isEqualTo(Screen.Computer("desk-1"))
+        // Local desktop session ids are never restored as cloud chats.
+        assertThat(Screen.fromRoute("agent/local-session")).isEqualTo(Screen.Agent("local-session"))
+        assertThat(Screen.fromRoute("computer/local-session")).isNotEqualTo(Screen.Agent("local-session"))
+    }
+
+    @Test
     fun `Settings opened from a chat is pushed over it, and What's new over Settings`() {
         val stack = NavStack(Screen.Home)
         stack.openAgent("bc-1")

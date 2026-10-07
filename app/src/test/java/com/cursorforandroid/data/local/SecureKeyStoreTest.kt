@@ -182,6 +182,21 @@ class SecureKeyStoreTest {
     }
 
     @Test
+    fun `the controller pairing key survives an ordinary API-key sign-out`() {
+        val prefs = FailingPrefs(backing("controller-survive"))
+        val store = SecureKeyStore(context, openRetryDelayMs = 0) { prefs }
+        assertThat(store.setControllerKeyJson("""{"kty":"EC","crv":"P-256"}""")).isTrue()
+        assertThat(store.setApiKey("key_live")).isTrue()
+
+        assertThat(store.setApiKey(null)).isTrue()
+        assertThat(store.apiKey()).isNull()
+        assertThat(store.controllerKeyJson()).isEqualTo("""{"kty":"EC","crv":"P-256"}""")
+        val next = SecureKeyStore(context, openRetryDelayMs = 0) { prefs }
+        assertThat(next.controllerKeyJson()).isEqualTo("""{"kty":"EC","crv":"P-256"}""")
+        assertThat(next.apiKey()).isNull()
+    }
+
+    @Test
     fun `an ordinary sign-out removes the key and leaves no tombstone behind`() {
         val prefs = FailingPrefs(backing("sign-out-clean"))
         val store = SecureKeyStore(context, openRetryDelayMs = 0) { prefs }

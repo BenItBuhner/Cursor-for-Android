@@ -30,6 +30,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.domain.CursorUser
+import com.cursorforandroid.ui.computers.ComputersCopy
 import com.cursorforandroid.ui.settings.ExtendedModeCopy
 import com.cursorforandroid.ui.settings.ExtendedModeTags
 import com.cursorforandroid.ui.settings.ProjectDiagnosticsCopy
@@ -253,7 +254,7 @@ class SettingsScreenshotTest {
     }
 
     /**
-     * Extended mode is the Advanced card's one row: the transcript engine and background live sync are always on, the
+     * Advanced is Extended mode plus Computers. The transcript engine and background live sync are always on, the
      * crash report consent is gone, nothing is experimental and voice input has no switch.
      */
     private fun assertAlone() {
@@ -261,6 +262,7 @@ class SettingsScreenshotTest {
             compose.onAllNodesWithText(it).assertCountEquals(0)
         }
         compose.onAllNodesWithText(ExtendedModeCopy.SETTING_TITLE).assertCountEquals(1)
+        compose.onAllNodesWithText(ComputersCopy.TITLE).assertCountEquals(1)
     }
 
     /**
