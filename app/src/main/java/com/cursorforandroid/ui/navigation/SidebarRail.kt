@@ -33,16 +33,17 @@ import kotlin.math.roundToInt
  *
  * The column is measured at [width] — [CursorDimens.sidebarWidth] until the reader drags it wider or narrower — and
  * only its visible width animates: the content stays anchored to the moving edge, so it travels off to the start of
- * the window and returns from there rather than being wiped, and nothing inside it — the chat list, the search field —
- * lays out again for any frame of the motion. The detail pane beside it reflows into the room the rail gives up, as on
- * cursor.com. The hairline that separates the two is drawn over the column's end edge, so the rail takes [width] and
- * not a dp more, and rides inside the animated box so it always marks the boundary while it moves. [width] is read at
- * layout, so a drag resizes the column without recomposing the list in it.
+ * the window and returns from there rather than being wiped, and nothing inside it — the chat list — lays out again
+ * for any frame of the motion. The detail pane beside it reflows into the room the rail gives up, as on cursor.com.
+ * The hairline that separates the two is drawn over the column's end edge, so the rail takes [width] and not a dp
+ * more, and rides inside the animated box so it always marks the boundary while it moves. [width] is read at layout,
+ * so a drag resizes the column without recomposing the list in it. Search on this layout is the palette over the
+ * window, not a field in the rail; the phone drawer keeps that field as the narrow-view search.
  *
  * Unlike the phone drawer it covers nothing: the pane reflows beside it, so a composer holding the keyboard keeps both
- * while the rail comes back, where the drawer takes them. Collapsing, the rail is the drawer shutting: its own search,
- * holding focus, lets it go and the keyboard is put away as the collapse begins, and a composer beside it that holds
- * them keeps both ([com.cursorforandroid.ui.components.SheetFocus]).
+ * while the rail comes back, where the drawer takes them. Collapsing, the rail is the drawer shutting: a field holding
+ * focus in it lets go and the keyboard is put away as the collapse begins, and a composer beside it that holds them
+ * keeps both ([com.cursorforandroid.ui.components.SheetFocus]).
  *
  * First composition with [expanded] true shows the rail at once, without a slide: that is what a Fold unfolding or a
  * phone rotating sees when the drawer layout is swapped for this one, and a rail that arrived by sliding in would
