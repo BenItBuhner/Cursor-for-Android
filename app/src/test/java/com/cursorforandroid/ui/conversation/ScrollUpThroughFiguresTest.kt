@@ -229,17 +229,17 @@ class ScrollUpThroughFiguresTest {
      */
     private fun flingUp(durationMillis: Long, releasing: Boolean): Pass {
         compose.mainClock.autoAdvance = false
-        val list = listBounds()
         compose.onNode(transcript).performTouchInput { swipe(Offset(left + 80f, top + 100f), Offset(left + 80f, top + 100f + SWIPE_PX), durationMillis = durationMillis) }
         val moves = mutableListOf<Float>()
         var before = textTops()
         var released: Int? = null
-        var landedAcrossTop = 0
+        val acrossTop = mutableSetOf<Int>()
         val placeholderHeights = mutableSetOf<Int>()
         val figureHeights = mutableMapOf<Int, Int>()
         var seenFigures = emptySet<Int>()
         for (n in 1..FRAMES) {
             frame()
+            val list = listBounds()
             val now = textTops()
             val common = before.keys.intersect(now.keys)
             // The frames of the finger's own drag are not the fling's.
@@ -250,7 +250,10 @@ class ScrollUpThroughFiguresTest {
             val figures = described("Figure ", substring = true).associateBy { it.config[SemanticsProperties.ContentDescription].single().removePrefix("Figure ").toInt() }
             for ((figure, node) in figures) {
                 figureHeights[figure] = node.size.height
-                if (figure !in seenFigures && node.positionInRoot.y < list.top) landedAcrossTop++
+                // Decode finishes a frame or more after the placeholder was let through; counting only the first
+                // frame the node exists missed a gentle fling whose figure was already on screen that frame and
+                // crossed the top on the next. positionInRoot, not the clipped bounds: those never sit above the list.
+                if (node.positionInRoot.y < list.top) acrossTop += figure
             }
             seenFigures = figures.keys
 
@@ -272,7 +275,7 @@ class ScrollUpThroughFiguresTest {
             if (moves.size > 10 && moves.takeLast(2).all { it == 0f } && (released == null || released in seenFigures)) break
         }
         if (releasing) assertWithMessage("a figure was let onto the wire while its reply crossed the top edge").that(released).isNotNull()
-        return Pass(moves, landedAcrossTop, placeholderHeights, figureHeights)
+        return Pass(moves, acrossTop.size, placeholderHeights, figureHeights)
     }
 
     /** A fling only slows, and slowly: a frame moving the text further than the frame before, or much less (a jump back up), is a jump. */
