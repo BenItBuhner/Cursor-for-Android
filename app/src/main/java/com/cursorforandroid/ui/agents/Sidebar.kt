@@ -248,21 +248,24 @@ fun Sidebar(
         }
 
         // A pen writes into the search from its row and the slack around it, outside the reveal's clip, and before the
-        // list under it gets to call the stroke a scroll: drawn over the list, it is hit first.
-        AnimatedVisibility(
-            visible = searching && inRailSearch,
-            enter = expandVertically(tween(160)) + fadeIn(tween(160)),
-            exit = shrinkVertically(tween(140)) + fadeOut(tween(100)),
-            modifier = Modifier.zIndex(1f).stylusWriting(enabled = searching && inRailSearch),
-        ) {
-            SearchField(
-                value = query,
-                onValueChange = ::setSearchQuery,
-                onClose = { searching = false; setSearchQuery("") },
-                focusRequester = focusRequester,
-            )
+        // list under it gets to call the stroke a scroll: drawn over the list, it is hit first. Wide windows leave
+        // this uncomposed: their header button opens the search palette instead.
+        if (inRailSearch) {
+            AnimatedVisibility(
+                visible = searching,
+                enter = expandVertically(tween(160)) + fadeIn(tween(160)),
+                exit = shrinkVertically(tween(140)) + fadeOut(tween(100)),
+                modifier = Modifier.zIndex(1f).stylusWriting(enabled = searching),
+            ) {
+                SearchField(
+                    value = query,
+                    onValueChange = ::setSearchQuery,
+                    onClose = { searching = false; setSearchQuery("") },
+                    focusRequester = focusRequester,
+                )
+            }
+            if (searching) LaunchedEffect(Unit) { focusRequester.requestFocus() }
         }
-        if (searching && inRailSearch) LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
         val pull = rememberPullToRefreshState()
         PullRefreshHaptics(pull, state.isRefreshing)

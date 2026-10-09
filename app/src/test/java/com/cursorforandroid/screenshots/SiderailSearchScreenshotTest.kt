@@ -72,8 +72,14 @@ class SiderailSearchScreenshotTest {
     }
 
     private fun capture(name: String) {
+        // The search field's caret blinks on a 1000 ms loop; freeze it in the hidden half so CI and this machine
+        // do not disagree by one vertical bar.
+        compose.mainClock.autoAdvance = false
+        val now = compose.mainClock.currentTime
+        compose.mainClock.advanceTimeBy((CARET_HIDDEN_AT - (now % CARET_PERIOD) + CARET_PERIOD) % CARET_PERIOD)
         compose.waitForIdle()
         captureScreenRoboImage(File(outDir, "$name.png").path, RoborazziOptions())
+        compose.mainClock.autoAdvance = true
     }
 
     private fun graph(): AppGraph {
@@ -87,6 +93,9 @@ class SiderailSearchScreenshotTest {
             runBlocking {
                 it.prefs.setNewChatHome(NewChatHome.RECENT)
                 it.session.enterDemo()
+                it.catalog.loadRepositories()
+                it.catalog.loadModels()
+                it.agents.refresh()
             }
         }
     }
@@ -108,6 +117,7 @@ class SiderailSearchScreenshotTest {
             }
         }
         compose.waitUntil(30_000) { onScreen("Ask Cursor to build, fix bugs, explore") }
+        compose.waitUntil(30_000) { graph.agents.state.value.let { it.hasLoaded && !it.isRefreshing } }
     }
 
     private fun onScreen(text: String) =
@@ -144,6 +154,10 @@ class SiderailSearchScreenshotTest {
         show(wide = true)
         compose.waitUntil(20_000) { described("Search chats") }
         waitForSidebarTop()
+        // The composer chips load on a worker; capturing before they settle left CI on "Loading…" against a golden
+        // that already had the demo's repository and model.
+        compose.waitUntil(30_000) { onScreen("Claude Fable 5.1") }
+        compose.waitUntil(30_000) { onScreen("codex-poly-bot") }
         compose.onNodeWithContentDescription("Search chats").performClick()
         compose.waitUntil(10_000) { tagged(PaletteTags.CARD) }
         compose.waitUntil(20_000) { onScreen(PaletteCopy.PLACEHOLDER) }
@@ -155,6 +169,8 @@ class SiderailSearchScreenshotTest {
     private companion object {
         val DEMO_USER = CursorUser("Demo", "demo@cursor.local", "Demo", "User", null)
         const val FIXED_NOW = 1_736_949_600_000L
+        const val CARET_PERIOD = 1_000L
+        const val CARET_HIDDEN_AT = 500L
     }
 }
 

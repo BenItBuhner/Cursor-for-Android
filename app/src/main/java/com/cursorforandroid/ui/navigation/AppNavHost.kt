@@ -197,6 +197,9 @@ private fun AppShell(
     )
     SideEffect { keyboard?.bindings = shortcutBindings }
     val shortcuts = remember { ShellShortcuts() }
+    // One lambda for the rail's search button: a fresh `palette::openSearch` each composition is a new function
+    // identity, and that made the wide sidebar's rows recompose when only the list object had changed.
+    val openPaletteSearch = remember(shortcuts) { { shortcuts.palette.openSearch() } }
     LaunchedEffect(selectedAgentId) { selectedAgentId?.let(shortcuts::visit) }
     val mediaViewer = rememberMediaViewerState()
     val focusManager = LocalFocusManager.current
@@ -542,7 +545,7 @@ private fun AppShell(
                 onOpenDraft = ::openDraft,
                 onDeleteDraft = { row -> scope.launch { graph.newChatDrafts.remove(row.id) } },
                 onShortcutRows = { shortcuts.railRows = it },
-                onSearch = if (wide) shortcuts.palette::openSearch else null,
+                onSearch = if (wide) openPaletteSearch else null,
             ),
             modifier = modifier,
             showShortcutNumbers = keyboard?.showNumbers == true,
