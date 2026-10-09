@@ -204,10 +204,13 @@ class ScrollUpThroughFiguresTest {
     /** Back to the newest row by the jump button — a finger flung into the bottom edge would pull to catch up, and the pull's spring home lifts the list for frames. */
     private fun jumpToNewest() {
         compose.mainClock.autoAdvance = true
-        compose.onNode(hasContentDescription("Scroll to latest")).performClick()
-        compose.waitForIdle()
-        compose.waitUntil(10_000) { following() }
-        compose.waitForIdle()
+        // decodeEveryFigure walks the list and can already be on the newest row; the jump chip is then gone.
+        if (!following()) {
+            compose.onNode(hasContentDescription("Scroll to latest")).performClick()
+            compose.waitForIdle()
+            compose.waitUntil(10_000) { following() }
+            compose.waitForIdle()
+        }
         // Every figure on screen decoded and the rows at rest before the next fling.
         compose.mainClock.autoAdvance = false
         var still = 0
@@ -253,7 +256,7 @@ class ScrollUpThroughFiguresTest {
         compose.mainClock.autoAdvance = false
         assertWithMessage("every figure decoded once before the second pass; heights $heights served $served")
             .that(heights.keys)
-            .containsAtLeastElementsIn(1..TURNS)
+            .containsAtLeastElementsIn((1..TURNS).toList())
         return heights
     }
 
@@ -344,7 +347,7 @@ class ScrollUpThroughFiguresTest {
         jumpToNewest()
         val second = flingUp(durationMillis, releasing = false)
         assertNoJump(second, "second pass, the figures' sizes known")
-        val unknown = roundToInt(140 * compose.density.density)
+        val unknown = (140f * compose.density.density).roundToInt()
         val known = decoded + second.figureHeights + first.figureHeights
         assertWithMessage("placeholders of the second pass stand at their figures' heights, not the 140 dp of a figure never seen; figures $known")
             .that(second.placeholderHeights).isNotEmpty()
