@@ -132,8 +132,8 @@ class SidebarListMonotonicTest {
 
         private fun latency(): Long = if (maxLatencyMs <= 0) 0 else synchronized(random) { random.nextLong(maxLatencyMs + 1) }
 
-        override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): ListAgentsResponseDto {
-            val answer = super.listAgents(limit, cursor, includeArchived)
+        override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean, prUrl: String?): ListAgentsResponseDto {
+            val answer = super.listAgents(limit, cursor, includeArchived, prUrl)
             delay(latency())
             val glitch = synchronized(this) {
                 val g = glitch ?: return@synchronized null

@@ -477,7 +477,7 @@ class AppGraph(
         ReviewRepository(
             gitHub = { lazyGitHub.value },
             origin = { lazyOrigin.value },
-            usageApi = { agentId -> ReviewRepository.usageOf(session.current.api.usage(agentId)) },
+            usageApi = { agentId, runId -> ReviewRepository.usageOf(session.current.api.usage(agentId, runId)) },
             isDemo = { session.isDemo },
             demo = DemoReview,
             scm = { lazyPullRequestApi.value },

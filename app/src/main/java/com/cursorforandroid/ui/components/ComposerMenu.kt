@@ -534,6 +534,7 @@ fun McpServerSheet(
             command = command.trim(),
             args = McpServerForm.parseArgs(args),
             env = parsedEnv,
+            auth = server?.auth,
             enabled = server?.enabled ?: true,
         )
         McpServerForm.validate(candidate, others)?.let { error = it; return }
@@ -560,7 +561,7 @@ fun McpServerSheet(
             }
             Text(
                 when (transport) {
-                    McpTransport.Http -> "Calls are proxied by Cursor; the agent never sees the headers."
+                    McpTransport.Http, McpTransport.Sse -> "Calls are proxied by Cursor; the agent never sees the headers."
                     McpTransport.Stdio -> "Starts inside the agent's VM, so the command has to be available there."
                 },
                 style = type.small,
@@ -569,7 +570,7 @@ fun McpServerSheet(
             )
 
             when (transport) {
-                McpTransport.Http -> {
+                McpTransport.Http, McpTransport.Sse -> {
                     FieldLabel("URL")
                     SheetField(url, { url = it; error = null }, placeholder = "https://mcp.linear.app/mcp", singleLine = true, keyboardType = KeyboardType.Uri)
                     FieldLabel("Headers (one \"Name: value\" per line)")

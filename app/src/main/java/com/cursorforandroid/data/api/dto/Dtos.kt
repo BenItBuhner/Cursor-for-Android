@@ -56,6 +56,8 @@ data class AgentDto(
     val repos: List<RepoConfigDto> = emptyList(),
     val workOnCurrentBranch: Boolean? = null,
     val skipReviewerRequest: Boolean? = null,
+    val autoCreatePR: Boolean? = null,
+    val openAsCursorGithubApp: Boolean? = null,
 )
 
 @Serializable
@@ -75,6 +77,12 @@ data class RunGitBranchDto(
 data class RunGitDto(val branches: List<RunGitBranchDto> = emptyList())
 
 @Serializable
+data class RunErrorDto(
+    val message: String = "",
+    val code: String? = null,
+)
+
+@Serializable
 data class RunDto(
     val id: String,
     val agentId: String,
@@ -83,6 +91,8 @@ data class RunDto(
     val updatedAt: String = "",
     val durationMs: Long? = null,
     val result: String? = null,
+    val requestId: String? = null,
+    val error: RunErrorDto? = null,
     val git: RunGitDto? = null,
 )
 
@@ -115,8 +125,20 @@ data class ModelRefDto(
 )
 
 /**
- * Inline MCP server definition (`mcpServers[]`). Remote servers carry `url` (+ `headers`); stdio servers carry
- * `command` (+ `args`, `env`) and start inside the cloud VM.
+ * OAuth credentials for a remote MCP server (`mcpServers[].auth`). Field names match the Cloud Agents API
+ * and `@cursor/sdk`'s `McpServerConfig.auth`.
+ */
+@Serializable
+data class McpAuthDto(
+    val CLIENT_ID: String,
+    val CLIENT_SECRET: String? = null,
+    val scopes: List<String>? = null,
+)
+
+/**
+ * Inline MCP server definition (`mcpServers[]`). Remote servers carry `url` (+ `headers` or OAuth [auth]);
+ * stdio servers carry `command` (+ `args`, `env`) and start inside the cloud VM. [type] is `http`, `sse`,
+ * or `stdio`.
  */
 @Serializable
 data class McpServerDto(
@@ -124,6 +146,7 @@ data class McpServerDto(
     val type: String? = null,
     val url: String? = null,
     val headers: Map<String, String>? = null,
+    val auth: McpAuthDto? = null,
     val command: String? = null,
     val args: List<String>? = null,
     val env: Map<String, String>? = null,
@@ -145,6 +168,12 @@ data class CreateAgentRequestDto(
     val skipReviewerRequest: Boolean? = null,
     val mcpServers: List<McpServerDto>? = null,
     val mode: String? = null,
+    /**
+     * Session-scoped env for the cloud VM. A JSON object of name → value; cannot be combined with a
+     * client-supplied [agentId] (the server mints the id when secrets ride along).
+     */
+    val envVars: Map<String, String>? = null,
+    val openAsCursorGithubApp: Boolean? = null,
 )
 
 @Serializable
@@ -164,6 +193,7 @@ data class CreateRunRequestDto(
      */
     val model: ModelRefDto? = null,
     val mode: String? = null,
+    val envVars: Map<String, String>? = null,
 )
 
 @Serializable
@@ -305,14 +335,28 @@ data class UsageTokensDto(
     val cacheWriteTokens: Long = 0,
     val cacheReadTokens: Long = 0,
     val totalTokens: Long = 0,
+    /** A subset of [outputTokens]; excluded from [totalTokens]. Absent when the backend does not report it. */
+    val reasoningTokens: Long? = null,
 )
 
 @Serializable
-data class RunUsageDto(val id: String, val usage: UsageTokensDto = UsageTokensDto())
+data class UsageCostDto(
+    val rawCostCents: Double = 0.0,
+    val chargedCents: Double = 0.0,
+)
+
+@Serializable
+data class RunUsageDto(
+    val id: String,
+    val usage: UsageTokensDto = UsageTokensDto(),
+    val usageUuid: String? = null,
+    val cost: UsageCostDto? = null,
+)
 
 @Serializable
 data class AgentUsageResponseDto(
     val totalUsage: UsageTokensDto = UsageTokensDto(),
+    val cost: UsageCostDto? = null,
     val runs: List<RunUsageDto> = emptyList(),
 )
 
@@ -333,6 +377,7 @@ data class ApiErrorDto(
     val code: String = "unknown",
     val message: String = "",
     val helpUrl: String? = null,
+    val requestId: String? = null,
 )
 
 // ---- SSE payloads ------------------------------------------------------------------------------------------

@@ -212,7 +212,7 @@ class AgentListPublishBenchmarkTest {
     }
 
     private class WiredApi(private val delegate: CursorApi, private val wire: Wire) : CursorApi by delegate {
-        override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): ListAgentsResponseDto = wire.call { delegate.listAgents(limit, cursor, includeArchived) }
+        override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean, prUrl: String?): ListAgentsResponseDto = wire.call { delegate.listAgents(limit, cursor, includeArchived, prUrl) }
         override suspend fun listAgentsV0(limit: Int, cursor: String?): V0ListAgentsResponseDto = wire.call { delegate.listAgentsV0(limit, cursor) }
         override suspend fun getAgent(id: String): AgentDto = wire.call { delegate.getAgent(id) }
         override suspend fun getRun(id: String, runId: String): RunDto = wire.call { delegate.getRun(id, runId) }

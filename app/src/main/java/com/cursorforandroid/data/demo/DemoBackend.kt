@@ -440,7 +440,7 @@ internal class DemoCursorApi(private val store: DemoStore) : CursorApi {
                 ModelListItemDto(
                     id = "composer-2.5", displayName = "Composer 2.5", description = "Cursor's fast frontier model.",
                     // `aliases`: "Alternate IDs that resolve to the same model", as the live catalogue lists them.
-                    aliases = listOf("composer-latest", "composer"),
+                    aliases = listOf("composer-latest", "composer", "composer-2"),
                     parameters = listOf(ModelParameterDefinitionDto("fast", "Fast", listOf(ModelParameterValueDto("false"), ModelParameterValueDto("true", "Fast")))),
                     variants = listOf(
                         ModelVariantDto(params = listOf(ModelParamDto("fast", "true")), displayName = "Composer 2.5", isDefault = true),
@@ -449,7 +449,28 @@ internal class DemoCursorApi(private val store: DemoStore) : CursorApi {
                 ),
                 ModelListItemDto(id = "gpt-5.6", displayName = "GPT-5.6", variants = listOf(ModelVariantDto(params = listOf(ModelParamDto("effort", "high")), displayName = "GPT-5.6 High", isDefault = true))),
                 ModelListItemDto(id = "gemini-3.8-flash", displayName = "Gemini 3.8 Flash", variants = listOf(ModelVariantDto(params = emptyList(), displayName = "Gemini 3.8 Flash", isDefault = true))),
-                ModelListItemDto(id = "auto-smart", displayName = "Auto", description = "Cursor Router picks the model."),
+                ModelListItemDto(
+                    id = "auto-smart",
+                    displayName = "Auto",
+                    description = "Cursor Router picks the model.",
+                    aliases = listOf("auto"),
+                    parameters = listOf(
+                        ModelParameterDefinitionDto(
+                            "optimize_for",
+                            "Optimize for",
+                            listOf(
+                                ModelParameterValueDto("cost", "Cost"),
+                                ModelParameterValueDto("balanced", "Balanced"),
+                                ModelParameterValueDto("intelligence", "Intelligence"),
+                            ),
+                        ),
+                    ),
+                    variants = listOf(
+                        ModelVariantDto(params = listOf(ModelParamDto("optimize_for", "cost")), displayName = "Auto"),
+                        ModelVariantDto(params = listOf(ModelParamDto("optimize_for", "balanced")), displayName = "Auto", isDefault = true),
+                        ModelVariantDto(params = listOf(ModelParamDto("optimize_for", "intelligence")), displayName = "Auto"),
+                    ),
+                ),
             ),
         )
     }
@@ -493,7 +514,7 @@ internal class DemoCursorApi(private val store: DemoStore) : CursorApi {
         )
     }
 
-    override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): ListAgentsResponseDto = io {
+    override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean, prUrl: String?): ListAgentsResponseDto = io {
         delay(250)
         val (items, next) = pageOf(store.agentsByRecency(includeArchived), limit, cursor) { it.id }
         ListAgentsResponseDto(items = items.map { it.summary() }, nextCursor = next)
@@ -550,7 +571,7 @@ internal class DemoCursorApi(private val store: DemoStore) : CursorApi {
         IdResponseDto(id)
     }
 
-    override suspend fun usage(id: String): AgentUsageResponseDto = AgentUsageResponseDto()
+    override suspend fun usage(id: String, runId: String?): AgentUsageResponseDto = AgentUsageResponseDto()
 
     override suspend fun artifacts(id: String): ListArtifactsResponseDto = io {
         delay(100)

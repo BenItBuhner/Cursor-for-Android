@@ -53,6 +53,7 @@ import com.cursorforandroid.domain.RepoEntry
 import com.cursorforandroid.domain.ReviewVerdict
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.domain.TokenUsage
+import com.cursorforandroid.domain.UsageCost
 import com.cursorforandroid.domain.ToolNames
 import com.cursorforandroid.domain.ToolPayload
 import com.cursorforandroid.domain.TranscriptContent
@@ -818,12 +819,19 @@ private fun UsageBody(usage: AgentUsage) {
         FactRow("Total", TokenUsage.format(total.total))
         FactRow("Input", TokenUsage.format(total.inputTokens))
         FactRow("Output", TokenUsage.format(total.outputTokens))
+        total.reasoningTokens?.takeIf { it > 0 }?.let { FactRow("Reasoning", TokenUsage.format(it)) }
         if (total.cacheReadTokens > 0) FactRow("Cache read", TokenUsage.format(total.cacheReadTokens))
         if (total.cacheWriteTokens > 0) FactRow("Cache write", TokenUsage.format(total.cacheWriteTokens))
+        usage.cost?.takeUnless { it.isEmpty }?.let { cost ->
+            if (cost.chargedCents != 0.0) FactRow("Charged", UsageCost.formatCents(cost.chargedCents))
+            if (cost.rawCostCents != 0.0 && cost.rawCostCents != cost.chargedCents) FactRow("Raw cost", UsageCost.formatCents(cost.rawCostCents))
+        }
         if (usage.runs.size > 1) {
             PanelCaption("By run")
             usage.runs.forEachIndexed { index, run ->
-                FactRow("Run ${usage.runs.size - index}", "${TokenUsage.format(run.usage.total)} · in ${TokenUsage.format(run.usage.inputTokens)} · out ${TokenUsage.format(run.usage.outputTokens)}")
+                val tokens = "${TokenUsage.format(run.usage.total)} · in ${TokenUsage.format(run.usage.inputTokens)} · out ${TokenUsage.format(run.usage.outputTokens)}"
+                val billed = run.cost?.takeUnless { it.isEmpty }?.let { " · ${UsageCost.formatCents(it.chargedCents.takeIf { cents -> cents != 0.0 } ?: it.rawCostCents)}" }.orEmpty()
+                FactRow("Run ${usage.runs.size - index}", tokens + billed)
             }
         }
     }

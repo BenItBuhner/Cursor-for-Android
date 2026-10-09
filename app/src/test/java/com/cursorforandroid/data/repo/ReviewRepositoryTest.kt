@@ -9,7 +9,9 @@ import com.cursorforandroid.data.api.PullRequestStatusDetails
 import com.cursorforandroid.data.api.ScmPullRequestApi
 import com.cursorforandroid.data.api.dto.AgentUsageResponseDto
 import com.cursorforandroid.data.api.dto.RunUsageDto
+import com.cursorforandroid.data.api.dto.UsageCostDto
 import com.cursorforandroid.data.api.dto.UsageTokensDto
+import com.cursorforandroid.domain.AgentUsage
 import com.cursorforandroid.domain.Capabilities
 import com.cursorforandroid.domain.ChangedFile
 import com.cursorforandroid.domain.ChangedFileStatus
@@ -24,6 +26,7 @@ import com.cursorforandroid.domain.ReviewThread
 import com.cursorforandroid.domain.ReviewVerdict
 import com.cursorforandroid.domain.ScmHost
 import com.cursorforandroid.domain.TokenUsage
+import com.cursorforandroid.domain.UsageCost
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -41,6 +44,7 @@ class ReviewRepositoryTest {
     private val server = MockWebServer()
     private var now = 1_800_000_000_000L
     private var usageCalls = 0
+    private var lastUsageRunId: String? = "unset"
     private lateinit var repo: ReviewRepository
     private val prUrl = "https://github.com/acme/app/pull/42"
 
@@ -58,7 +62,11 @@ class ReviewRepositoryTest {
         repo = ReviewRepository(
             gitHub = { gitHub },
             origin = { origin },
-            usageApi = { usageCalls++; ReviewRepository.usageOf(AgentUsageResponseDto(UsageTokensDto(1000, 500, 0, 200, 1700), listOf(RunUsageDto("run-1", UsageTokensDto(totalTokens = 1700))))) },
+            usageApi = { _, runId ->
+                usageCalls++
+                lastUsageRunId = runId
+                ReviewRepository.usageOf(AgentUsageResponseDto(UsageTokensDto(1000, 500, 0, 200, 1700), runs = listOf(RunUsageDto("run-1", UsageTokensDto(totalTokens = 1700)))))
+            },
             now = { now },
         )
     }
@@ -145,7 +153,7 @@ class ReviewRepositoryTest {
         val demo = ReviewRepository(
             gitHub = { error("not for the demo") },
             origin = { error("not for the demo") },
-            usageApi = { error("not for the demo") },
+            usageApi = { _, _ -> error("not for the demo") },
             isDemo = { true },
             demo = { url -> if (url == prUrl) com.cursorforandroid.data.demo.DemoReview.pullRequest(url) else null },
         )
@@ -199,7 +207,7 @@ class ReviewRepositoryTest {
     private fun accountRepo(capabilities: Capabilities = Capabilities.EXTENDED, demo: Boolean = false) = ReviewRepository(
         gitHub = { GitHubApi(OkHttpClient(), baseUrl = server.url("/").toString(), now = { now }) },
         origin = { OriginApi(OkHttpClient(), tokenProvider = { null }, baseUrl = server.url("/origin/").toString()) },
-        usageApi = { error("not here") },
+        usageApi = { _, _ -> error("not here") },
         isDemo = { demo },
         demo = { null },
         now = { now },
@@ -290,5 +298,36 @@ class ReviewRepositoryTest {
         assertThat(TokenUsage.format(2_500_000)).isEqualTo("2.5M")
         assertThat(TokenUsage.format(999)).isEqualTo("999")
         assertThat(TokenUsage.format(12_000)).isEqualTo("12k")
+        repo.usage("bc-1", runId = "run-9")
+        assertThat(lastUsageRunId).isEqualTo("run-9")
+        assertThat(usageCalls).isEqualTo(3)
+        repo.usage("bc-1")
+        assertThat(usageCalls).isEqualTo(3)
+    }
+
+    @Test
+    fun `usage maps billed cost, reasoning tokens and a run uuid`() {
+        val mapped = ReviewRepository.usageOf(
+            AgentUsageResponseDto(
+                totalUsage = UsageTokensDto(100, 40, 0, 0, 140, reasoningTokens = 12),
+                cost = UsageCostDto(rawCostCents = 250.0, chargedCents = 200.0),
+                runs = listOf(
+                    RunUsageDto(
+                        "run-1",
+                        UsageTokensDto(100, 40, 0, 0, 140, reasoningTokens = 12),
+                        usageUuid = "uu-1",
+                        cost = UsageCostDto(rawCostCents = 250.0, chargedCents = 200.0),
+                    ),
+                ),
+            ),
+        )
+        assertThat(mapped.total.reasoningTokens).isEqualTo(12)
+        assertThat(mapped.total.total).isEqualTo(140)
+        assertThat(mapped.cost).isEqualTo(UsageCost(250.0, 200.0))
+        assertThat(mapped.runs.single().usageUuid).isEqualTo("uu-1")
+        assertThat(mapped.runs.single().cost).isEqualTo(UsageCost(250.0, 200.0))
+        assertThat(mapped.isEmpty).isFalse()
+        assertThat(AgentUsage(TokenUsage(), emptyList(), UsageCost(1.0, 0.0)).isEmpty).isFalse()
+        assertThat(UsageCost.formatCents(250.0)).isEqualTo("$" + "2.50")
     }
 }

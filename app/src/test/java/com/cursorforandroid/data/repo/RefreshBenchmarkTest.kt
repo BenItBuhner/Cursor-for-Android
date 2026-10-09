@@ -153,8 +153,8 @@ class RefreshBenchmarkTest {
 
     /** The public API, every call recorded and delayed. */
     private class LoggingApi(private val delegate: CursorApi, private val log: CallLog) : CursorApi by delegate {
-        override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): ListAgentsResponseDto =
-            log.record("v1 /agents page", cursor ?: "first") { delegate.listAgents(limit, cursor, includeArchived) }
+        override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean, prUrl: String?): ListAgentsResponseDto =
+            log.record("v1 /agents page", cursor ?: "first") { delegate.listAgents(limit, cursor, includeArchived, prUrl) }
         override suspend fun listAgentsV0(limit: Int, cursor: String?): V0ListAgentsResponseDto =
             log.record("v0 /agents page (status scan)", cursor ?: "first") { delegate.listAgentsV0(limit, cursor) }
         override suspend fun getAgent(id: String): AgentDto = log.record("v1 /agents/{id} (by id)", id) { delegate.getAgent(id) }
