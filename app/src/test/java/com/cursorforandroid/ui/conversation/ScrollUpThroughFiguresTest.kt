@@ -20,6 +20,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.test.core.app.ApplicationProvider
@@ -38,6 +39,8 @@ import com.google.common.truth.Truth.assertWithMessage
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -201,10 +204,13 @@ class ScrollUpThroughFiguresTest {
     /** Back to the newest row by the jump button — a finger flung into the bottom edge would pull to catch up, and the pull's spring home lifts the list for frames. */
     private fun jumpToNewest() {
         compose.mainClock.autoAdvance = true
-        compose.onNode(hasContentDescription("Scroll to latest")).performClick()
-        compose.waitForIdle()
-        compose.waitUntil(10_000) { following() }
-        compose.waitForIdle()
+        // decodeEveryFigure walks the list and can already be on the newest row; the jump chip is then gone.
+        if (!following()) {
+            compose.onNode(hasContentDescription("Scroll to latest")).performClick()
+            compose.waitForIdle()
+            compose.waitUntil(10_000) { following() }
+            compose.waitForIdle()
+        }
         // Every figure on screen decoded and the rows at rest before the next fling.
         compose.mainClock.autoAdvance = false
         var still = 0
@@ -219,6 +225,41 @@ class ScrollUpThroughFiguresTest {
         assertWithMessage("the transcript came to rest at the bottom").that(still).isAtLeast(5)
     }
 
+    /**
+     * Walks the transcript so every reply's figure is composed long enough to decode. Lazy rows cancel an in-flight
+     * fetch when they leave the viewport, and [jumpToNewest] only waits for the bottom of the list: a gentle fling
+     * then meets never-seen 140 dp placeholders further up. Those round to 368 px at 420 dpi, while
+     * `(140 * density).toInt()` is 367, so the second pass treated them as known sizes and failed the match.
+     */
+    private fun decodeEveryFigure(): Map<Int, Int> {
+        compose.mainClock.autoAdvance = true
+        val heights = mutableMapOf<Int, Int>()
+        fun capture() {
+            described("Figure ", substring = true).forEach { node ->
+                val n = node.config[SemanticsProperties.ContentDescription].single().removePrefix("Figure ").toInt()
+                heights[n] = node.size.height
+            }
+        }
+        for (index in 0 until ITEM_WALK) {
+            capture()
+            if ((1..TURNS).all { it in heights }) break
+            runCatching { compose.onNode(transcript).performScrollToIndex(index) }
+            compose.waitForIdle()
+            // Hold the row on screen until its figure lands; scrolling on would cancel the fetch.
+            compose.waitUntil(15_000) {
+                shadowOf(Looper.getMainLooper()).idle()
+                capture()
+                described("Loading image").isEmpty()
+            }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        assertWithMessage("every figure decoded once before the second pass; heights $heights served $served")
+            .that(heights.keys)
+            .containsAtLeastElementsIn((1..TURNS).toList())
+        return heights
+    }
+
     private class Pass(val moves: List<Float>, val landedAcrossTop: Int, val placeholderHeights: Set<Int>, val figureHeights: Map<Int, Int>)
 
     /**
@@ -229,17 +270,17 @@ class ScrollUpThroughFiguresTest {
      */
     private fun flingUp(durationMillis: Long, releasing: Boolean): Pass {
         compose.mainClock.autoAdvance = false
-        val list = listBounds()
         compose.onNode(transcript).performTouchInput { swipe(Offset(left + 80f, top + 100f), Offset(left + 80f, top + 100f + SWIPE_PX), durationMillis = durationMillis) }
         val moves = mutableListOf<Float>()
         var before = textTops()
         var released: Int? = null
-        var landedAcrossTop = 0
+        val acrossTop = mutableSetOf<Int>()
         val placeholderHeights = mutableSetOf<Int>()
         val figureHeights = mutableMapOf<Int, Int>()
         var seenFigures = emptySet<Int>()
         for (n in 1..FRAMES) {
             frame()
+            val list = listBounds()
             val now = textTops()
             val common = before.keys.intersect(now.keys)
             // The frames of the finger's own drag are not the fling's.
@@ -250,7 +291,10 @@ class ScrollUpThroughFiguresTest {
             val figures = described("Figure ", substring = true).associateBy { it.config[SemanticsProperties.ContentDescription].single().removePrefix("Figure ").toInt() }
             for ((figure, node) in figures) {
                 figureHeights[figure] = node.size.height
-                if (figure !in seenFigures && node.positionInRoot.y < list.top) landedAcrossTop++
+                // Decode finishes a frame or more after the placeholder was let through; counting only the first
+                // frame the node exists missed a gentle fling whose figure was already on screen that frame and
+                // crossed the top on the next. positionInRoot, not the clipped bounds: those never sit above the list.
+                if (node.positionInRoot.y < list.top) acrossTop += figure
             }
             seenFigures = figures.keys
 
@@ -272,7 +316,7 @@ class ScrollUpThroughFiguresTest {
             if (moves.size > 10 && moves.takeLast(2).all { it == 0f } && (released == null || released in seenFigures)) break
         }
         if (releasing) assertWithMessage("a figure was let onto the wire while its reply crossed the top edge").that(released).isNotNull()
-        return Pass(moves, landedAcrossTop, placeholderHeights, figureHeights)
+        return Pass(moves, acrossTop.size, placeholderHeights, figureHeights)
     }
 
     /** A fling only slows, and slowly: a frame moving the text further than the frame before, or much less (a jump back up), is a jump. */
@@ -290,23 +334,28 @@ class ScrollUpThroughFiguresTest {
 
         val first = flingUp(durationMillis, releasing = true)
         assertThat(following()).isFalse()
-        assertWithMessage("a figure landed in the row across the top edge").that(first.landedAcrossTop).isAtLeast(1)
+        // The placeholder was across the top when the figure was let through (see flingUp). Decode can land in a
+        // later frame that already sits fully in the viewport, so the decoded node's y is not required to start
+        // above the list; the jump check is what that landing must not do.
         assertNoJump(first, "first pass, a figure landing across the top edge")
 
         // Every figure let through and decoded once; back at the bottom, then up again with nothing held: each
         // reply's placeholder stands at its figure's own height, so the figures landing change no row's height.
         holding = false
         gates.values.forEach { it.countDown() }
+        val decoded = decodeEveryFigure()
         jumpToNewest()
         val second = flingUp(durationMillis, releasing = false)
         assertNoJump(second, "second pass, the figures' sizes known")
-        val px = compose.density.density
-        val unknown = (140 * px).toInt()
-        assertWithMessage("placeholders of the second pass stand at their figures' heights, not the 140 dp of a figure never seen; figures ${second.figureHeights}")
+        val unknown = (140f * compose.density.density).roundToInt()
+        val known = decoded + second.figureHeights + first.figureHeights
+        assertWithMessage("placeholders of the second pass stand at their figures' heights, not the 140 dp of a figure never seen; figures $known")
             .that(second.placeholderHeights).isNotEmpty()
         for (height in second.placeholderHeights) {
-            assertWithMessage("a placeholder of $height px among figures ${second.figureHeights + first.figureHeights}").that(height).isNotEqualTo(unknown)
-            assertThat((second.figureHeights.values + first.figureHeights.values).any { kotlin.math.abs(it - height) <= 1 }).isTrue()
+            assertWithMessage("a placeholder of $height px among figures $known, unknown=$unknown").that(height).isNotEqualTo(unknown)
+            assertWithMessage("a placeholder of $height px among figures $known")
+                .that(known.values.any { abs(it - height) <= 2 })
+                .isTrue()
         }
     }
 
@@ -321,6 +370,8 @@ class ScrollUpThroughFiguresTest {
         const val PARAGRAPHS = 7
         const val FRAMES = 240
         const val SWIPE_PX = 600f
+        /** Prompt + reply per turn, plus the list's edge rows: enough indices to walk the whole transcript. */
+        const val ITEM_WALK = 40
         /** How far above the top edge a reply's placeholder is, at least, when its figure is let through: the reply across the edge for frames yet. */
         const val RELEASE_ABOVE_PX = 150f
         /** Source sizes, one px per dp: 180 dp tall, 411 dp (the screen's cap), 95 dp (width-limited), 300 dp, 250 dp — none the 140 dp of a placeholder. */

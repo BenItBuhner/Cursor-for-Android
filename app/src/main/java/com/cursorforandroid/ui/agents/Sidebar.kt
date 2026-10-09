@@ -136,6 +136,11 @@ data class SidebarCallbacks(
     val onShortcutRows: (List<AgentRow>) -> Unit = {},
     /** Where the chats menu [onCustomize] opens is anchored: the footer's filter button. */
     val customizeAnchor: PopoverAnchor? = null,
+    /**
+     * The header search button on a wide window: opens the search palette (the same surface Ctrl+P does) instead of
+     * the in-rail field, which is not composed. Null on the phone drawer, where that field is the narrow-view search.
+     */
+    val onSearch: (() -> Unit)? = null,
 )
 
 /** Test tags for the card slot above the account footer: one card at a time, the update's or the notes'. */
@@ -177,7 +182,10 @@ fun Sidebar(
     extendedMode: Boolean = false,
     /** New chats written and not sent, most recent first: listed above every group (see [DraftRow.listed]). */
     drafts: List<DraftRow> = emptyList(),
-    /** Bumped by the shell when something outside asks for the search field (the widget's search button): each bump opens it. */
+    /**
+     * Bumped by the shell when something outside asks for the in-rail search field (the widget's search button on a
+     * phone): each bump opens it. Wide windows open the search palette instead and leave this at 0.
+     */
     searchRequests: Int = 0,
     /** Ctrl is held on a hardware keyboard: the first ten chat rows show the digit that opens them. */
     showShortcutNumbers: Boolean = false,
@@ -193,7 +201,8 @@ fun Sidebar(
     val type = CursorTheme.typography
     val haptics = rememberHaptics()
     var searching by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(searchRequests) { if (searchRequests > 0) searching = true }
+    val inRailSearch = callbacks.onSearch == null
+    LaunchedEffect(searchRequests, inRailSearch) { if (searchRequests > 0 && inRailSearch) searching = true }
     // The field owns what is typed. [state.query] is the organized list's copy, computed off the main thread, and
     // feeding it back here put the cursor at the start of the box on every keystroke — the next character then
     // inserted on the left, so a search could not be typed. Closing still clears both.
@@ -222,8 +231,16 @@ fun Sidebar(
             FlatIconButton(
                 CursorIcons.Search,
                 "Search chats",
-                onClick = { searching = !searching; if (!searching) setSearchQuery("") },
-                tint = if (searching) colors.iconPrimary else colors.iconSecondary,
+                onClick = {
+                    val paletteSearch = callbacks.onSearch
+                    if (paletteSearch != null) {
+                        paletteSearch()
+                    } else {
+                        searching = !searching
+                        if (!searching) setSearchQuery("")
+                    }
+                },
+                tint = if (searching && inRailSearch) colors.iconPrimary else colors.iconSecondary,
             )
             if (callbacks.onToggleSidebar != null) {
                 FlatIconButton(CursorIcons.Sidebar, "Toggle sidebar", onClick = callbacks.onToggleSidebar)
@@ -231,21 +248,24 @@ fun Sidebar(
         }
 
         // A pen writes into the search from its row and the slack around it, outside the reveal's clip, and before the
-        // list under it gets to call the stroke a scroll: drawn over the list, it is hit first.
-        AnimatedVisibility(
-            visible = searching,
-            enter = expandVertically(tween(160)) + fadeIn(tween(160)),
-            exit = shrinkVertically(tween(140)) + fadeOut(tween(100)),
-            modifier = Modifier.zIndex(1f).stylusWriting(enabled = searching),
-        ) {
-            SearchField(
-                value = query,
-                onValueChange = ::setSearchQuery,
-                onClose = { searching = false; setSearchQuery("") },
-                focusRequester = focusRequester,
-            )
+        // list under it gets to call the stroke a scroll: drawn over the list, it is hit first. Wide windows leave
+        // this uncomposed: their header button opens the search palette instead.
+        if (inRailSearch) {
+            AnimatedVisibility(
+                visible = searching,
+                enter = expandVertically(tween(160)) + fadeIn(tween(160)),
+                exit = shrinkVertically(tween(140)) + fadeOut(tween(100)),
+                modifier = Modifier.zIndex(1f).stylusWriting(enabled = searching),
+            ) {
+                SearchField(
+                    value = query,
+                    onValueChange = ::setSearchQuery,
+                    onClose = { searching = false; setSearchQuery("") },
+                    focusRequester = focusRequester,
+                )
+            }
+            if (searching) LaunchedEffect(Unit) { focusRequester.requestFocus() }
         }
-        if (searching) LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
         val pull = rememberPullToRefreshState()
         PullRefreshHaptics(pull, state.isRefreshing)

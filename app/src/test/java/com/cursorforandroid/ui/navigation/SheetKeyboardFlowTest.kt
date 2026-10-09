@@ -21,6 +21,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
@@ -30,6 +31,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.NewChatHome
+import com.cursorforandroid.ui.shortcuts.PaletteTags
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.google.common.truth.Truth.assertThat
@@ -46,9 +48,9 @@ import org.robolectric.annotation.Config
  * panel by its button lets the composer go and puts the keyboard away with its draft kept, and the sidebar's search
  * takes the keyboard as usual once the drawer is in. On a wide window the rail comes back beside the chat rather than
  * over it, and the side panel is pinned beside the chat as well, so a composer holding the keyboard keeps both through
- * either. Shutting the drawer, or collapsing the rail, takes the keyboard from the sidebar's search, while a composer
- * beside the collapsing rail keeps it. The swipes themselves, and the ones that must leave the keyboard be, are
- * [com.cursorforandroid.ui.panel.SheetKeyboardTest]'s.
+ * either. Shutting the drawer takes the keyboard from the sidebar's in-rail search. On a wide window the rail's
+ * search button opens the palette instead of a field in the rail. The swipes themselves, and the ones that must
+ * leave the keyboard be, are [com.cursorforandroid.ui.panel.SheetKeyboardTest]'s.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35], qualifiers = "w411dp-h914dp-night-420dpi")
@@ -206,40 +208,14 @@ class SheetKeyboardFlowTest {
 
     @Test
     @Config(qualifiers = "w1024dp-h768dp-night-mdpi")
-    fun `on a wide window collapsing the rail takes the keyboard from its search as the slide begins, and leaves a composer beside it be`() {
+    fun `on a wide window the rail's search button opens the palette and does not show the in-rail field`() {
         compose.runOnIdle { wide = true }
-        openChat(IDLE_CHAT)
-        startWriting(CHAT_PLACEHOLDER)
+        compose.waitUntil(10_000) { described("Search chats") }
 
-        // The composer beside the rail is not the rail's to take.
-        compose.onNodeWithContentDescription("Toggle sidebar").performClick()
-        compose.waitUntil(10_000) { described("Open sidebar") }
-        compose.waitForIdle()
-        written.assertIsFocused()
-        assertThat(softInputVisible()).isTrue()
-        assertThat(fieldText(written)).isEqualTo(Draft)
-
-        compose.onNodeWithContentDescription("Open sidebar").performClick()
-        compose.waitUntil(10_000) { described("Toggle sidebar") && !described("Open sidebar") }
-        startSearching()
-
-        compose.mainClock.autoAdvance = false
-        try {
-            compose.onNodeWithContentDescription("Toggle sidebar").performClick()
-            compose.mainClock.advanceTimeByFrame()
-            compose.mainClock.advanceTimeByFrame()
-            // Still sliding out, the search still composed: it has let go already, and the keyboard is down.
-            assertThat(searchShown()).isTrue()
-            search.assertIsNotFocused()
-            assertThat(softInputVisible()).isFalse()
-        } finally {
-            compose.mainClock.autoAdvance = true
-        }
-        compose.waitUntil(10_000) { described("Open sidebar") && !searchShown() }
-        compose.waitForIdle()
-        written.assertIsNotFocused()
-        assertThat(softInputVisible()).isFalse()
-        assertThat(fieldText(written)).isEqualTo(Draft)
+        compose.onNodeWithContentDescription("Search chats").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag(PaletteTags.CARD)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag(PaletteTags.FIELD).assertIsFocused()
+        assertThat(searchShown()).isFalse()
     }
 
     private companion object {

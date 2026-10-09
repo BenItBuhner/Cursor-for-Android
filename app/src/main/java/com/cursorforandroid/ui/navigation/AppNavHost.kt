@@ -197,6 +197,9 @@ private fun AppShell(
     )
     SideEffect { keyboard?.bindings = shortcutBindings }
     val shortcuts = remember { ShellShortcuts() }
+    // One lambda for the rail's search button: a fresh `palette::openSearch` each composition is a new function
+    // identity, and that made the wide sidebar's rows recompose when only the list object had changed.
+    val openPaletteSearch = remember(shortcuts) { { shortcuts.palette.openSearch() } }
     LaunchedEffect(selectedAgentId) { selectedAgentId?.let(shortcuts::visit) }
     val mediaViewer = rememberMediaViewerState()
     val focusManager = LocalFocusManager.current
@@ -404,14 +407,20 @@ private fun AppShell(
     val openDraftId by graph.newChatDrafts.open.collectAsStateWithLifecycle()
     // The draft open in the New Chat pane is the one being written while the pane is on screen; left, it is listed.
     val draftRows = remember(draftsState, openDraftId, topScreen) { DraftRow.listed(draftsState.drafts, open = openDraftId.takeIf { topScreen == Screen.Home }) }
-    // The widget's search button: the list surface with the sidebar's search field open. Counted rather than
-    // flagged so the sidebar sees a second request after the first was closed.
+    // The widget's search button: on a phone, the drawer with the in-rail field open; on a wide window, the same
+    // search palette the rail's search button and Ctrl+P open. Counted rather than flagged so the sidebar sees a
+    // second request after the first was closed.
     var searchRequests by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(searchRequested) {
         if (searchRequested) {
             navigateTop(Screen.Home)
-            if (!wide) drawerState.open() else revealSidebar()
-            searchRequests++
+            if (!wide) {
+                drawerState.open()
+                searchRequests++
+            } else {
+                revealSidebar()
+                shortcuts.palette.openSearch()
+            }
             onSearchConsumed()
         }
     }
@@ -536,6 +545,7 @@ private fun AppShell(
                 onOpenDraft = ::openDraft,
                 onDeleteDraft = { row -> scope.launch { graph.newChatDrafts.remove(row.id) } },
                 onShortcutRows = { shortcuts.railRows = it },
+                onSearch = if (wide) openPaletteSearch else null,
             ),
             modifier = modifier,
             showShortcutNumbers = keyboard?.showNumbers == true,
