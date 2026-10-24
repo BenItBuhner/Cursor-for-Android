@@ -8,7 +8,10 @@ package com.cursorforandroid.domain
  *
  * With every flag off the app speaks to `api.cursor.com` (v1 plus the two legacy v0 endpoints), to `cursor.com` /
  * `api2.cursor.sh` only for the browser sign-in Cursor's own SDK and CLI perform, and to GitHub's REST API for what
- * a GitHub-hosted repository can say about itself.
+ * a GitHub-hosted repository can say about itself. One call sits outside that: when `POST /v1/agents` answers
+ * `usage_limit_exceeded` without checking included usage, the launch is started again through
+ * `StartBackgroundComposerFromSnapshot` (see `AgentRepository`), which is how the desktop draws on included usage.
+ * That session is not this setting.
  */
 data class Capabilities(
     /** `POST /auth/exchange_user_api_key`: the account session every other flag's call is authenticated with. */

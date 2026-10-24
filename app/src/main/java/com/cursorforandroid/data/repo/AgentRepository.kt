@@ -23,6 +23,7 @@ import com.cursorforandroid.data.api.dto.V0AgentDto
 import com.cursorforandroid.data.api.isLostReply
 import com.cursorforandroid.data.api.toCursorError
 import com.cursorforandroid.data.api.userMessage
+import com.cursorforandroid.data.auth.SessionUnavailableException
 import com.cursorforandroid.data.local.AgentListCache
 import com.cursorforandroid.data.local.CachedLineage
 import com.cursorforandroid.data.local.CachedPlacement
@@ -321,6 +322,15 @@ class LaunchUnansweredException(cause: Throwable) : IOException(
 )
 
 /**
+ * `POST /v1/agents` refused the launch as a usage limit, and starting it the way the desktop does — the path that
+ * still checks included usage — never got an answer. [cause] is why that second start did not get through.
+ */
+class IncludedUsageStartUnreachableException(cause: Throwable) : IOException(
+    "Cursor's API refused this chat before checking your included usage, and starting it the way the desktop does didn't get through: ${cause.userMessage().trimEnd('.')}.",
+    cause,
+)
+
+/**
  * The account refused a start on one of the user's machines (see [AgentRepository.launch], Extended mode): [message]
  * is its words, [asked] the one line naming the call and its answer, as the app's compact notices print it —
  * `POST /aiserver.v1.BackgroundComposerService/StartBackgroundComposerFromSnapshot → HTTP 400 failed_precondition`.
@@ -418,6 +428,14 @@ class AgentRepository(
      */
     private val start: (suspend () -> AgentStartApi)? = null,
     private val uploads: (suspend () -> PromptUploader)? = null,
+    /**
+     * The account's start, used only after `POST /v1/agents` answers `usage_limit_exceeded`. Since the consolidated
+     * plans that refusal is returned without checking included usage; this is the desktop's start, which still checks
+     * it. Null when there is nothing to reroute through (tests of the documented create, the demo). A pool is not
+     * rerouted: this start has no pool target. The provider may return null — the demo — in which case the API's
+     * refusal stands.
+     */
+    private val includedUsageStart: (suspend () -> AgentStartApi?)? = null,
 ) {
     private val restoreMutex = Mutex()
 
@@ -2275,7 +2293,10 @@ class AgentRepository(
      * looked up by, on the spot: the chat is read by id a few times over the next moments and adopted when the
      * server did create it (see [recoverLostReply]); only when it is nowhere does the launch fail, with
      * [LaunchUnansweredException] saying so rather than a bare timeout. An answer the server gave — a `400` with
-     * its message, a `5xx` — is never waited on or asked about again: it fails the launch at once, as it is. A row
+     * its message, a `5xx` — is never waited on or asked about again: it fails the launch at once, as it is.
+     * `usage_limit_exceeded` is the exception. Since the consolidated plans the documented create returns it
+     * without checking included usage, so a cloud or machine launch is started again on the account (see
+     * [rerouteUsageLimit]), which is how the desktop bills. A row
      * [beginLaunch] put in the list is replaced by the server's record, or removed when the request fails.
      * [saveImages] is off for a caller that staged the prompt's images itself and files them under the run.
      * A prompt with files, a machine's repository in Extended mode, and an Ask or Debug chat
@@ -2302,6 +2323,7 @@ class AgentRepository(
                     t.toCursorError()?.code == AGENT_ID_CONFLICT -> adopt(api, id).also { (_, run) -> trace.adopted("after 409 agent_id_conflict", run) }
                     t.isLostReply() -> recoverLostReply(api, id)?.also { (_, run) -> trace.adopted("after a lost reply (${t.javaClass.simpleName})", run) }
                         ?: throw LaunchUnansweredException(t)
+                    t.toCursorError()?.code == USAGE_LIMIT_EXCEEDED -> rerouteUsageLimit(api, request, trace, t)
                     else -> throw machineRefusal(request, t)
                 }
             }
@@ -2342,11 +2364,14 @@ class AgentRepository(
      * One launch's decision and its outcome, for the diagnostics' `send:` block (see [SendDiagnostics.LaunchLine]):
      * which request it went out as, what it named as the place to run, and what came of it.
      */
-    private class LaunchTrace(request: LaunchRequest, onAccount: Boolean) {
+    private class LaunchTrace(private val request: LaunchRequest, onAccount: Boolean) {
         val atMillis: Long = AppClock.now()
-        /** `account` for the account's start (a prompt with files, a machine in Extended mode), `v1` for the documented create. */
-        val via: String = if (onAccount) "account" else "v1"
-        val target: String = request.launchTarget(via)
+        /**
+         * `account` for the account's start (a prompt with files, a machine in Extended mode, or a documented create
+         * rerouted after `usage_limit_exceeded`), `v1` for the documented create. A reroute moves it (see [rerouteUsageLimit]).
+         */
+        @Volatile var via: String = if (onAccount) "account" else "v1"
+        val target: String get() = request.launchTarget(via)
         val files: Int = request.files.size
         val images: Int = request.images.size
         @Volatile var outcome: String = "in flight"
@@ -2371,6 +2396,7 @@ class AgentRepository(
                     t is CancellationException -> "cancelled"
                     t is LaunchCancelledException -> "stopped from the chat"
                     t is LaunchUnansweredException -> "unanswered" + (t.cause?.let { " (${it.javaClass.simpleName})" } ?: "")
+                    t is IncludedUsageStartUnreachableException -> "usage limit, account start unreachable" + (t.cause?.let { " (${it.javaClass.simpleName})" } ?: "")
                     error != null -> "refused http=${error.httpCode} code=${error.code}"
                     connect != null -> "refused by the account http=${connect.httpCode}" + (connect.code?.let { " code=$it" } ?: "")
                     t is IOException -> "no answer (${t.javaClass.simpleName})"
@@ -2419,15 +2445,106 @@ class AgentRepository(
      * `user_message.mode`, as the desktop starts one; Extended mode's `agentModes` only, and on Cursor's cloud or a
      * machine's repository, like files.
      */
-    private suspend fun startOnAccount(api: CursorApi, request: LaunchRequest, progress: UploadProgress, trace: LaunchTrace, onMachine: Boolean): Pair<AgentDto, RunDto?> {
+    /**
+     * The documented create answered [USAGE_LIMIT_EXCEEDED]. On the consolidated plans that check never looks at
+     * included usage — the refusal names on-demand usage, which those plans do not have — while a chat started the
+     * way the desktop starts one still draws on it. So a cloud launch, or a machine's repository, is sent again
+     * through [includedUsageStart], Extended mode or not. The chat is read by id first: a refusal that arrived
+     * after the server had created it is adopted, not started twice.
+     *
+     * A pool stays on the refusal. This start has no pool target, and sending it as a cloud chat would run it
+     * somewhere else. A real limit the account also refuses is the account's answer, shown as it said it. A second
+     * start that never gets through — the session, the connection — is [IncludedUsageStartUnreachableException],
+     * not the API's sentence restated as if the limit were spent.
+     */
+    private suspend fun rerouteUsageLimit(api: CursorApi, request: LaunchRequest, trace: LaunchTrace, original: Throwable): Pair<AgentDto, RunDto?> {
+        if (!request.reroutesPastUsageLimit() || includedUsageStart == null) throw machineRefusal(request, original)
+        adoptIfPresent(api, request.agentId!!)?.let { (dto, run) ->
+            return (dto to run).also { trace.adopted("after usage_limit_exceeded, the chat was already there", run) }
+        }
+        val accountStart = try {
+            includedUsageStart.invoke()
+        } catch (t: CancellationException) {
+            throw t
+        } catch (t: Throwable) {
+            if (t.leavesUsageLimitStanding()) throw IncludedUsageStartUnreachableException(t)
+            throw t
+        } ?: throw machineRefusal(request, original)
+        trace.via = "account"
+        return try {
+            startOnAccount(
+                api,
+                request,
+                UploadProgress.NONE,
+                trace,
+                onMachine = request.env.type == EnvType.MACHINE,
+                starter = { accountStart },
+                enforceCapabilities = false,
+            )
+        } catch (t: CancellationException) {
+            throw t
+        } catch (t: Throwable) {
+            if (t.leavesUsageLimitStanding()) {
+                trace.via = "v1"
+                throw IncludedUsageStartUnreachableException(t)
+            }
+            throw t
+        }
+    }
+
+    /**
+     * Whether [this] can be started on the account after the documented create's usage-limit refusal: a client-minted
+     * id, no files (those already take the account's start), and not a pool. A machine needs the repository the
+     * desktop's start names; without one the documented refusal stands.
+     */
+    private fun LaunchRequest.reroutesPastUsageLimit(): Boolean {
+        if (agentId.isNullOrBlank() || files.isNotEmpty()) return false
+        return when (env.type) {
+            EnvType.POOL -> false
+            EnvType.MACHINE -> !env.apiName.isNullOrBlank() && !repoUrl.isNullOrBlank()
+            else -> true
+        }
+    }
+
+    /** The chat [id] already names, when the server has it; null when the read misses or itself fails. */
+    private suspend fun adoptIfPresent(api: CursorApi, id: String): Pair<AgentDto, RunDto?>? = try {
+        adopt(api, id)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * A failure from the account start that is not an answer: the session could not be opened, the connection
+     * dropped. An answer — the account's own refusal, including a limit it really enforced — is not one of these.
+     */
+    private fun Throwable.leavesUsageLimitStanding(): Boolean = when (this) {
+        is CancellationException, is ConnectRpcException, is CursorApiException -> false
+        is MachineStartRefusedException, is MachineRepositoryRefusedException -> false
+        is SessionUnavailableException, is IOException -> true
+        else -> false
+    }
+
+    private suspend fun startOnAccount(
+        api: CursorApi,
+        request: LaunchRequest,
+        progress: UploadProgress,
+        trace: LaunchTrace,
+        onMachine: Boolean,
+        starter: (suspend () -> AgentStartApi)? = start,
+        /** Off for the usage-limit reroute, which is not an Extended-mode feature (see [rerouteUsageLimit]). */
+        enforceCapabilities: Boolean = true,
+    ): Pair<AgentDto, RunDto?> {
         val id = requireNotNull(request.agentId) { "A launch on the account needs the client-minted agent id." }
         val accountMode = request.accountMode?.takeIf { it.needsAccountService }
-        if (accountMode != null) {
-            if (start == null || !capabilities().agentModes) throw IllegalStateException(modeNeedsExtended(accountMode))
+        if (enforceCapabilities && accountMode != null) {
+            if (starter == null || !capabilities().agentModes) throw IllegalStateException(modeNeedsExtended(accountMode))
             if (!onMachine && (request.env.type == EnvType.POOL || request.env.type == EnvType.MACHINE)) throw IllegalArgumentException(modeNeedsCloud(accountMode))
         }
-        val startApi = start ?: throw IllegalStateException(FILES_NEED_EXTENDED)
+        val startApi = starter ?: throw IllegalStateException(FILES_NEED_EXTENDED)
         val uploaded = if (request.files.isEmpty()) emptyList() else {
+            if (!enforceCapabilities) throw IllegalStateException("A usage-limit reroute carries no files.")
             val uploader = uploads ?: throw IllegalStateException(FILES_NEED_EXTENDED)
             if (!capabilities().promptFiles) throw IllegalStateException(FILES_NEED_EXTENDED)
             if (request.env.type == EnvType.POOL || request.env.type == EnvType.MACHINE) throw IllegalArgumentException(FILES_NEED_CLOUD)
@@ -3196,6 +3313,8 @@ class AgentRepository(
         /** A row that reads finished but was active this recently may still be going; its record settles it. */
         private const val VERIFY_JUST_ACTIVE_WINDOW_MS = 5 * 60 * 1000L
         private const val AGENT_ID_CONFLICT = "agent_id_conflict"
+        /** What `POST /v1/agents` returns when it will not start the chat, included usage notwithstanding. */
+        private const val USAGE_LIMIT_EXCEEDED = "usage_limit_exceeded"
         const val FILES_NEED_EXTENDED = "Attaching files needs Extended mode; turn it on in Settings, or take the files off."
         const val FILES_NEED_CLOUD = "Files can go on a new chat that runs on Cursor's cloud only. Start it on Cloud, or attach them in a follow-up once it is running."
 

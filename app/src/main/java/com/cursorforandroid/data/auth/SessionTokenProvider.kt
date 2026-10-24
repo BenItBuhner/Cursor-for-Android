@@ -44,6 +44,7 @@ class SessionUnavailableException(message: String, val code: String? = null, cau
  * The exchange is not part of the documented API, and neither is anything the session is used for, so it is behind
  * Extended mode: [sessionAllowed] is asked before every hand-out, and while it says no, no session exists and none is
  * started — this is the one choke point every `api2` RPC goes through, whatever a caller further up forgot to check.
+ * The usage-limit launch reroute holds a second provider whose gate is open (see `AppGraph`); nothing else uses it.
  */
 class SessionTokenProvider(
     private val client: OkHttpClient,

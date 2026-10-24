@@ -1,9 +1,14 @@
 package com.cursorforandroid.data.api
 
 import com.cursorforandroid.BuildConfig
-import com.cursorforandroid.data.api.dto.ApiErrorBodyDto
+import com.cursorforandroid.data.api.dto.ApiErrorDto
 import com.cursorforandroid.data.auth.SessionUnavailableException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.Interceptor
@@ -67,7 +72,7 @@ fun Throwable.toCursorError(): CursorApiException? {
     val body = runCatching {
         http.response()?.errorBody()?.let { it.source().peek().readString(it.contentType()?.charset() ?: Charsets.UTF_8) }
     }.getOrNull()
-    val parsed = body?.let { runCatching { CursorJson.decodeFromString(ApiErrorBodyDto.serializer(), it) }.getOrNull() }?.error
+    val parsed = body?.let(::parseApiError)
     return CursorApiException(
         httpCode = http.code(),
         code = parsed?.code ?: "http_${http.code()}",
@@ -138,7 +143,9 @@ fun Throwable.userMessage(): String {
             e.isRateLimited -> rateLimitedMessage(e)
             e.code == "agent_busy" -> "The agent is still working on the previous prompt."
             e.code == "agent_archived" -> "This agent is archived. Unarchive it to send a follow-up."
-            e.code == "usage_limit_exceeded" -> "Your Cursor usage limit has been reached."
+            // The on-demand sentence is what the create endpoint says on the consolidated plans even when included
+            // usage remains (there is no on-demand setting to turn on). A launch reroutes before this is shown.
+            e.code == "usage_limit_exceeded" -> if (e.message.isOnDemandBillingMismatch()) ON_DEMAND_BILLING_MISMATCH else "Your Cursor usage limit has been reached."
             else -> e.message
         }
     }
@@ -190,6 +197,49 @@ const val LOOKUP_FAILED_ONLINE = "Couldn't look up Cursor's server, though the p
 
 /** Said of a failed name lookup of Cursor's host when the phone cannot tell whether it has a network. */
 const val LOOKUP_FAILED = "Couldn't look up Cursor's server. Check your connection."
+
+/**
+ * Said when creating an agent is refused as `usage_limit_exceeded` with the on-demand wording, and the launch could
+ * not be started the way the desktop starts one. Since the consolidated plans (October 2026) `POST /v1/agents`
+ * returns that refusal without checking included usage, and those plans have no on-demand setting.
+ */
+const val ON_DEMAND_BILLING_MISMATCH =
+    "Cursor refused to start this chat and called it a usage limit, without checking the included usage the current plans bill. On-demand usage is not a setting those plans have."
+
+/** The on-demand sentence the create endpoint uses for the billing mismatch above, as opposed to a limit that was actually spent. */
+private fun String.isOnDemandBillingMismatch(): Boolean = contains("on-demand usage", ignoreCase = true)
+
+/**
+ * The API's error body, in either shape it is sent. The documented one is `{ error: { code, message } }`. A refusal
+ * that puts the sentence in `error` as a string — "Your on-demand usage limit was reached…", with no code — is read
+ * the same way, and a usage-limit sentence is given the code the object form would have carried, so a launch can
+ * tell it from any other failure. A body with `code` and `message` at the top, and no `error` member, is read too.
+ */
+private fun parseApiError(body: String): ApiErrorDto? {
+    val root = runCatching { CursorJson.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+    when (val error = root["error"]) {
+        is JsonObject -> return runCatching { CursorJson.decodeFromJsonElement(ApiErrorDto.serializer(), error) }.getOrNull()
+        is JsonPrimitive -> {
+            if (!error.isString) return null
+            val text = error.content.trim().takeIf { it.isNotEmpty() } ?: return null
+            val code = if (text.readsAsUsageLimit()) "usage_limit_exceeded" else "error"
+            return ApiErrorDto(code = code, message = text)
+        }
+        null -> {
+            val code = root.string("code") ?: return null
+            return ApiErrorDto(code = code, message = root.string("message").orEmpty(), helpUrl = root.string("helpUrl"))
+        }
+        else -> return null
+    }
+}
+
+/** A sentence that is the usage-limit refusal, whatever code the body forgot to send with it. */
+private fun String.readsAsUsageLimit(): Boolean {
+    val lower = lowercase()
+    return "usage limit" in lower || "usage_limit" in lower || "on-demand usage" in lower
+}
+
+private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 
 /**
  * Marks the body of every request that is not idempotent — a `POST`, a `DELETE`, anything but `GET` and `HEAD` —
