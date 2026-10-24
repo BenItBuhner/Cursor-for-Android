@@ -8,12 +8,14 @@ import com.cursorforandroid.data.api.AgentStartApi
 import com.cursorforandroid.data.api.ComposerSnapshot
 import com.cursorforandroid.data.api.ConnectRpcException
 import com.cursorforandroid.data.api.CursorApiException
+import com.cursorforandroid.data.api.ON_DEMAND_BILLING_MISMATCH
 import com.cursorforandroid.data.api.PresignedPromptUpload
 import com.cursorforandroid.data.api.PromptUploadApi
 import com.cursorforandroid.data.api.PromptUploadCompletion
 import com.cursorforandroid.data.api.StartRequest
 import com.cursorforandroid.data.api.toCursorError
 import com.cursorforandroid.data.api.userMessage
+import com.cursorforandroid.data.auth.SessionUnavailableException
 import com.cursorforandroid.data.local.AgentListCache
 import com.cursorforandroid.data.local.AttachmentStore
 import com.cursorforandroid.data.local.JsonDiskCache
@@ -212,7 +214,12 @@ class AgentRepositoryLaunchTest {
         override suspend fun abort(uploadId: String, s3UploadId: String) = Unit
     }
 
-    private fun withAccountStart(start: FakeStart, uploads: FakeUploads, capabilities: Capabilities = Capabilities.EXTENDED): AgentRepository {
+    private fun withAccountStart(
+        start: FakeStart,
+        uploads: FakeUploads,
+        capabilities: Capabilities = Capabilities.EXTENDED,
+        includedUsageStart: (suspend () -> AgentStartApi?)? = null,
+    ): AgentRepository {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val backend = CursorBackend(api, FakeRunStreamer(), isDemo = true)
         val session = SessionManager(SecureKeyStore(context), prefs, backend, backend)
@@ -222,8 +229,16 @@ class AgentRepositoryLaunchTest {
             capabilities = { capabilities },
             start = { start },
             uploads = { PromptUploader(uploads, OkHttpClient(), partTimeoutMs = 0L) },
+            includedUsageStart = includedUsageStart,
         )
     }
+
+    /** The refusal `POST /v1/agents` gives on the consolidated plans, included usage notwithstanding. */
+    private fun onDemandRefusal(): HttpException = FakeCursorApi.httpError(
+        403,
+        "usage_limit_exceeded",
+        "On-demand usage is required. Enable on-demand usage at https://www.cursor.com/dashboard?tab=settings to continue using Background Agents.",
+    )
 
     @Test
     fun `a launch with files goes through the account's start with the files uploaded, then adopts the chat from the API`() = runBlocking<Unit> {
@@ -577,5 +592,123 @@ class AgentRepositoryLaunchTest {
         val pool = request.copy(env = DeviceTarget.pool("gpu"), agentId = LaunchIdempotency.agentId(request.copy(env = DeviceTarget.pool("gpu")), "pool"))
         agents.launch(pool, null).getOrThrow()
         assertThat(api.createRequests.last().env).isEqualTo(AgentEnvDto(type = "pool", name = "gpu"))
+    }
+
+    @Test
+    fun `a usage limit from the documented create starts the chat on the account instead, extended mode or not`() = runBlocking<Unit> {
+        val start = FakeStart()
+        // The gate is off: this reroute is how a launch works while Extended mode is off.
+        val agents = withAccountStart(start, FakeUploads(), capabilities = Capabilities.DOCUMENTED, includedUsageStart = { start })
+        val cloud = request.copy(planMode = true)
+        val id = LaunchIdempotency.agentId(cloud, "nonce")
+        api.failNextCreate = onDemandRefusal()
+        start.onStart = { api.addRunningAgent(it.agentId, "Sync merge and chat state", "run-server-1") }
+
+        val (agent, run) = agents.launch(cloud.copy(agentId = id), "Auto").getOrThrow()
+
+        // The documented create was asked, refused, and not asked again. The account's start carried the same chat.
+        assertThat(api.createRequests).hasSize(1)
+        assertThat(api.createRequests.single().mode).isEqualTo("plan")
+        val sent = start.requests.single()
+        assertThat(sent.agentId).isEqualTo(id)
+        assertThat(sent.text).isEqualTo(request.prompt)
+        assertThat(sent.repoUrl).isEqualTo(request.repoUrl)
+        assertThat(sent.ref).isEqualTo("main")
+        assertThat(sent.modelId).isEqualTo("auto-smart")
+        assertThat(sent.mode).isEqualTo(AgentMode.PLAN)
+        assertThat(sent.machine).isNull()
+        assertThat(agent.id).isEqualTo(id)
+        assertThat(agent.name).isEqualTo("Sync merge and chat state")
+        assertThat(run?.id).isEqualTo("run-server-1")
+        val line = agents.launchDiagnostics(id)!!
+        assertThat(line.via).isEqualTo("account")
+        assertThat(line.outcome).startsWith("accepted")
+
+        // No repository — the home composer's "Start from scratch" — reroutes the same way.
+        val scratch = request.copy(repoUrl = null, ref = null)
+        val scratchId = LaunchIdempotency.agentId(scratch, "scratch")
+        api.failNextCreate = onDemandRefusal()
+        agents.launch(scratch.copy(agentId = scratchId), "Auto").getOrThrow()
+        assertThat(start.requests.last().repoUrl).isNull()
+        assertThat(start.requests.last().environmentName).isNull()
+
+        // A string body with no code is the same refusal.
+        val bare = request.copy(repoUrl = "https://github.com/acme/other")
+        val bareId = LaunchIdempotency.agentId(bare, "bare")
+        api.failNextCreate = HttpException(
+            Response.error<Unit>(
+                403,
+                """{"error":"Your on-demand usage limit was reached. Increase it at https://www.cursor.com/dashboard?tab=settings to continue using Background Agents."}"""
+                    .toResponseBody("application/json".toMediaType()),
+            ),
+        )
+        agents.launch(bare.copy(agentId = bareId), "Auto").getOrThrow()
+        assertThat(start.requests.last().repoUrl).isEqualTo("https://github.com/acme/other")
+        assertThat(start.requests).hasSize(3)
+    }
+
+    @Test
+    fun `a usage limit the account also enforces is the account's answer, and a pool is not rerouted`() = runBlocking<Unit> {
+        val start = FakeStart()
+        val agents = withAccountStart(start, FakeUploads(), capabilities = Capabilities.DOCUMENTED, includedUsageStart = { start })
+        val id = LaunchIdempotency.agentId(request, "nonce")
+        api.failNextCreate = onDemandRefusal()
+        start.onStart = { throw ConnectRpcException(403, "resource_exhausted", "You've used your included usage for this week.") }
+
+        val refused = agents.launch(request.copy(agentId = id), "Auto")
+
+        assertThat(refused.exceptionOrNull()!!.userMessage()).isEqualTo("You've used your included usage for this week.")
+        assertThat(start.requests).hasSize(1)
+        assertThat(agents.state.value.agents).isEmpty()
+        assertThat(agents.launchDiagnostics(id)!!.via).isEqualTo("account")
+        assertThat(agents.launchDiagnostics(id)!!.outcome).startsWith("refused by the account")
+
+        // A pool has no account start to send. The on-demand wording is said for what it is, not as a spent limit.
+        val pool = request.copy(env = DeviceTarget.pool("gpu"))
+        val poolId = LaunchIdempotency.agentId(pool, "pool")
+        api.failNextCreate = onDemandRefusal()
+        val pooled = agents.launch(pool.copy(agentId = poolId), "Auto")
+        assertThat(pooled.exceptionOrNull()!!.userMessage()).isEqualTo(ON_DEMAND_BILLING_MISMATCH)
+        assertThat(start.requests).hasSize(1)
+        assertThat(agents.launchDiagnostics(poolId)!!.via).isEqualTo("v1")
+    }
+
+    @Test
+    fun `a usage limit whose account start never gets through says so, instead of a spent limit`() = runBlocking<Unit> {
+        val agents = withAccountStart(
+            FakeStart(),
+            FakeUploads(),
+            capabilities = Capabilities.DOCUMENTED,
+            includedUsageStart = { throw SessionUnavailableException("Cursor won't start a session for this API key.", SessionUnavailableException.KEY_REJECTED) },
+        )
+        val id = LaunchIdempotency.agentId(request, "nonce")
+        api.failNextCreate = onDemandRefusal()
+
+        val failed = agents.launch(request.copy(agentId = id), "Auto")
+
+        val error = failed.exceptionOrNull()!!
+        assertThat(error).isInstanceOf(IncludedUsageStartUnreachableException::class.java)
+        assertThat(error.userMessage()).contains("didn't get through")
+        assertThat(error.userMessage()).contains("Cursor won't start a session for this API key")
+        assertThat(error.userMessage()).doesNotContain("has been reached")
+        assertThat(agents.launchDiagnostics(id)!!.outcome).contains("account start unreachable")
+        assertThat(agents.state.value.agents).isEmpty()
+    }
+
+    @Test
+    fun `a machine the documented create refuses as a usage limit is started on the account with that machine`() = runBlocking<Unit> {
+        val start = FakeStart()
+        val agents = withAccountStart(start, FakeUploads(), capabilities = Capabilities.DOCUMENTED, includedUsageStart = { start })
+        val machine = request.copy(env = DeviceTarget.machine("bennett"))
+        val id = LaunchIdempotency.agentId(machine, "nonce")
+        api.failNextCreate = onDemandRefusal()
+        start.onStart = { api.addRunningAgent(it.agentId, "On the machine", "run-machine") }
+
+        agents.launch(machine.copy(agentId = id), "Auto").getOrThrow()
+
+        val sent = start.requests.single()
+        assertThat(sent.machine?.name).isEqualTo("bennett")
+        assertThat(sent.repoUrl).isEqualTo(request.repoUrl)
+        assertThat(agents.launchDiagnostics(id)!!.via).isEqualTo("account")
     }
 }

@@ -398,6 +398,13 @@ class AppGraph(
     }
     /** The account session the account-level RPCs take, derived from the stored key when needed and kept in memory only; none while Extended mode is off. */
     private val lazySessionTokens = lazy { SessionTokenProvider(lazyAccountClient.value, { keyStore.apiKey() }, sessionAllowed = { extendedMode.isEnabled() }) }
+
+    /**
+     * The session for one call Extended mode does not gate: starting a chat after `POST /v1/agents` answered
+     * `usage_limit_exceeded` without checking included usage. The desktop's start still checks it, so this is how a
+     * new chat draws on included usage while that API refusal stands. Nothing else on api2 uses this provider.
+     */
+    private val lazyIncludedUsageTokens = lazy { SessionTokenProvider(lazyAccountClient.value, { keyStore.apiKey() }, sessionAllowed = { true }) }
     /** The account's agent list, pins, archive, rename, pull request statuses and sources: what the desktop Agents window and the iOS app show. */
     private val lazyAccountAgents = lazy { BackgroundComposerApi(lazyAccountRpc.value, lazySessionTokens.value) }
     private val lazyAccountPullRequests = lazy { CursorPullRequestSource(lazyAccountAgents.value) }
@@ -624,6 +631,16 @@ class AppGraph(
         agentStartApi ?: ConnectAgentStartApi(lazyAccountRpc.value, lazySessionTokens.value, noRepoEnvironment = { lazyProjectCreation.value.noRepoEnvironmentPublicId() })
     }
 
+    /**
+     * The same start, on [lazyIncludedUsageTokens], for a documented create the API refused as a usage limit.
+     * Its no-repo lookup uses that session too: the personal environment is what "Start from scratch" names, and
+     * the Extended-mode creation client would refuse to look it up while the mode is off.
+     */
+    private val lazyIncludedUsageCreation = lazy { ConnectProjectCreationApi(lazyAccountRpc.value, lazyIncludedUsageTokens.value) }
+    private val lazyIncludedUsageStart: Lazy<AgentStartApi> = lazy {
+        ConnectAgentStartApi(lazyAccountRpc.value, lazyIncludedUsageTokens.value, noRepoEnvironment = { lazyIncludedUsageCreation.value.noRepoEnvironmentPublicId() })
+    }
+
     private val lazyRepositoryBranches: Lazy<RepositoryBranchesApi> = lazy { repositoryBranchesApi ?: ConnectRepositoryBranchesApi(lazyAccountRpc.value, lazySessionTokens.value) }
 
     /**
@@ -661,6 +678,9 @@ class AppGraph(
             accountPaused = { accountPauseMillis() > 0L },
             start = { lazyAgentStart.value },
             uploads = { promptUploads },
+            // The demo has no account. Everywhere else, a usage-limit refusal from the documented create is started
+            // again here — Extended mode or not — because that refusal does not mean included usage is spent.
+            includedUsageStart = { if (session.isDemo) null else lazyIncludedUsageStart.value },
         ).also { repo ->
             // The account layer — the pin repository's round: the account's list with its names, looks, sources,
             // lineage fields and running statuses, the pins, the pull request states, and off it the root discovery
@@ -1195,6 +1215,7 @@ class AppGraph(
             if (lazySteering.isInitialized()) steering.reset()
             if (lazyAccountPullRequests.isInitialized()) lazyAccountPullRequests.value.reset()
             if (lazySessionTokens.isInitialized()) lazySessionTokens.value.clear()
+            if (lazyIncludedUsageTokens.isInitialized()) lazyIncludedUsageTokens.value.clear()
             // Signing out of one real account and into another keeps the same backend, so the list must be
             // reset explicitly or the previous account's agents would show.
             if (lazyAgents.isInitialized()) agents.reset()
@@ -1223,9 +1244,10 @@ class AppGraph(
         }
 
         // Extended mode turned off (and, once, an upgraded install whose mode starts off): nothing the account
-        // service produced stays. The session token first — nothing on api2 may be called from here — then what its
-        // calls left in memory and on disk, and the pins become this device's own. Same rule as the sign-out above:
-        // memory is reset only where this process built it, disk is wiped regardless.
+        // service produced stays. The session token first — nothing on api2 may be called from here, apart from the
+        // usage-limit launch reroute, whose session is its own and stays — then what its calls left in memory and
+        // on disk, and the pins become this device's own. Same rule as the sign-out above: memory is reset only
+        // where this process built it, disk is wiped regardless.
         extendedMode.onDisabled = {
             if (lazySessionTokens.isInitialized()) lazySessionTokens.value.clear()
             if (lazyPins.isInitialized()) pins.reset()

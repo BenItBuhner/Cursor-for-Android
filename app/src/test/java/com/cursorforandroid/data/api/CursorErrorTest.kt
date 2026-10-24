@@ -48,6 +48,30 @@ class CursorErrorTest {
     }
 
     @Test
+    fun `a usage limit sent as a string, or as a flat code, is still the usage limit`() {
+        val stringBody = httpFailure(
+            403,
+            """{"error":"Your on-demand usage limit was reached. Increase it at https://www.cursor.com/dashboard?tab=settings to continue using Background Agents."}""",
+        )
+        val first = stringBody.toCursorError()!!
+        val second = stringBody.toCursorError()!!
+        assertThat(first.code).isEqualTo("usage_limit_exceeded")
+        assertThat(first.message).contains("on-demand usage limit")
+        assertThat(second.code).isEqualTo(first.code)
+        assertThat(stringBody.userMessage()).isEqualTo(ON_DEMAND_BILLING_MISMATCH)
+
+        val flat = httpFailure(403, """{"code":"usage_limit_exceeded","message":"You've used all of this month's agents."}""")
+        assertThat(flat.toCursorError()!!.code).isEqualTo("usage_limit_exceeded")
+        assertThat(flat.userMessage()).isEqualTo("Your Cursor usage limit has been reached.")
+
+        val onDemandObject = httpFailure(
+            403,
+            """{"error":{"code":"usage_limit_exceeded","message":"On-demand usage is required. Enable on-demand usage at https://www.cursor.com/dashboard?tab=settings to continue using Background Agents."}}""",
+        )
+        assertThat(onDemandObject.userMessage()).isEqualTo(ON_DEMAND_BILLING_MISMATCH)
+    }
+
+    @Test
     fun `a failure with no usable body falls back to the status`() {
         val failure = httpFailure(500, "<html>gateway</html>")
 
