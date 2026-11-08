@@ -235,7 +235,7 @@ open class FakeCursorApi : CursorApi {
         failPools?.let { throw it }
         return ListPoolsResponseDto(pools = pools)
     }
-    override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): ListAgentsResponseDto {
+    override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean, prUrl: String?): ListAgentsResponseDto {
         listAgentsCount.incrementAndGet()
         failListAgents?.let { throw it }
         // Snapshot first, then wait: the answer reflects the server as it was when the request went out.
@@ -286,7 +286,11 @@ open class FakeCursorApi : CursorApi {
         agents.remove(id)
         return IdResponseDto(id)
     }
-    override suspend fun usage(id: String) = AgentUsageResponseDto()
+    @Volatile var lastUsageRunId: String? = null
+    override suspend fun usage(id: String, runId: String?): AgentUsageResponseDto {
+        lastUsageRunId = runId
+        return AgentUsageResponseDto()
+    }
     override suspend fun artifacts(id: String) = ListArtifactsResponseDto()
     open override suspend fun artifactUrl(id: String, path: String) = DownloadArtifactResponseDto(url = "")
     override suspend fun listRuns(id: String, limit: Int, cursor: String?): ListRunsResponseDto {

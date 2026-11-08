@@ -59,6 +59,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.domain.AgentIndicator
 import com.cursorforandroid.domain.AgentRow
+import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.DeviceTarget
 import com.cursorforandroid.domain.MediaMarkup
 import com.cursorforandroid.domain.NewChatHome
@@ -81,6 +82,7 @@ import kotlin.math.roundToInt
 import com.cursorforandroid.ui.components.LocalSendMotion
 import com.cursorforandroid.ui.components.SendMotion
 import com.cursorforandroid.ui.components.CursorCard
+import com.cursorforandroid.ui.components.CaptionBarSpacer
 import com.cursorforandroid.ui.components.CursorHeader
 import com.cursorforandroid.ui.components.FadingLazyColumn
 import com.cursorforandroid.ui.components.CursorIcons
@@ -127,7 +129,7 @@ import androidx.compose.ui.unit.IntOffset
 import com.cursorforandroid.ui.components.onContextClick
 
 /**
- * The "New Chat" pane — the home of the official app: context selectors, the composer, then — as Settings › New chat
+ * The "New Chat" pane — the home of the official app: a greeting ([NewChatGreeting]), context selectors, the composer, then — as Settings › New chat
  * page chooses ([home]) — the recent chats list with preview cards (cursor.com/agents), the Projects as shortcuts, the
  * two stacked, or nothing (see [homeBlocks]); what does not fill the pane sits in its middle. On phones a 44dp header carries the
  * sidebar toggle.
@@ -159,6 +161,8 @@ fun HomeScreen(
     /** Ctrl+N asked for the composer: it is scrolled to and focused, and [onComposerFocused] says the ask was taken. */
     focusComposer: Boolean = false,
     onComposerFocused: () -> Unit = {},
+    /** The signed-in account, whose first name the greeting may use; null greets without a name. */
+    user: CursorUser? = null,
 ) {
     // The draft open here is kept with the screen's saved state: a process ended under the composer opens it again,
     // while an app started afresh begins a new one, the others waiting in the sidebar.
@@ -220,10 +224,15 @@ fun HomeScreen(
     var paneHeight by remember { mutableIntStateOf(0) }
     val keyboardFocus = rememberKeyboardFocus(composerFocused, paneHeight = { paneHeight })
     val givenOver by keyboardFocus.engaged
+    val greeting = rememberNewChatGreeting(graph.caches.greetings, user, listState)
 
     Column(modifier.fillMaxSize().background(colors.canvas).onSizeChanged { paneHeight = it.height }.endsArrangingOnTap(projectGrid)) {
         if (onOpenSidebar != null) {
             CursorHeader(leading = { FlatIconButton(CursorIcons.Sidebar, "Open sidebar", onClick = onOpenSidebar) })
+        } else {
+            // Beside the rail there is no header; in a desktop window the pane still leaves the caption bar's row to
+            // the window's controls, and to the window being dragged by it.
+            CaptionBarSpacer()
         }
         // The list scrolls edge to edge; the last row must still clear the navigation bar (48dp with three buttons).
         val navigationBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -256,6 +265,7 @@ fun HomeScreen(
         centring.squeeze = { expansion.fraction }
         var pageHeight by remember { mutableIntStateOf(0) }
         var composerTop by remember { mutableIntStateOf(0) }
+        var greetingHeight by remember { mutableIntStateOf(0) }
         val density = LocalDensity.current
         val expandedMargins = with(density) { (pageTopPadding(withHeader = onOpenSidebar != null) + ExpandedFootGap).roundToPx() }
         // The list stands clear of the keyboard, not of the navigation bar: with the keyboard down the bar is over its foot.
@@ -291,6 +301,7 @@ fun HomeScreen(
                         .onSizeChanged { centring.composerLaidOut(it.height) }
                         .testTag(NewChatHomeTags.COMPOSER),
                 ) {
+                    NewChatGreeting(greeting, keyboardFocus, expanding = { expansion.fraction }, Modifier.onSizeChanged { greetingHeight = it.height })
                     NewChatSelectors(state, onRepo = { repoSheet = true }, onBranch = { branchSheet = true }, onDevice = { deviceSheet = true }, anchors = pickerAnchors)
                     ComposerBox(
                         value = state.prompt,
@@ -335,7 +346,8 @@ fun HomeScreen(
                         focusRequests = composerFocusRequests,
                         voice = voice,
                         expansion = expansion,
-                        expandRoom = { pageHeight - footUnderBar() - expandedMargins - composerTop },
+                        // The greeting folds away as the composer expands, so its room is the composer's to take.
+                        expandRoom = { pageHeight - footUnderBar() - expandedMargins - (composerTop - greetingHeight) },
                         modifier = Modifier.onPlaced { composerTop = it.positionInParent().y.roundToInt() },
                     )
                     state.error?.let { ComposerErrorLine(it, state.errorAsked, onDismiss = viewModel::dismissError) }

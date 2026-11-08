@@ -56,8 +56,8 @@ class ModelSlugsTest {
                 }
             }
         }
-        // 97 spellable combinations across the catalogue, three spellings each.
-        assertThat(checked).isEqualTo(291)
+        // 100 spellable combinations across the catalogue, three spellings each.
+        assertThat(checked).isEqualTo(300)
     }
 
     @Test
@@ -244,6 +244,7 @@ class ModelSlugsTest {
         assertThat(ModelSlugs.resolve(catalog, "composer-fast")).isEqualTo(ModelChoice(LiveModelCatalog.model("composer-2.5"), LiveModelCatalog.model("composer-2.5").defaultVariant))
         assertThat(ModelSlugs.resolve(catalog, "composer-latest")?.model?.id).isEqualTo("composer-2.5")
         assertThat(ModelSlugs.resolve(catalog, "auto")?.model?.id).isEqualTo("auto-smart")
+        assertThat(ModelSlugs.resolve(catalog, "auto")?.params).containsExactly(ModelParam("optimize_for", "balanced"))
         assertThat(ModelSlugs.resolve(catalog, AccountModel.AUTO_ID)?.model?.id).isEqualTo("auto-smart")
         // The docs' vendor-first id, in today's order.
         assertThat(ModelSlugs.resolve(catalog, "claude-sonnet-4-6-thinking")?.model?.id).isEqualTo("claude-4.6-sonnet-thinking")

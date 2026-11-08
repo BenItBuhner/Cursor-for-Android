@@ -1008,7 +1008,7 @@ class ConversationRepositoryTest {
         assertThat(result.isSuccess).isTrue()
         val body = api.runRequests.single()
         assertThat(body.prompt.text).isEqualTo("Try Composer")
-        assertThat(body.model).isEqualTo(ModelRefDto("composer-2", listOf(ModelParamDto("fast", "true"))))
+        assertThat(body.model).isEqualTo(ModelRefDto("composer-2.5", listOf(ModelParamDto("fast", "true"))))
         assertThat(body.mode).isEqualTo("agent")
         val row = agents.agent("bc-1")!!
         assertThat(row.modelId).isEqualTo("composer-2")

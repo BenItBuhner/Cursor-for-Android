@@ -51,5 +51,9 @@ class McpServerFormTest {
     fun `summary shows the host for http and the command line for stdio`() {
         assertThat(linear.summary).isEqualTo("mcp.linear.app/mcp")
         assertThat(McpServer(id = "3", name = "gh", transport = McpTransport.Stdio, command = "npx", args = listOf("-y", "pkg")).summary).isEqualTo("npx -y pkg")
+        val sse = McpServer(id = "4", name = "docs", transport = McpTransport.Sse, url = "https://example.com/sse")
+        assertThat(sse.summary).isEqualTo("example.com/sse")
+        assertThat(McpServerForm.validate(sse, emptyList())).isNull()
+        assertThat(McpServerForm.validate(sse.copy(url = ""), emptyList())).isEqualTo("Enter the server URL.")
     }
 }
