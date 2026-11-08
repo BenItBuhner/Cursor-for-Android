@@ -64,7 +64,7 @@ class AgentRepositoryFollowUpTest {
         agents.followUp("bc-1", "Again", planMode = true, modelId = "composer-2", modelParams = params, modelDisplayName = "Composer 2 · Fast off").getOrThrow()
 
         val body = api.runRequests.single()
-        assertThat(body.model).isEqualTo(ModelRefDto("composer-2", listOf(ModelParamDto("fast", "false"))))
+        assertThat(body.model).isEqualTo(ModelRefDto("composer-2.5", listOf(ModelParamDto("fast", "false"))))
         assertThat(body.mode).isEqualTo("plan")
         val row = agents.agent("bc-1")!!
         assertThat(row.modelId).isEqualTo("composer-2")
@@ -96,10 +96,16 @@ class AgentRepositoryFollowUpTest {
         val result = agents.followUp("bc-1", "Again", modelId = "composer-2", modelParams = listOf(ModelParam("fast", "true")), modelDisplayName = "Composer 2 · Fast")
 
         assertThat(result.isFailure).isTrue()
-        assertThat(api.runRequests.single().model?.id).isEqualTo("composer-2")
+        assertThat(api.runRequests.single().model?.id).isEqualTo("composer-2.5")
         val row = agents.agent("bc-1")!!
         assertThat(row.modelId).isEqualTo("auto-smart")
         assertThat(row.modelDisplayName).isEqualTo("Auto")
         assertThat(row.runStatus).isEqualTo(RunStatus.FINISHED)
+    }
+
+    @Test
+    fun `a follow-up carries session envVars and drops CURSOR_ names`() = runBlocking<Unit> {
+        agents.followUp("bc-1", "Again", envVars = mapOf("FOO" to "bar", "CURSOR_X" to "no")).getOrThrow()
+        assertThat(api.runRequests.single().envVars).containsExactly("FOO", "bar")
     }
 }

@@ -94,7 +94,7 @@ class AgentsViewModelTest {
                 return demoApi.delete(id)
             }
 
-            override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): ListAgentsResponseDto {
+            override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean, prUrl: String?): ListAgentsResponseDto {
                 listCalls++
                 val call = listCalls
                 listCallTimes += virtualNow()
