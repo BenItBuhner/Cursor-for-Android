@@ -14,14 +14,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -83,6 +81,10 @@ import com.cursorforandroid.domain.NestedRow
 import com.cursorforandroid.ui.components.popoverAnchor
 import com.cursorforandroid.ui.components.PopoverAnchor
 import com.cursorforandroid.ui.components.CursorIcons
+import com.cursorforandroid.ui.components.HeaderTopInsets
+import com.cursorforandroid.ui.components.LocalCaptionBar
+import com.cursorforandroid.ui.components.captionControls
+import com.cursorforandroid.ui.components.captionRow
 import com.cursorforandroid.ui.components.FlatIconButton
 import com.cursorforandroid.ui.components.PullRefreshHaptics
 import com.cursorforandroid.ui.components.RefreshIndicator
@@ -220,31 +222,42 @@ fun Sidebar(
     // A process death restores [searching] and [query] together; the ViewModel starts empty and has to be told.
     LaunchedEffect(Unit) { if (searching) onQueryChange(query) }
 
-    Column(modifier.fillMaxSize().background(colors.sidebar).windowInsetsPadding(WindowInsets.statusBars)) {
+    // In a desktop window's caption bar the row is the bar's, and the logo gives way to the system's app menu, which
+    // shows the app's icon at that very corner. The buttons pack just after the chip — no extra start padding, no
+    // spacer pushing them to the rail's far edge.
+    val caption = LocalCaptionBar.current
+    Column(modifier.fillMaxSize().background(colors.sidebar).then(if (caption != null) Modifier else Modifier.windowInsetsPadding(HeaderTopInsets))) {
         Row(
-            Modifier.fillMaxWidth().height(CursorDimens.headerHeight).padding(start = 14.dp, end = 6.dp),
+            Modifier
+                .fillMaxWidth()
+                .then(if (caption != null) Modifier.captionRow(caption) else Modifier.height(CursorDimens.headerHeight).padding(start = 14.dp, end = 6.dp)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(CursorIcons.Cube, "Cursor", tint = colors.iconPrimary, modifier = Modifier.size(CursorDimens.logo))
-            Spacer(Modifier.weight(1f))
-            FlatIconButton(CursorIcons.Plus, "New chat", onClick = callbacks.onNewChat)
-            FlatIconButton(
-                CursorIcons.Search,
-                "Search chats",
-                onClick = {
-                    val paletteSearch = callbacks.onSearch
-                    if (paletteSearch != null) {
-                        paletteSearch()
-                    } else {
-                        searching = !searching
-                        if (!searching) setSearchQuery("")
-                    }
-                },
-                tint = if (searching && inRailSearch) colors.iconPrimary else colors.iconSecondary,
-            )
-            if (callbacks.onToggleSidebar != null) {
-                FlatIconButton(CursorIcons.Sidebar, "Toggle sidebar", onClick = callbacks.onToggleSidebar)
+            if (caption == null) {
+                Icon(CursorIcons.Cube, "Cursor", tint = colors.iconPrimary, modifier = Modifier.size(CursorDimens.logo))
+                Spacer(Modifier.weight(1f))
             }
+            Row(Modifier.captionControls(caption), verticalAlignment = Alignment.CenterVertically) {
+                FlatIconButton(CursorIcons.Plus, "New chat", onClick = callbacks.onNewChat)
+                FlatIconButton(
+                    CursorIcons.Search,
+                    "Search chats",
+                    onClick = {
+                        val paletteSearch = callbacks.onSearch
+                        if (paletteSearch != null) {
+                            paletteSearch()
+                        } else {
+                            searching = !searching
+                            if (!searching) setSearchQuery("")
+                        }
+                    },
+                    tint = if (searching && inRailSearch) colors.iconPrimary else colors.iconSecondary,
+                )
+                if (callbacks.onToggleSidebar != null) {
+                    FlatIconButton(CursorIcons.Sidebar, "Toggle sidebar", onClick = callbacks.onToggleSidebar)
+                }
+            }
+            if (caption != null) Spacer(Modifier.weight(1f))
         }
 
         // A pen writes into the search from its row and the slack around it, outside the reveal's clip, and before the
