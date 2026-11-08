@@ -55,9 +55,13 @@ internal class KeyboardFocus internal constructor(
     /** Animations removed in the system's settings: the lists fade without sliding. */
     val reducedMotion: Boolean,
     private val keyboard: () -> Float,
+    private val room: () -> Dp = { Dp.Infinity },
 ) {
     /** How far the page is given over to the composer, 0 to 1. Read in layout and drawing. */
     val fraction: Float get() = gate.value * keyboard()
+
+    /** The pane's height left above the keyboard at its full height (all of it with none). Read in layout and drawing. */
+    val roomAbove: Dp get() = room()
 
     /** Any of the page given over: its lists take no touch and say nothing to accessibility services. */
     val engaged: State<Boolean> = derivedStateOf { fraction > 0f }
@@ -89,20 +93,26 @@ internal fun rememberKeyboardFocus(composerFocused: Boolean, paneHeight: () -> I
     val reducedMotion = rememberReducedMotion()
     val gate = remember { Animatable(0f) }
     val focus = remember(density, reducedMotion) {
-        KeyboardFocus(gate, reducedMotion = reducedMotion) {
-            val now = ime.getBottom(density)
-            val start = from.getBottom(density)
-            val end = to.getBottom(density)
-            val keyboard = maxOf(now, start, end)
-            val takes = keyboardTakesPage(
-                // A hardware keyboard is the gate's, so that one attached with the keyboard up eases the page back.
-                hardwareKeyboard = false,
-                keyboard = density.dp(keyboard),
-                windowWidth = windowWidth,
-                roomAbove = density.dp(paneHeight() - keyboard),
-            )
-            if (takes) keyboardRisen(now, start, end) else 0f
-        }
+        fun fullKeyboard() = maxOf(ime.getBottom(density), from.getBottom(density), to.getBottom(density))
+        KeyboardFocus(
+            gate,
+            reducedMotion = reducedMotion,
+            keyboard = {
+                val now = ime.getBottom(density)
+                val start = from.getBottom(density)
+                val end = to.getBottom(density)
+                val keyboard = maxOf(now, start, end)
+                val takes = keyboardTakesPage(
+                    // A hardware keyboard is the gate's, so that one attached with the keyboard up eases the page back.
+                    hardwareKeyboard = false,
+                    keyboard = density.dp(keyboard),
+                    windowWidth = windowWidth,
+                    roomAbove = density.dp(paneHeight() - keyboard),
+                )
+                if (takes) keyboardRisen(now, start, end) else 0f
+            },
+            room = { density.dp(paneHeight() - fullKeyboard()) },
+        )
     }
     val on = composerFocused && !configuration.hardwareKeyboardAttached
     LaunchedEffect(focus, on) { focus.follow(on) }
