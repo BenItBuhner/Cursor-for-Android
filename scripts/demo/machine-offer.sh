@@ -9,7 +9,9 @@ fresh_start
 wait_for "Continue with Cursor" 120 >/dev/null
 tap "Try the demo" 30
 started=$SECONDS
-maybe_tap "Continue" 8
+maybe_tap "Allow" 10
+maybe_tap "Continue" 6
+maybe_tap "Allow" 4
 wait_for "Cloud" 60 >/dev/null
 record_start machine-offer
 sleep 2
