@@ -95,7 +95,7 @@ class MachineOfferScreenshotTest {
     fun longName() = frame("1152_machine_offer_long_name", machineName = "bennetts-macbook-pro-16-inch-2025.local")
 
     @Test
-    fun opening() = frame("1153_machine_offer_opening", openForMillis = 96)
+    fun opening() = frame("1153_machine_offer_opening", openForMillis = 176)
 
     private companion object {
         const val SettledMillis = 1_200L

@@ -100,16 +100,19 @@ private fun MachineOfferRow(option: DeviceOption, onRun: () -> Unit, onDismiss: 
     ) {
         PresenceDot()
         Icon(CursorIcons.Desktop, null, tint = colors.iconSecondary, modifier = Modifier.size(15.dp))
-        Text(
-            MachineOfferCopy.title(option),
-            style = type.base,
-            color = colors.textSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        Text(MachineOfferCopy.ACTION, style = type.base, fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, modifier = Modifier.testTag(MachineOfferTags.ACTION))
-        Box(Modifier.weight(1f))
+        // The name and the action share what the dot, the icon and the dismiss button leave: the name gives way first,
+        // and the action stays whole beside it.
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                MachineOfferCopy.title(option),
+                style = type.base,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Text(MachineOfferCopy.ACTION, style = type.base, fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, modifier = Modifier.testTag(MachineOfferTags.ACTION))
+        }
         FlatIconButton(CursorIcons.Close, MachineOfferCopy.DISMISS, onClick = onDismiss, modifier = Modifier.testTag(MachineOfferTags.DISMISS))
     }
 }
