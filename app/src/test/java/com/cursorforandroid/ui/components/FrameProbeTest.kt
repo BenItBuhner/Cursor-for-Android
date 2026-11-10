@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +24,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -72,7 +74,7 @@ class FrameProbeTest {
                         firstFrameNanos = t0
                         grow.animateTo(100f, tween(160))
                     }
-                    Box(Modifier.size(10.dp).height((10 + grow.value).dp).onSizeChanged { if (sized < 0) sized = frame })
+                    Box(Modifier.width(10.dp).height((10 + grow.value).dp).onSizeChanged { if (sized < 0) sized = frame })
                     SideEffect { values += "f$frame=${grow.value.toInt()}" }
                 }
             }
