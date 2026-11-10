@@ -925,7 +925,7 @@ if (agentCheckPlan != null && agentCheckPlan.classPaths.isNotEmpty()) {
     val forksGiven = providers.gradleProperty("app.testForks").isPresent
     tasks.withType<Test>().configureEach {
         if (name == "testDebugUnitTest") {
-            mustRunAfter(agentCheckPlanTask)
+            mustRunAfter(agentCheckPlanTask!!)
             agentCheckPlan.classPaths.forEach { include("$it.class", "$it\$*.class") }
             if (!forksGiven) maxParallelForks = 1
         }
@@ -939,7 +939,7 @@ tasks.register("agentCheck") {
         // Asked for by an abbreviation, or as another task's dependency: its tests are picked only when it is named.
         doFirst(AgentCheckMessage("Run agentCheck by its name (./gradlew :app:agentCheck): it picks its tests only when the command line names it.", fail = true))
     } else {
-        dependsOn(agentCheckPlanTask, "compileDebugUnitTestKotlin")
+        dependsOn(agentCheckPlanTask!!, "compileDebugUnitTestKotlin")
         if (agentCheckPlan.classPaths.isNotEmpty()) dependsOn("testDebugUnitTest")
         doLast(AgentCheckMessage(agentCheckPlan.after))
     }
