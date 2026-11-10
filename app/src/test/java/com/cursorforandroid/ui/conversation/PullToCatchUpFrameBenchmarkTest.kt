@@ -74,6 +74,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.time.Duration
 import java.time.Instant
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * What a frame of the pull to catch up costs, beside the two things it should feel like: the chat's own scroll and
@@ -126,6 +127,7 @@ class PullToCatchUpFrameBenchmarkTest {
      * scopes that ran are.
      */
     private class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         var scopes = 0
         private val observed = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<RecomposeScope, Boolean>())
 
@@ -136,12 +138,11 @@ class PullToCatchUpFrameBenchmarkTest {
 
         override fun onEndComposition(composition: ObservableComposition) = Unit
 
-        override fun onScopeEnter(scope: RecomposeScope) {
-            if (scope !in observed) return
-            scopes++
-        }
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
 
-        override fun onScopeExit(scope: RecomposeScope) = Unit
+        override fun onScopeExit(scope: RecomposeScope) {
+            if (ScopeBodies.exit(scope) && scope in observed) scopes++
+        }
 
         override fun onScopeDisposed(scope: RecomposeScope) {
             observed.remove(scope)

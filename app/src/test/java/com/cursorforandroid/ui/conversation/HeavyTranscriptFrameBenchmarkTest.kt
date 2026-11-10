@@ -58,6 +58,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.time.Duration
 import java.time.Instant
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * The conversation screen under the load Bennett's phone lags on (2026-09-25): a long chat whose one finished turn
@@ -101,6 +102,7 @@ class HeavyTranscriptFrameBenchmarkTest {
     }
 
     private class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         var scopes = 0
         private val observed = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<RecomposeScope, Boolean>())
         override fun onBeginComposition(composition: ObservableComposition) = Unit
@@ -108,8 +110,8 @@ class HeavyTranscriptFrameBenchmarkTest {
         override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { observed.add(scope) }
         override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
         override fun onEndComposition(composition: ObservableComposition) = Unit
-        override fun onScopeEnter(scope: RecomposeScope) { if (scope in observed) scopes++ }
-        override fun onScopeExit(scope: RecomposeScope) = Unit
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
+        override fun onScopeExit(scope: RecomposeScope) { if (ScopeBodies.exit(scope) && scope in observed) scopes++ }
         override fun onScopeDisposed(scope: RecomposeScope) { observed.remove(scope) }
     }
 

@@ -41,6 +41,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.time.Duration
 import java.time.Instant
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * The panel's Project section recomposes for what it shows, not for every change to the agent list: the real
@@ -62,6 +63,7 @@ class ProjectSectionRecompositionTest {
      * ([rootScopes]) and in the list items' ([itemScopes], one entry per item recomposition).
      */
     private class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         var root: Composition? = null
         var rootScopes = 0
         val itemScopes = mutableListOf<Int>()
@@ -75,11 +77,12 @@ class ProjectSectionRecompositionTest {
             passes.addLast(intArrayOf(if (composition === root) 1 else 0, 0))
         }
         override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { invalidated.add(scope) }
-        override fun onScopeEnter(scope: RecomposeScope) {
-            if (invalidated.remove(scope)) passes.lastOrNull()?.let { it[1]++ }
-        }
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
         override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
-        override fun onScopeExit(scope: RecomposeScope) = Unit
+        override fun onScopeExit(scope: RecomposeScope) {
+            val ran = ScopeBodies.exit(scope)
+            if (invalidated.remove(scope) && ran) passes.lastOrNull()?.let { it[1]++ }
+        }
         override fun onEndComposition(composition: ObservableComposition) {
             val pass = passes.removeLastOrNull() ?: return
             if (pass[1] == 0) return

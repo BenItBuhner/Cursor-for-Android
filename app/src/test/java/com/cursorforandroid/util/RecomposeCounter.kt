@@ -28,9 +28,11 @@ object RecomposeCounter : CompositionTracer {
     @Volatile
     private var on = false
 
-    override fun isTraceInProgress(): Boolean = on
+    override fun isTraceInProgress(): Boolean = on || ScopeBodies.watched
 
     override fun traceEventStart(key: Int, dirty1: Int, dirty2: Int, info: String) {
+        ScopeBodies.bodyStarted()
+        if (!on) return
         val name = info.substringBefore(" (")
         if (name.startsWith(APP_PREFIX)) counts.merge(name.removePrefix(APP_PREFIX), 1, Int::plus)
     }
@@ -61,6 +63,44 @@ object RecomposeCounter : CompositionTracer {
 }
 
 /**
+ * Which of the scopes a composition enters ran their body. A [CompositionObserver] is told of a scope the composer
+ * enters, which is not the same thing: a composable called again with the parameters it had is entered and skipped,
+ * and a scope invalidated by a derived state whose value did not change is entered only to read its states again.
+ * The trace marker the compiler puts at the top of a body is what tells them apart: it is passed only when the body
+ * runs, and it is the first thing passed after the scope is entered.
+ *
+ * An observer calls [watch] once, [enter] from `onScopeEnter` and [exit] from `onScopeExit`, on the composing thread.
+ */
+@OptIn(InternalComposeTracingApi::class)
+object ScopeBodies {
+    @Volatile
+    internal var watched = false
+        private set
+    private var entered: RecomposeScope? = null
+    private val ran = Collections.newSetFromMap(IdentityHashMap<RecomposeScope, Boolean>())
+
+    /** Turns the markers on; they stay on for the JVM, as the tracer cannot be taken back. */
+    fun watch() {
+        if (watched) return
+        Composer.setTracer(RecomposeCounter)
+        watched = true
+    }
+
+    fun enter(scope: RecomposeScope) { entered = scope }
+
+    internal fun bodyStarted() {
+        entered?.let(ran::add)
+        entered = null
+    }
+
+    /** Whether [scope]'s body ran since it was entered. */
+    fun exit(scope: RecomposeScope): Boolean {
+        if (entered === scope) entered = null
+        return ran.remove(scope)
+    }
+}
+
+/**
  * Recompose scopes that run, named by the class of the lambda each one restarts (the composable or content lambda it
  * belongs to). Hand it to `currentComposer.composition.observe` at the root of the content; [observeAll] then also
  * catches the scopes a changed parameter reruns, which the invalidation map alone never names.
@@ -72,18 +112,20 @@ class RecomposeScopes : CompositionObserver {
     val byName = HashMap<String, Int>()
     private val observed = Collections.newSetFromMap(IdentityHashMap<RecomposeScope, Boolean>())
 
+    init { ScopeBodies.watch() }
+
     override fun onBeginComposition(composition: ObservableComposition) = Unit
     // A scope counts from the first time it is invalidated, as the scopes of an invalidation map did.
     override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { observed.add(scope) }
     override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
     override fun onEndComposition(composition: ObservableComposition) = Unit
-    override fun onScopeEnter(scope: RecomposeScope) {
-        if (scope !in observed) return
+    override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
+    override fun onScopeExit(scope: RecomposeScope) {
+        if (!ScopeBodies.exit(scope) || scope !in observed) return
         scopes++
         val name = nameOf(scope)
         byName[name] = (byName[name] ?: 0) + 1
     }
-    override fun onScopeExit(scope: RecomposeScope) = Unit
     override fun onScopeDisposed(scope: RecomposeScope) { observed.remove(scope) }
 
     /** Observes every scope in [data]'s groups, not only the invalidated ones, so children recomposed by a changed parameter count too. */

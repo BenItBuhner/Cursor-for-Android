@@ -14,6 +14,7 @@ import java.time.Duration
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.concurrent.locks.LockSupport
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * What the UI scale benchmarks measure, frame by frame, with the clock held: each frame's wall time and the main
@@ -30,6 +31,7 @@ import java.util.concurrent.locks.LockSupport
 class ScaleMeter(private val compose: ComposeTestRule) {
 
     class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         @Volatile var scopes = 0
         private val observed = Collections.newSetFromMap(IdentityHashMap<RecomposeScope, Boolean>())
         override fun onBeginComposition(composition: ObservableComposition) = Unit
@@ -37,8 +39,8 @@ class ScaleMeter(private val compose: ComposeTestRule) {
         override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { observed.add(scope) }
         override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
         override fun onEndComposition(composition: ObservableComposition) = Unit
-        override fun onScopeEnter(scope: RecomposeScope) { if (scope in observed) scopes++ }
-        override fun onScopeExit(scope: RecomposeScope) = Unit
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
+        override fun onScopeExit(scope: RecomposeScope) { if (ScopeBodies.exit(scope) && scope in observed) scopes++ }
         override fun onScopeDisposed(scope: RecomposeScope) { observed.remove(scope) }
     }
 

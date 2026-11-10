@@ -27,6 +27,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * Another chat's tab follows the agents its transcript names, not the whole list: a change to a chat it does not
@@ -43,6 +44,7 @@ class AgentTabListFollowTest {
     val compose = createComposeRule()
 
     private class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         var scopes = 0
         private val observed = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<RecomposeScope, Boolean>())
         override fun onBeginComposition(composition: ObservableComposition) = Unit
@@ -50,8 +52,8 @@ class AgentTabListFollowTest {
         override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { observed.add(scope) }
         override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
         override fun onEndComposition(composition: ObservableComposition) = Unit
-        override fun onScopeEnter(scope: RecomposeScope) { if (scope in observed) scopes++ }
-        override fun onScopeExit(scope: RecomposeScope) = Unit
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
+        override fun onScopeExit(scope: RecomposeScope) { if (ScopeBodies.exit(scope) && scope in observed) scopes++ }
         override fun onScopeDisposed(scope: RecomposeScope) { observed.remove(scope) }
     }
 
