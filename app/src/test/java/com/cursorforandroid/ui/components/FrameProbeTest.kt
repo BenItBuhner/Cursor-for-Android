@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -31,6 +32,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.cursorforandroid.ui.theme.CursorTheme
+import com.cursorforandroid.ui.theme.ThemeMode
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Rule
 import org.junit.Test
@@ -50,28 +53,26 @@ class FrameProbeTest {
     @get:Rule
     val compose = createAndroidComposeRule<ComponentActivity>()
 
-    @Test
-    fun `1 the frames from a tap to its click, composition, effect, layout and animation`() {
+    private fun tapAndCount(themed: Boolean, pressable: Boolean, idleAfterTap: Boolean, semanticsEachFrame: Boolean): String {
         var frame = 0
         var clicked = -1
         var composed = -1
         var effect = -1
         var sized = -1
         var firstFrameAt = -1
-        var firstFrameNanos = 0L
         val values = mutableListOf<String>()
-        compose.setContent {
+        val content: @Composable () -> Unit = {
             var on by remember { mutableStateOf(false) }
             Column {
-                Box(Modifier.size(100.dp).testTag("t").clickable { on = true; clicked = frame })
+                val tap = { on = true; clicked = frame }
+                Box(Modifier.size(100.dp).testTag("t").then(if (pressable) Modifier.pressable(tap, CursorTheme.shapes.base) else Modifier.clickable(onClick = tap)))
                 if (on) {
                     SideEffect { if (composed < 0) composed = frame }
                     val grow = remember { Animatable(0f) }
                     LaunchedEffect(Unit) {
                         effect = frame
-                        val t0 = withFrameNanos { it }
+                        withFrameNanos { it }
                         firstFrameAt = frame
-                        firstFrameNanos = t0
                         grow.animateTo(100f, tween(160))
                     }
                     Box(Modifier.width(10.dp).height((10 + grow.value).dp).onSizeChanged { if (sized < 0) sized = frame })
@@ -79,51 +80,40 @@ class FrameProbeTest {
                 }
             }
         }
+        compose.setContent { if (themed) CursorTheme(mode = ThemeMode.Dark) { content() } else content() }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
-        val before = compose.mainClock.currentTime
         compose.onNodeWithTag("t").performClick()
-        val afterClick = compose.mainClock.currentTime
-        val atTap = "clicked=$clicked composed=$composed effect=$effect sized=$sized"
+        if (idleAfterTap) compose.waitForIdle()
         repeat(14) {
             frame = it + 1
             compose.mainClock.advanceTimeByFrame()
+            if (semanticsEachFrame) compose.onNodeWithTag("t").fetchSemanticsNode()
         }
         compose.mainClock.autoAdvance = true
-        assertWithMessage(
-            "PROBE tap took ${afterClick - before}ms of clock; right after tap: $atTap; then clicked=$clicked composed=$composed effect=$effect " +
-                "sized=$sized firstFrameAt=$firstFrameAt firstFrameMs=${firstFrameNanos / 1_000_000} clockAtTap=$afterClick values=$values",
-        ).that(false).isTrue()
+        return "clicked=$clicked composed=$composed effect=$effect sized=$sized firstFrameAt=$firstFrameAt values=$values"
     }
 
+    private fun report(what: String) = assertWithMessage("PROBE $what").that(false).isTrue()
+
     @Test
-    fun `2 a field's focus after it is cleared by force`() {
-        lateinit var focus: FocusManager
-        var touchMode = false
-        var viewFocused = false
-        compose.setContent {
-            focus = LocalFocusManager.current
-            val view = LocalView.current
-            SideEffect { touchMode = view.isInTouchMode; viewFocused = view.hasFocus() }
-            Column {
-                Box(Modifier.size(40.dp).clickable { })
-                BasicTextField(rememberTextFieldState(), Modifier.testTag("f").height(40.dp))
-            }
-        }
-        compose.onNodeWithTag("f").performClick()
-        compose.onNodeWithTag("f").assertIsFocused()
-        fun focused() = compose.onNodeWithTag("f").fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Focused)
-        compose.mainClock.autoAdvance = false
-        compose.runOnUiThread { focus.clearFocus(force = true) }
-        val at0 = focused()
-        compose.mainClock.advanceTimeByFrame()
-        val at1 = focused()
-        compose.mainClock.advanceTimeByFrame()
-        val at2 = focused()
-        repeat(5) { compose.mainClock.advanceTimeByFrame() }
-        val at7 = focused()
-        compose.mainClock.autoAdvance = true
-        compose.waitForIdle()
-        assertWithMessage("PROBE focus after clearFocus(force): at0=$at0 at1=$at1 at2=$at2 at7=$at7 idle=${focused()} touchMode=$touchMode viewHadFocus=$viewFocused").that(false).isTrue()
-    }
+    fun `10 a bare clickable`() = report(tapAndCount(themed = false, pressable = false, idleAfterTap = false, semanticsEachFrame = false))
+
+    @Test
+    fun `11 a bare clickable, idled after the tap`() = report(tapAndCount(themed = false, pressable = false, idleAfterTap = true, semanticsEachFrame = false))
+
+    @Test
+    fun `12 a bare clickable, its semantics read every frame`() = report(tapAndCount(themed = false, pressable = false, idleAfterTap = false, semanticsEachFrame = true))
+
+    @Test
+    fun `13 a themed pressable`() = report(tapAndCount(themed = true, pressable = true, idleAfterTap = false, semanticsEachFrame = false))
+
+    @Test
+    fun `14 a themed pressable, idled after the tap`() = report(tapAndCount(themed = true, pressable = true, idleAfterTap = true, semanticsEachFrame = false))
+
+    @Test
+    fun `15 a themed pressable, its semantics read every frame`() = report(tapAndCount(themed = true, pressable = true, idleAfterTap = false, semanticsEachFrame = true))
+
+    @Test
+    fun `16 a themed clickable`() = report(tapAndCount(themed = true, pressable = false, idleAfterTap = false, semanticsEachFrame = false))
 }
