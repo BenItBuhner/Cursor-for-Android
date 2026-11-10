@@ -44,6 +44,7 @@ import androidx.compose.ui.layout.Measurable
 import androidx.compose.ui.layout.MeasureResult
 import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -303,7 +304,8 @@ internal class CatchUpOverscroll(
 
     override val isInProgress: Boolean get() = platform.isInProgress || pull.holding
 
-    override val effectModifier: Modifier get() = platform.effectModifier
+    // The platform's own drawing of its stretch, node for node: the pull adds no drawing of its own here.
+    override val node: DelegatableNode get() = platform.node
 }
 
 /**
