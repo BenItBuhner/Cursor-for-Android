@@ -8,7 +8,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,6 +39,7 @@ import com.cursorforandroid.ui.conversation.GoalStrip
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.google.common.truth.Truth.assertThat
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -85,50 +94,16 @@ class ClickProbeTest {
     private fun AtTheFoot(content: @Composable () -> Unit) =
         Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.Bottom) { content() }
 
-    @Test
-    fun `01 a plain clickable`() {
-        show { Box(Modifier.size(100.dp).testTag("t").clickable { clicks++ }) }
-        compose.onNodeWithTag("t").performClick()
-        clicked()
+    /** Turns a Compose feature flag off for [block], where this Compose has it. */
+    private fun without(owner: String, flag: String, block: () -> Unit) {
+        val field = runCatching { Class.forName(owner).getDeclaredField(flag).apply { isAccessible = true } }.getOrNull()
+        assumeTrue("$flag is not a flag of this Compose", field != null && field.type == Boolean::class.javaPrimitiveType)
+        val was = field!!.getBoolean(null)
+        field.setBoolean(null, false)
+        try { block() } finally { field.setBoolean(null, was) }
     }
 
-    @Test
-    fun `02 a pressable`() {
-        show { Box(Modifier.size(100.dp).testTag("t").pressable({ clicks++ }, CursorTheme.shapes.base)) }
-        compose.onNodeWithTag("t").performClick()
-        clicked()
-    }
-
-    @Test
-    fun `03 a pressable by touch input`() {
-        show { Box(Modifier.size(100.dp).testTag("t").pressable({ clicks++ }, CursorTheme.shapes.base)) }
-        compose.onNodeWithTag("t").performTouchInput { click() }
-        clicked()
-    }
-
-    @Test
-    fun `04 a pressable over a scroll of its own`() {
-        show { Box(Modifier.size(100.dp).pressable({ clicks++ }, CursorTheme.shapes.base).testTag("t").verticalScroll(rememberScrollState())) }
-        compose.onNodeWithTag("t").performClick()
-        clicked()
-    }
-
-    @Test
-    fun `05 a selector chip alone`() {
-        show { SelectorChip("chip", onClick = { clicks++ }) }
-        compose.onNodeWithText("chip").performClick()
-        clicked()
-    }
-
-    @Test
-    fun `06 a selector chip at the foot`() {
-        show { AtTheFoot { SelectorRow { SelectorChip("chip", onClick = { clicks++ }) } } }
-        compose.onNodeWithText("chip").performClick()
-        clicked()
-    }
-
-    @Test
-    fun `07 a selector chip over the composer`() {
+    private fun chipOverComposer() {
         show {
             AtTheFoot {
                 SelectorRow { SelectorChip("chip", onClick = { clicks++ }) }
@@ -139,66 +114,88 @@ class ClickProbeTest {
         clicked()
     }
 
-    @Test
-    fun `08 a selector chip over the composer, no ripple`() {
-        show(ripple = false) {
-            AtTheFoot {
-                SelectorRow { SelectorChip("chip", onClick = { clicks++ }) }
-                Composer()
-            }
-        }
-        compose.onNodeWithText("chip").performClick()
-        clicked()
-    }
-
-    @Test
-    fun `09 the composer's own model chip`() {
-        show { AtTheFoot { Composer() } }
-        compose.onNodeWithText("Model").performClick()
-        compose.waitForIdle()
-        assertThat(clicks).isEqualTo(100)
-    }
-
-    @Test
-    fun `10 the goal strip alone`() {
-        show { AtTheFoot { GoalStrip(goal = goal, expanded = false, onExpandedChange = { clicks++ }, modifier = Modifier.fillMaxWidth()) } }
-        compose.onNodeWithTag("goal-strip").performClick()
-        clicked()
-    }
-
-    @Test
-    fun `11 the goal strip over the composer`() {
+    private fun over(below: @Composable () -> Unit, target: @Composable () -> Unit) {
         show {
             AtTheFoot {
-                GoalStrip(goal = goal, expanded = false, onExpandedChange = { clicks++ }, modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
-                Composer()
-            }
-        }
-        compose.onNodeWithTag("goal-strip").performClick()
-        clicked()
-    }
-
-    @Test
-    fun `12 a plain clickable over the composer`() {
-        show {
-            AtTheFoot {
-                Box(Modifier.fillMaxWidth().padding(bottom = 4.dp).size(60.dp).testTag("t").clickable { clicks++ })
-                Composer()
+                target()
+                below()
             }
         }
         compose.onNodeWithTag("t").performClick()
         clicked()
     }
 
+    private val shape get() = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+
     @Test
-    fun `13 a plain clickable at the top with the composer at the foot`() {
-        show {
-            Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Box(Modifier.size(60.dp).testTag("t").clickable { clicks++ })
-                Composer()
-            }
+    fun `20 a plain clickable 28dp tall over the composer`() =
+        over({ Composer() }) { Box(Modifier.padding(bottom = 6.dp).size(60.dp, 28.dp).testTag("t").clickable { clicks++ }) }
+
+    @Test
+    fun `21 a clipped clickable 60dp tall over the composer`() =
+        over({ Composer() }) { Box(Modifier.padding(bottom = 4.dp).size(60.dp).testTag("t").clip(shape).clickable { clicks++ }) }
+
+    @Test
+    fun `22 a clickable with its own source and ripple over the composer`() =
+        over({ Composer() }) {
+            Box(Modifier.padding(bottom = 4.dp).size(60.dp).testTag("t").clickable(remember { MutableInteractionSource() }, ripple(), onClick = { clicks++ }))
         }
-        compose.onNodeWithTag("t").performClick()
-        clicked()
+
+    @Test
+    fun `23 a pressable 60dp tall over the composer`() =
+        over({ Composer() }) { Box(Modifier.padding(bottom = 4.dp).size(60.dp).testTag("t").pressable({ clicks++ }, shape)) }
+
+    @Test
+    fun `24 a pressable 28dp tall over the composer`() =
+        over({ Composer() }) { Box(Modifier.padding(bottom = 6.dp).size(60.dp, 28.dp).testTag("t").pressable({ clicks++ }, shape)) }
+
+    @Test
+    fun `25 a plain clickable 28dp tall, 120dp over the composer`() =
+        over({ Composer() }) { Box(Modifier.padding(bottom = 120.dp).size(60.dp, 28.dp).testTag("t").clickable { clicks++ }) }
+
+    @Test
+    fun `26 a plain clickable 28dp tall over a bare text field of a state`() =
+        over({ BasicTextField(rememberTextFieldState(), Modifier.fillMaxWidth().height(60.dp)) }) {
+            Box(Modifier.padding(bottom = 6.dp).size(60.dp, 28.dp).testTag("t").clickable { clicks++ })
+        }
+
+    @Test
+    fun `27 a plain clickable 28dp tall over a bare text field of a value`() =
+        over({ BasicTextField(TextFieldValue(""), {}, Modifier.fillMaxWidth().height(60.dp)) }) {
+            Box(Modifier.padding(bottom = 6.dp).size(60.dp, 28.dp).testTag("t").clickable { clicks++ })
+        }
+
+    @Test
+    fun `28 a plain clickable 28dp tall over a plain box`() =
+        over({ Box(Modifier.fillMaxWidth().height(60.dp).clickable { clicks += 100 }) }) {
+            Box(Modifier.padding(bottom = 6.dp).size(60.dp, 28.dp).testTag("t").clickable { clicks++ })
+        }
+
+    @Test
+    fun `30 the chip over the composer`() = chipOverComposer()
+
+    @Test
+    fun `31 the chip, without the new text field modifier`() =
+        without(FOUNDATION, "isNewTextFieldModifierImplementationEnabled", ::chipOverComposer)
+
+    @Test
+    fun `32 the chip, without waiting for window focus`() =
+        without(FOUNDATION, "isTextFieldWaitWindowFocusForInputSessionEnabled", ::chipOverComposer)
+
+    @Test
+    fun `33 the chip, without styled text`() = without(FOUNDATION, "isBasicTextFieldStyledTextEnabled", ::chipOverComposer)
+
+    @Test
+    fun `34 the chip, without the semantics hit test skip`() = without(UI, "isSkipNonImportantSemanticsNodesHitTestEnabled", ::chipOverComposer)
+
+    @Test
+    fun `35 the chip, without moves that have not moved`() = without(UI, "isTriggerMoveEventsWhenLocationHasNotChangedEnabled", ::chipOverComposer)
+
+    @Test
+    fun `36 the chip, without the size optimization`() = without(FOUNDATION, "isBasicTextFieldSizeOptimizationEnabled", ::chipOverComposer)
+
+    private companion object {
+        const val FOUNDATION = "androidx.compose.foundation.ComposeFoundationFlags"
+        const val UI = "androidx.compose.ui.ComposeUiFlags"
     }
 }
