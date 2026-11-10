@@ -156,9 +156,10 @@ class StopConfirmationTest {
         // And so does a tap outside the dialog.
         tapComposerStop()
         compose.runOnUiThread {
-            // A press and a lift in the window's corner, clear of the card: the dialog dismisses on the lift.
+            // A press and a lift past the dialog window's own corner, as a touch on the dimmed page behind reaches it:
+            // the dialog dismisses on the lift.
             for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
-                val outside = MotionEvent.obtain(0L, 0L, action, 0f, 0f, 0)
+                val outside = MotionEvent.obtain(0L, 0L, action, -100f, -100f, 0)
                 ShadowDialog.getLatestDialog().onTouchEvent(outside)
                 outside.recycle()
             }
