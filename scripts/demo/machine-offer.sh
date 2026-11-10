@@ -26,9 +26,12 @@ sleep 2
 tap "Remote"
 wait_for "Bennetts-MacBook-Pro" 20 contains >/dev/null
 sleep 2
-adb shell input keyevent KEYCODE_BACK
-sleep 1
-maybe_tap "Close Device" 3
+# Back out of Remote, then out of the device list.
+for _ in 1 2 3; do
+  adb shell input keyevent KEYCODE_BACK
+  sleep 1.5
+  wait_for "Refresh devices" 2 >/dev/null 2>&1 || break
+done
 wait_for "Run here" 20 >/dev/null
 sleep 3
 tap "Run here"
