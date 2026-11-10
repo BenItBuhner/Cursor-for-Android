@@ -8,7 +8,6 @@ import android.view.View
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -31,11 +30,12 @@ import androidx.compose.ui.input.pointer.SuspendingPointerInputModifierNode
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.DelegatingNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.PointerInputModifierNode
+import androidx.compose.ui.node.TouchBoundsExpansion
+import androidx.compose.ui.node.requireDensity
 import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.node.requireLayoutCoordinates
 import androidx.compose.ui.platform.InspectorInfo
@@ -44,7 +44,6 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.offset
 import kotlinx.coroutines.launch
 
 /**
@@ -65,23 +64,12 @@ import kotlinx.coroutines.launch
  *   on them. A pen tap on the box, or within the margin a finger would have around it, that nothing under it took is
  *   given to the window again as that finger's tap: the field focuses and puts the caret where a finger's tap would.
  *
- * The area shares pointer input with its siblings: whatever lies under the slack still gets every finger.
+ * The slack is the node's stylus touch bounds ([PointerInputModifierNode.touchBoundsExpansion]), not layout: a finger
+ * never lands in it, so whatever lies around the box keeps every finger, and a pen that starts directly on something
+ * else there is that thing's, as around Compose's own fields.
  */
 fun Modifier.stylusWriting(enabled: Boolean = true, handwriting: Boolean = true): Modifier =
-    if (!enabled) {
-        this
-    } else {
-        this
-            .layout { measurable, constraints ->
-                // The slack is laid out around the box and handed back: the box measures and places as it did without it.
-                val horizontal = WritingSlackHorizontal.roundToPx()
-                val vertical = WritingSlackVertical.roundToPx()
-                val placeable = measurable.measure(constraints.offset(2 * horizontal, 2 * vertical))
-                layout(placeable.width - 2 * horizontal, placeable.height - 2 * vertical) { placeable.place(-horizontal, -vertical) }
-            }
-            .then(StylusWritingElement(handwriting))
-            .padding(horizontal = WritingSlackHorizontal, vertical = WritingSlackVertical)
-    }
+    if (enabled) this then StylusWritingElement(handwriting) else this
 
 /**
  * Hosts a `BasicTextField` whose pen input is the [stylusWriting] box around it to decide. Compose's own text fields
@@ -178,12 +166,19 @@ private class StylusWritingNode(var handwriting: Boolean) :
         },
     )
 
-    /** The box without the slack around it, in this node's coordinates. */
-    private fun PointerInputScope.box(): Rect {
-        val horizontal = WritingSlackHorizontal.toPx()
-        val vertical = WritingSlackVertical.toPx()
-        return Rect(horizontal, vertical, size.width - horizontal, size.height - vertical)
-    }
+    /** A pen reaches the node from the slack around the box too; a finger only on the box. */
+    override val touchBoundsExpansion: TouchBoundsExpansion
+        get() = with(requireDensity()) {
+            TouchBoundsExpansion.Absolute(
+                left = WritingSlackHorizontal.roundToPx(),
+                top = WritingSlackVertical.roundToPx(),
+                right = WritingSlackHorizontal.roundToPx(),
+                bottom = WritingSlackVertical.roundToPx(),
+            )
+        }
+
+    /** The box, in this node's coordinates: the slack around it is outside them. */
+    private fun PointerInputScope.box(): Rect = Rect(0f, 0f, size.width.toFloat(), size.height.toFloat())
 
     /** The box and the margin Compose's minimum touch target gives a finger around a box this size. */
     private fun PointerInputScope.fingerReach(): Rect {
