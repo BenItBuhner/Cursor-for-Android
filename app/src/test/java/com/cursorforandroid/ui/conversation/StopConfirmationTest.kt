@@ -117,8 +117,6 @@ class StopConfirmationTest {
     }
 
     private fun awaitDialogGone() {
-        // A dismissal from outside a frame is applied by idling; the wait below only steps the clock.
-        compose.waitForIdle()
         compose.waitUntil(10_000) { !dialogShown() }
         compose.waitForIdle()
     }
@@ -158,9 +156,12 @@ class StopConfirmationTest {
         // And so does a tap outside the dialog.
         tapComposerStop()
         compose.runOnUiThread {
-            val outside = MotionEvent.obtain(0L, 0L, MotionEvent.ACTION_OUTSIDE, 0f, 0f, 0)
-            ShadowDialog.getLatestDialog().onTouchEvent(outside)
-            outside.recycle()
+            // A press and a lift in the window's corner, clear of the card: the dialog dismisses on the lift.
+            for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val outside = MotionEvent.obtain(0L, 0L, action, 0f, 0f, 0)
+                ShadowDialog.getLatestDialog().onTouchEvent(outside)
+                outside.recycle()
+            }
         }
         awaitDialogGone()
         assertStillRunning()

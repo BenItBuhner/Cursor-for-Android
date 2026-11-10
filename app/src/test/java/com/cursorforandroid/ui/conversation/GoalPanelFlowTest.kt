@@ -166,7 +166,6 @@ class GoalPanelFlowTest {
         compose.mainClock.autoAdvance = true
         compose.onNode(hasTestTag(STRIP)).performTouchInput(block)
         compose.mainClock.autoAdvance = false
-        compose.waitForIdle() // applies what the touch changed; the held clock does not move
     }
 
     /** A finger drawn [dyDp] along the panel in [steps] moves, held still, then lifted. */
@@ -183,6 +182,7 @@ class GoalPanelFlowTest {
 
     private fun tapStrip() {
         touch { click(Offset(centerX, top + 20 * density)) }
+        compose.waitForIdle() // applies what the touch changed; the held clock does not move
     }
 
     private fun detailsVisible() = compose.onAllNodes(hasTestTag("goal-details"), useUnmergedTree = true).fetchSemanticsNodes()
