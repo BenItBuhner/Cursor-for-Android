@@ -31,6 +31,7 @@ import com.cursorforandroid.data.local.CachedRecord
 import com.cursorforandroid.data.local.AttachmentStore
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.data.local.PromptKey
+import com.cursorforandroid.data.runCatchingCancellable
 import com.cursorforandroid.domain.AccountModel
 import com.cursorforandroid.domain.Agent
 import com.cursorforandroid.domain.AgentLifecycle
@@ -897,7 +898,7 @@ class AgentRepository(
                 val gone = (failure as? CursorApiException)?.httpCode == 404
                 // The public API's refusal is not the last word while the account still has the record: the row
                 // stands in from the record (its name, look and archive flag), as a pinned chat's does.
-                val asked = runCatching { recordById(id) }
+                val asked = runCatchingCancellable { recordById(id) }
                 val record = asked.getOrNull()
                 val accountAnswered = asked.isSuccess && !session.isDemo && capabilities().accountSession
                 when {
@@ -1367,7 +1368,7 @@ class AgentRepository(
         try {
             coroutineScope {
                 // The legacy list enriches the rows and never gates them: its page is read alongside, best effort.
-                val legacyPage = async { legacy?.let { runCatching { api.listAgentsV0(limit = PAGE_SIZE, cursor = it) }.getOrNull() } }
+                val legacyPage = async { legacy?.let { runCatchingCancellable { api.listAgentsV0(limit = PAGE_SIZE, cursor = it) }.getOrNull() } }
                 val page = pending.track("list page (older)") { api.listAgents(limit = PAGE_SIZE, cursor = cursor, includeArchived = true) }
                 val enrichment = legacyPage.await()
                 val more = page.nextCursor?.isNotBlank() == true
@@ -1794,7 +1795,7 @@ class AgentRepository(
                     pinnedUnresolved.remove(id)
                     return@byId
                 }
-                val record = runCatching { recordById(id) }.getOrNull()
+                val record = runCatchingCancellable { recordById(id) }.getOrNull()
                 if (record != null && generation.get() == startedIn) {
                     upsert(record.toStandIn(), startedIn)
                     pinnedUnresolved.remove(id)
@@ -2207,14 +2208,14 @@ class AgentRepository(
         val run: RunDto? = if (knownRun != null && (dto.latestRunId == null || dto.latestRunId == knownRun.id)) {
             knownRun
         } else {
-            dto.latestRunId?.let { runId -> runCatching { runById(id, runId, api) }.getOrNull() }
+            dto.latestRunId?.let { runId -> runCatchingCancellable { runById(id, runId, api) }.getOrNull() }
         }
         // Extended mode: the row lands with its account record, as every row of the desktop's list does, so it is
         // published placed rather than published bare and moved once the record has been read — unless the account
         // service is refusing or not answering (see [materializeRecords]): then the row lands bare and is placed
         // once the account answers again, rather than waiting on it.
         val askRecord = agent(id)?.record == null && !session.isDemo && capabilities().accountSession && !accountListUnread && !accountPaused()
-        val record = if (askRecord) runCatching { recordById(id) }.getOrNull() else null
+        val record = if (askRecord) runCatchingCancellable { recordById(id) }.getOrNull() else null
         // Merged into the row as it is at publication, under the lock a cancel patches under, and with the run as
         // this device knows it (see [known]): a Stop that landed while the record was on its way — the read a chat's
         // load launched before it — is not undone by a record that predates it. A record whose latest run began
@@ -2624,7 +2625,7 @@ class AgentRepository(
     /** The agent an earlier attempt created under the client-minted [id], with its latest run when that can be read. */
     private suspend fun adopt(api: CursorApi, id: String): Pair<AgentDto, RunDto?> {
         val existing = api.getAgent(id)
-        return existing to existing.latestRunId?.let { runId -> runCatching { api.getRun(existing.id, runId) }.getOrNull() }
+        return existing to existing.latestRunId?.let { runId -> runCatchingCancellable { api.getRun(existing.id, runId) }.getOrNull() }
     }
 
     /**
@@ -2645,7 +2646,7 @@ class AgentRepository(
             } catch (t: Throwable) {
                 if (t.toCursorError()?.httpCode == 404) null else return null
             }
-            if (found != null) return found to found.latestRunId?.let { runId -> runCatching { api.getRun(found.id, runId) }.getOrNull() }
+            if (found != null) return found to found.latestRunId?.let { runId -> runCatchingCancellable { api.getRun(found.id, runId) }.getOrNull() }
         }
         return null
     }
