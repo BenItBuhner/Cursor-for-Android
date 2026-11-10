@@ -11,6 +11,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
@@ -58,7 +59,9 @@ class MachineOfferScreenshotTest {
 
     private fun frame(name: String, mode: ThemeMode = ThemeMode.Dark, machineName: String = "Bennett\u2019s MacBook Pro", openForMillis: Long = SettledMillis) {
         compose.mainClock.autoAdvance = false
-        var offer by mutableStateOf<DeviceOption?>(null)
+        // The settled frames start with the offer standing; only the opening frame starts without it and has it arrive.
+        val opening = openForMillis != SettledMillis
+        var offer by mutableStateOf(if (opening) null else machine(machineName))
         compose.setContent {
             CursorTheme(mode = mode) {
                 CompositionLocalProvider(LocalRippleConfiguration provides null) {
@@ -70,7 +73,13 @@ class MachineOfferScreenshotTest {
             }
         }
         compose.mainClock.advanceTimeBy(64)
-        compose.runOnUiThread { offer = machine(machineName) }
+        if (opening) {
+            compose.runOnUiThread {
+                offer = machine(machineName)
+                // The write is made outside a composition; with the clock held, nothing else tells the composer of it.
+                Snapshot.sendApplyNotifications()
+            }
+        }
         compose.mainClock.advanceTimeBy(openForMillis)
         captureScreenRoboImage(File(outDir, "$name.png").path, RoborazziOptions())
     }
