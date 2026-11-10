@@ -13,6 +13,9 @@ import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.printToString
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -182,7 +185,11 @@ class GoalStripScreenshotTest {
             }
         }
         compose.onNodeWithTag("goal-strip").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("3 turns started by Cursor for it.").fetchSemanticsNodes().isNotEmpty() }
+        try {
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("3 turns started by Cursor for it.").fetchSemanticsNodes().isNotEmpty() }
+        } catch (e: ComposeTimeoutException) {
+            throw AssertionError("The strip did not open onto its details. On screen:\n" + compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 40), e)
+        }
         // The strip grows into place over a few frames; the frame is of it settled.
         compose.mainClock.advanceTimeBy(1_000L)
         capture("67_composer_goal_strip_open")

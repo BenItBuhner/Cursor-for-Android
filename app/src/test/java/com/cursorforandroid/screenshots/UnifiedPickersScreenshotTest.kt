@@ -17,6 +17,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.printToString
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasAnyAncestor
@@ -160,7 +163,13 @@ class UnifiedPickersScreenshotTest {
     private fun openFromChip(mode: ThemeMode, chip: () -> Unit) {
         showComposer(mode)
         chip()
-        compose.waitUntil(10_000) { tagged(PickerTags.List) }
+        try {
+            compose.waitUntil(10_000) { tagged(PickerTags.List) }
+        } catch (e: ComposeTimeoutException) {
+            // A picker that never opened is told apart from one that opened as something else by what is on screen.
+            val screen = compose.onAllNodes(isRoot()).fetchSemanticsNodes().indices.joinToString("\n") { compose.onAllNodes(isRoot())[it].printToString(maxDepth = 40) }
+            throw AssertionError("No picker opened from the chip. On screen:\n$screen", e)
+        }
         compose.waitForIdle()
     }
 
