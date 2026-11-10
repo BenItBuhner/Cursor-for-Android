@@ -16,7 +16,7 @@ import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -112,7 +112,7 @@ internal object SubagentStretchScene {
     fun Screen(graph: AppGraph, source: (String) -> Flow<SubagentChild?>, meter: ScaleMeter? = null, layout: Layout = standard) {
         if (meter != null) {
             val root = currentComposer.composition
-            remember(root) { root.observe(meter.recompositions) }
+            remember(root) { root.setObserver(meter.recompositions) }
         }
         val rows = remember { TranscriptRows.of(transcript(layout), coordinatorMode = true) }
         val index = remember(rows) { SubagentRows.index(rows) }

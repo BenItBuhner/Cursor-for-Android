@@ -7,7 +7,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.tooling.CompositionData
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
@@ -74,7 +74,7 @@ class HomeKeystrokeScopeTest {
         compose.setContent {
             val root = currentComposer.composition
             DisposableEffect(root) {
-                val handle = root.observe(rec)
+                val handle = root.setObserver(rec)
                 onDispose { handle?.dispose() }
             }
             val d = currentComposer.compositionData

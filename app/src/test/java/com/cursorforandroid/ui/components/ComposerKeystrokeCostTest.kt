@@ -16,7 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.tooling.CompositionData
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -77,7 +77,7 @@ class ComposerKeystrokeCostTest {
         val plusMenu = ComposerMenuActions(onPickMedia = {})
         compose.setContent {
             val root = currentComposer.composition
-            remember(root) { root.observe(scopes) }
+            remember(root) { root.setObserver(scopes) }
             val d = currentComposer.compositionData
             SideEffect { data = d }
             CursorTheme(mode = ThemeMode.Dark) {

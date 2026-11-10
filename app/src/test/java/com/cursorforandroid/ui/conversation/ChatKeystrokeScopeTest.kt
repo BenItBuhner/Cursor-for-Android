@@ -10,7 +10,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.tooling.CompositionData
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
@@ -139,7 +139,7 @@ class ChatKeystrokeScopeTest {
         runBlocking { graph.agents.refresh() }
         compose.setContent {
             val root = currentComposer.composition
-            remember(root) { root.observe(rec) }
+            remember(root) { root.setObserver(rec) }
             val d = currentComposer.compositionData
             SideEffect { data = d }
             CursorTheme(mode = ThemeMode.Dark) {

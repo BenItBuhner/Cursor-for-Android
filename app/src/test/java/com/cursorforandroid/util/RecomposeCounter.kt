@@ -9,8 +9,7 @@ import androidx.compose.runtime.RecomposeScope
 import androidx.compose.runtime.tooling.CompositionData
 import androidx.compose.runtime.tooling.CompositionGroup
 import androidx.compose.runtime.tooling.CompositionObserver
-import androidx.compose.runtime.tooling.RecomposeScopeObserver
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.ObservableComposition
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentHashMap
@@ -67,29 +66,31 @@ object RecomposeCounter : CompositionTracer {
  * catches the scopes a changed parameter reruns, which the invalidation map alone never names.
  */
 @OptIn(ExperimentalComposeRuntimeApi::class)
-class RecomposeScopes : CompositionObserver, RecomposeScopeObserver {
+class RecomposeScopes : CompositionObserver {
     var scopes = 0
         private set
     val byName = HashMap<String, Int>()
     private val observed = Collections.newSetFromMap(IdentityHashMap<RecomposeScope, Boolean>())
 
-    override fun onBeginComposition(composition: Composition, invalidationMap: Map<RecomposeScope, Set<Any>?>) {
-        for (scope in invalidationMap.keys) if (observed.add(scope)) scope.observe(this)
-    }
-    override fun onEndComposition(composition: Composition) = Unit
-    override fun onBeginScopeComposition(scope: RecomposeScope) {
+    override fun onBeginComposition(composition: ObservableComposition) = Unit
+    // A scope counts from the first time it is invalidated, as the scopes of an invalidation map did.
+    override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { observed.add(scope) }
+    override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
+    override fun onEndComposition(composition: ObservableComposition) = Unit
+    override fun onScopeEnter(scope: RecomposeScope) {
+        if (scope !in observed) return
         scopes++
         val name = nameOf(scope)
         byName[name] = (byName[name] ?: 0) + 1
     }
-    override fun onEndScopeComposition(scope: RecomposeScope) = Unit
+    override fun onScopeExit(scope: RecomposeScope) = Unit
     override fun onScopeDisposed(scope: RecomposeScope) { observed.remove(scope) }
 
     /** Observes every scope in [data]'s groups, not only the invalidated ones, so children recomposed by a changed parameter count too. */
     fun observeAll(data: CompositionData) {
         fun walk(g: CompositionGroup) {
             for (d in g.data) {
-                if (d is RecomposeScope && observed.add(d)) d.observe(this)
+                if (d is RecomposeScope) observed.add(d)
                 subcompositions(d).forEach { sub -> sub.compositionGroups.forEach(::walk) }
             }
             for (c in g.compositionGroups) walk(c)
