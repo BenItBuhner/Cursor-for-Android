@@ -182,6 +182,7 @@ class GoalPanelFlowTest {
 
     private fun tapStrip() {
         touch { click(Offset(centerX, top + 20 * density)) }
+        compose.waitForIdle() // applies what the touch changed; the held clock does not move
     }
 
     private fun detailsVisible() = compose.onAllNodes(hasTestTag("goal-details"), useUnmergedTree = true).fetchSemanticsNodes()
@@ -234,6 +235,7 @@ class GoalPanelFlowTest {
         compose.onAllNodes(hasTestTag("composer-expand") and hasAnyAncestor(hasTestTag(COMPOSER)), useUnmergedTree = true)
             .fetchSemanticsNodes().takeIf { it.isNotEmpty() }?.let {
                 compose.onAllNodes(hasTestTag("composer-expand") and hasAnyAncestor(hasTestTag(COMPOSER)), useUnmergedTree = true).onFirst().performClick()
+                compose.waitForIdle() // applies what the touch changed; the held clock does not move
                 play(18)
                 frames(10)
                 check("$label: expanding the composer closed the goal", bounds(hasTestTag(STRIP)).height < 60 * density)

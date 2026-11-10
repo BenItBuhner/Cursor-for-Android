@@ -102,6 +102,7 @@ class ComposerExpandTest {
     private fun named(description: String) = compose.onAllNodes(hasContentDescription(description), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
     private fun tapExpand() {
         compose.onNode(expandButton, useUnmergedTree = true).performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.waitForIdle()
     }
     private fun dp(px: Float) = px / density
@@ -166,6 +167,7 @@ class ComposerExpandTest {
         val collapsed = bounds(hasTestTag(COMPOSER)).height
         compose.mainClock.autoAdvance = false
         compose.onNode(expandButton, useUnmergedTree = true).performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.mainClock.advanceTimeBy(ExpandMillis / 2L)
         val midway = bounds(hasTestTag(COMPOSER)).height
         compose.mainClock.advanceTimeBy(ExpandMillis.toLong() + 100)
@@ -174,6 +176,7 @@ class ComposerExpandTest {
         assertThat(midway).isLessThan(expanded - 20 * density)
 
         compose.onNode(expandButton, useUnmergedTree = true).performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.mainClock.advanceTimeBy(ExpandMillis / 2L)
         val down = bounds(hasTestTag(COMPOSER)).height
         assertThat(down).isGreaterThan(collapsed + 20 * density)

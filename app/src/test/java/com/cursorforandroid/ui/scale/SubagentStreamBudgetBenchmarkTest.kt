@@ -339,9 +339,14 @@ class SubagentStreamBudgetBenchmarkTest {
 
         const val MAX_MAIN_DELIVERIES_PER_SEC = 60.0
         const val MAX_MAIN_ALLOC_KB_PER_FRAME = 600.0
-        const val MAX_SCOPES_PER_FRAME = 6.0
+        /**
+         * Re-based with the move to the runtime's new composition observer (late 2026), which the meter counts through
+         * now: the same scene measures 8.0 scopes a frame here and 13.1 with five hundred workers, where the guards
+         * were 6 and 8 against the old observer's count. A row recomposing per event, not per frame, is tens of times these.
+         */
+        const val MAX_SCOPES_PER_FRAME = 10.0
         /** Five hundred workers' streams at a hundred events a second, twice the rows on the screen. */
-        const val MAX_SCOPES_PER_FRAME_FIVE_HUNDRED = 8.0
+        const val MAX_SCOPES_PER_FRAME_FIVE_HUNDRED = 16.0
 
         const val SAMPLE_MS = 100L
         /** A stream whose run is this many events behind what its server wrote (a second's worth) is stalled. */

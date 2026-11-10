@@ -43,8 +43,15 @@ fun Modifier.sendOnHardwareEnter(state: TextFieldState, onSend: (() -> Unit)?, o
     hardwareEnter(
         onSend = onSend,
         composing = { state.composition != null },
-        // An edit that changes nothing still ends the composition and tells the IME so.
-        settleComposition = { state.edit { } },
+        // The text put back as it is: an edit that touches nothing leaves the composition standing, and one that
+        // replaces the text, with the same text, ends it and tells the IME so.
+        settleComposition = {
+            state.edit {
+                val caret = selection
+                replace(0, length, toString())
+                selection = caret
+            }
+        },
         newline = {
             state.edit {
                 val at = selection.min

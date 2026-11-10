@@ -5,8 +5,8 @@ import androidx.compose.runtime.Composition
 import androidx.compose.runtime.ExperimentalComposeRuntimeApi
 import androidx.compose.runtime.RecomposeScope
 import androidx.compose.runtime.tooling.CompositionObserver
-import androidx.compose.runtime.tooling.RecomposeScopeObserver
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.ObservableComposition
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import com.cursorforandroid.util.RecomposeCounter
 import org.robolectric.Shadows.shadowOf
@@ -14,6 +14,7 @@ import java.time.Duration
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.concurrent.locks.LockSupport
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * What the UI scale benchmarks measure, frame by frame, with the clock held: each frame's wall time and the main
@@ -29,15 +30,19 @@ import java.util.concurrent.locks.LockSupport
 @OptIn(ExperimentalComposeRuntimeApi::class)
 class ScaleMeter(private val compose: ComposeTestRule) {
 
-    class Recompositions : CompositionObserver, RecomposeScopeObserver {
+    class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         @Volatile var scopes = 0
         private val observed = Collections.newSetFromMap(IdentityHashMap<RecomposeScope, Boolean>())
-        override fun onBeginComposition(composition: Composition, invalidationMap: Map<RecomposeScope, Set<Any>?>) {
-            for (scope in invalidationMap.keys) if (observed.add(scope)) scope.observe(this)
-        }
-        override fun onEndComposition(composition: Composition) = Unit
-        override fun onBeginScopeComposition(scope: RecomposeScope) { scopes++ }
-        override fun onEndScopeComposition(scope: RecomposeScope) = Unit
+        private var composing = 0
+        override fun onBeginComposition(composition: ObservableComposition) { composing++ }
+        // A scope counts from the first time it is invalidated ahead of a composition, as the scopes of an invalidation
+        // map did. One invalidated while composing (a state written higher up in the same pass) was never in that map.
+        override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { if (composing == 0) observed.add(scope) }
+        override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
+        override fun onEndComposition(composition: ObservableComposition) { if (composing > 0) composing-- }
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
+        override fun onScopeExit(scope: RecomposeScope) { if (ScopeBodies.exit(scope) && scope in observed) scopes++ }
         override fun onScopeDisposed(scope: RecomposeScope) { observed.remove(scope) }
     }
 

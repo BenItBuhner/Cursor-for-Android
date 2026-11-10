@@ -11,7 +11,6 @@ import kotlin.concurrent.thread
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.roborazzi)
@@ -201,8 +200,9 @@ val appSentryProguardUuid: String = providers.gradleProperty("app.sentryProguard
 
 android {
     namespace = "com.cursorforandroid"
-    // 36 is required by androidx.core 1.17, which carries the Android 16 Live Updates notification APIs.
-    compileSdk = 36
+    // 37 is required by Compose 1.12, androidx.core 1.19, lifecycle 2.11 and Coil 3.6, which will not link against less.
+    // compileSdk only: the targetSdk below stays 35, so the app's runtime behaviour is unchanged.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.cursorforandroid"
@@ -255,10 +255,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += listOf("-opt-in=kotlin.RequiresOptIn")
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -276,6 +272,13 @@ android {
         // (src/main, src/debug and src/test are all there is), so the vital pass proves nothing lintDebug does not, and
         // CI runs lintDebug on every change. It cost ten minutes of the build job and of every release cut.
         checkReleaseBuilds = false
+    }
+}
+
+// Kotlin is compiled by the Android plugin itself (AGP 9's built-in Kotlin; there is no kotlin-android plugin to apply).
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -923,7 +926,7 @@ if (agentCheckPlan != null && agentCheckPlan.classPaths.isNotEmpty()) {
     val forksGiven = providers.gradleProperty("app.testForks").isPresent
     tasks.withType<Test>().configureEach {
         if (name == "testDebugUnitTest") {
-            mustRunAfter(agentCheckPlanTask)
+            mustRunAfter(agentCheckPlanTask!!)
             agentCheckPlan.classPaths.forEach { include("$it.class", "$it\$*.class") }
             if (!forksGiven) maxParallelForks = 1
         }
@@ -937,7 +940,7 @@ tasks.register("agentCheck") {
         // Asked for by an abbreviation, or as another task's dependency: its tests are picked only when it is named.
         doFirst(AgentCheckMessage("Run agentCheck by its name (./gradlew :app:agentCheck): it picks its tests only when the command line names it.", fail = true))
     } else {
-        dependsOn(agentCheckPlanTask, "compileDebugUnitTestKotlin")
+        dependsOn(agentCheckPlanTask!!, "compileDebugUnitTestKotlin")
         if (agentCheckPlan.classPaths.isNotEmpty()) dependsOn("testDebugUnitTest")
         doLast(AgentCheckMessage(agentCheckPlan.after))
     }

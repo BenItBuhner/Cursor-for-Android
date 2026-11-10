@@ -82,6 +82,7 @@ class MediaViewerHostTest {
 
     private fun openFirst() {
         compose.onAllNodes(hasContentDescription("First figure"))[0].performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         settle { state.phase == MediaViewerState.Phase.Open && exists("viewer-image-0") }
     }
 
@@ -94,6 +95,7 @@ class MediaViewerHostTest {
         // Drive the clock by hand through the open: the figure must be on its way, not jump.
         compose.mainClock.autoAdvance = false
         compose.onAllNodes(hasContentDescription("First figure"))[0].performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeByFrame()
         assertThat(state.phase).isEqualTo(MediaViewerState.Phase.Opening)
@@ -130,6 +132,7 @@ class MediaViewerHostTest {
 
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("viewer-close").performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeBy(120)
         assertThat(state.phase).isEqualTo(MediaViewerState.Phase.Closing)

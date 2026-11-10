@@ -11,7 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsActions
@@ -101,7 +101,7 @@ class ScaleRig(
         val started = System.nanoTime()
         compose.setContent {
             val root = currentComposer.composition
-            remember(root) { root.observe(meter.recompositions) }
+            remember(root) { root.setObserver(meter.recompositions) }
             CursorTheme(mode = ThemeMode.Dark) {
                 CompositionLocalProvider(LocalRippleConfiguration provides null) {
                     AppShell(

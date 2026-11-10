@@ -1,6 +1,5 @@
 package com.cursorforandroid.ui.navigation
 
-import android.app.Activity
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
@@ -33,7 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -85,7 +84,7 @@ fun CursorNavHost(
     val scene = remember { NavScene(stack.top) }
     val scope = rememberCoroutineScope()
     val colors = CursorTheme.colors
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
 
     // The host leaving composition while the activity stays (sign-out) abandons the whole stack; release every
     // entry's view models. A configuration change also disposes the host, but there the entries come back.

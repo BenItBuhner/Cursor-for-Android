@@ -16,8 +16,8 @@ import androidx.compose.runtime.RecomposeScope
 import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.tooling.CompositionObserver
-import androidx.compose.runtime.tooling.RecomposeScopeObserver
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.ObservableComposition
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
@@ -74,6 +74,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.time.Duration
 import java.time.Instant
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * What a frame of the pull to catch up costs, beside the two things it should feel like: the chat's own scroll and
@@ -125,21 +126,24 @@ class PullToCatchUpFrameBenchmarkTest {
      * arrow's fade reads one) is handed to the composition and skipped there: counted by its own observer, only the
      * scopes that ran are.
      */
-    private class Recompositions : CompositionObserver, RecomposeScopeObserver {
+    private class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         var scopes = 0
         private val observed = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<RecomposeScope, Boolean>())
 
-        override fun onBeginComposition(composition: Composition, invalidationMap: Map<RecomposeScope, Set<Any>?>) {
-            for (scope in invalidationMap.keys) if (observed.add(scope)) scope.observe(this)
+        private var composing = 0
+        override fun onBeginComposition(composition: ObservableComposition) { composing++ }
+        // A scope counts from the first time it is invalidated, as the scopes of an invalidation map did.
+        override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { if (composing == 0) observed.add(scope) }
+        override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
+
+        override fun onEndComposition(composition: ObservableComposition) { if (composing > 0) composing-- }
+
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
+
+        override fun onScopeExit(scope: RecomposeScope) {
+            if (ScopeBodies.exit(scope) && scope in observed) scopes++
         }
-
-        override fun onEndComposition(composition: Composition) = Unit
-
-        override fun onBeginScopeComposition(scope: RecomposeScope) {
-            scopes++
-        }
-
-        override fun onEndScopeComposition(scope: RecomposeScope) = Unit
 
         override fun onScopeDisposed(scope: RecomposeScope) {
             observed.remove(scope)
@@ -262,7 +266,7 @@ class PullToCatchUpFrameBenchmarkTest {
         runBlocking { graph.agents.refresh() }
         compose.setContent {
             val root = currentComposer.composition
-            remember(root) { root.observe(recompositions) }
+            remember(root) { root.setObserver(recompositions) }
             CursorTheme(mode = ThemeMode.Dark) {
                 CompositionLocalProvider(LocalRippleConfiguration provides null) {
                     Row {

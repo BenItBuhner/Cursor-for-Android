@@ -255,7 +255,7 @@ fun Sidebar(
                 visible = searching,
                 enter = expandVertically(tween(160)) + fadeIn(tween(160)),
                 exit = shrinkVertically(tween(140)) + fadeOut(tween(100)),
-                modifier = Modifier.zIndex(1f).stylusWriting(enabled = searching),
+                modifier = Modifier.zIndex(1f).stylusWriting(enabled = searching, slackOverSiblings = true),
             ) {
                 SearchField(
                     value = query,

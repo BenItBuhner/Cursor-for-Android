@@ -14,8 +14,8 @@ import androidx.compose.runtime.RecomposeScope
 import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.tooling.CompositionObserver
-import androidx.compose.runtime.tooling.RecomposeScopeObserver
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.ObservableComposition
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
@@ -53,6 +53,7 @@ import org.robolectric.annotation.GraphicsMode
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * A Big Project open in the panel while its workers stream (Bennett's report, 2026-09-28: a Project with many running
@@ -99,15 +100,17 @@ class ProjectFleetBenchmarkTest {
         RecomposeCounter.uninstall()
     }
 
-    private class Recompositions : CompositionObserver, RecomposeScopeObserver {
+    private class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         @Volatile var scopes = 0
         private val observed = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<RecomposeScope, Boolean>())
-        override fun onBeginComposition(composition: Composition, invalidationMap: Map<RecomposeScope, Set<Any>?>) {
-            for (scope in invalidationMap.keys) if (observed.add(scope)) scope.observe(this)
-        }
-        override fun onEndComposition(composition: Composition) = Unit
-        override fun onBeginScopeComposition(scope: RecomposeScope) { scopes++ }
-        override fun onEndScopeComposition(scope: RecomposeScope) = Unit
+        override fun onBeginComposition(composition: ObservableComposition) = Unit
+        // A scope counts from the first time it is invalidated, as the scopes of an invalidation map did.
+        override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { observed.add(scope) }
+        override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
+        override fun onEndComposition(composition: ObservableComposition) = Unit
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
+        override fun onScopeExit(scope: RecomposeScope) { if (ScopeBodies.exit(scope) && scope in observed) scopes++ }
         override fun onScopeDisposed(scope: RecomposeScope) { observed.remove(scope) }
     }
 
@@ -265,7 +268,7 @@ class ProjectFleetBenchmarkTest {
             measured(it) {
                 compose.setContent {
                     val root = currentComposer.composition
-                    remember(root) { root.observe(recompositions) }
+                    remember(root) { root.setObserver(recompositions) }
                     CursorTheme(mode = ThemeMode.Dark) {
                         CompositionLocalProvider(LocalRippleConfiguration provides null) {
                             val items = projectPanelItems(graph, ROOT, onOpenAgent = {}, onNotify = {})

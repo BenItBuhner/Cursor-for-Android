@@ -93,7 +93,7 @@ class LiveResizeRecompositionTest {
 
     private fun displayed(matcher: SemanticsMatcher) = runCatching { compose.onAllNodes(matcher).onFirst().assertIsDisplayed() }.isSuccess
 
-    private class Sweep(val counts: Map<String, Int>, val stepMillis: List<Double>) {
+    private class Sweep(val counts: Map<String, Int>, val stepMillis: List<Double>, val top: String) {
         operator fun get(name: String): Int = counts.getValue(name)
 
         override fun toString(): String {
@@ -125,7 +125,7 @@ class LiveResizeRecompositionTest {
         val top = RecomposeCounter.top(25)
         compose.mainClock.autoAdvance = true
         settle()
-        return Sweep(counts, millis).also { println("LIVE-RESIZE $from→$to: $it\n  top: $top") }
+        return Sweep(counts, millis, top).also { println("LIVE-RESIZE $from→$to: $it\n  top: $top") }
     }
 
     private fun resize(width: Int, height: Int, orientation: String) {
@@ -136,8 +136,20 @@ class LiveResizeRecompositionTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
+    /**
+     * Beside a pinned panel the host's own body runs once for each width, and nothing under it does. The body of the
+     * host's subcomposition is run again as the window's configuration is handed down, and on the Compose runtime of
+     * late 2026 that call no longer skips a host whose derived reads (the shell's panes, which follow the width) are
+     * waiting to be looked at again. What it must not do is run more than once a width, or take the panel or the chat
+     * with it: those are asserted with the rest of the shell.
+     */
+    private fun assertHostRunsAtMostOnceAWidth(sweep: Sweep) {
+        assertWithMessage("$PANEL_HOST over the sweep ($sweep)\n  what ran most: ${sweep.top}").that(sweep[PANEL_HOST]).isAtMost(sweep.stepMillis.size)
+        assertNothingRecomposed(sweep, "ui.panel.SidePanel", "ui.components.PaneResizeEdge")
+    }
+
     private fun assertNothingRecomposed(sweep: Sweep, vararg names: String) {
-        names.forEach { assertWithMessage("$it over the sweep ($sweep)").that(sweep[it]).isEqualTo(0) }
+        names.forEach { assertWithMessage("$it over the sweep ($sweep)\n  what ran most: ${sweep.top}").that(sweep[it]).isEqualTo(0) }
     }
 
     @Test
@@ -147,6 +159,7 @@ class LiveResizeRecompositionTest {
         val sweep = sweep(from = 1240, to = 1040, height = 900, orientation = "land")
         assertThat(displayed(hasTestTag(PANEL))).isTrue()
         assertNothingRecomposed(sweep, *WIDE_SHELL)
+        assertHostRunsAtMostOnceAWidth(sweep)
     }
 
     @Test
@@ -154,6 +167,7 @@ class LiveResizeRecompositionTest {
         launchOnChat()
         val sweep = sweep(from = 1240, to = 1040, height = 900, orientation = "land")
         assertNothingRecomposed(sweep, *WIDE_SHELL)
+        assertHostRunsAtMostOnceAWidth(sweep)
     }
 
     @Test
@@ -181,7 +195,7 @@ class LiveResizeRecompositionTest {
             APP_NAV_HOST, APP_SHELL, WIDE_PANES, "ui.navigation.SidebarRail", SIDEBAR, ROW, CHAT, CHAT_HEADER, COMPOSER, TRANSCRIPT_ROW,
             "ui.panel.SidePanel", PANEL_HOST, "ui.components.PaneResizeEdge", "ui.navigation.CursorNavHost", "ui.home.HomeScreen",
         )
-        val WIDE_SHELL = arrayOf(APP_SHELL, WIDE_PANES, SIDEBAR, ROW, CHAT, CHAT_HEADER, COMPOSER, TRANSCRIPT_ROW, PANEL_HOST)
+        val WIDE_SHELL = arrayOf(APP_SHELL, WIDE_PANES, SIDEBAR, ROW, CHAT, CHAT_HEADER, COMPOSER, TRANSCRIPT_ROW)
         const val HOME_PLACEHOLDER = "Ask Cursor to build, fix bugs, explore"
         const val CHAT_PLACEHOLDER = "Follow up"
         const val CHAT_ID = "bc-demo-0004"

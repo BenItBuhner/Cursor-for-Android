@@ -309,8 +309,11 @@ class JumpToBottomScreenTest {
             if (landed >= 0 && n - landed >= AFTER_FRAMES) break
         }
         assertWithMessage("the list came to rest at the newest row").that(landed).isAtLeast(0)
-        val started = steps.indexOfFirst { it > 0f }
-        val covered = steps.runningReduce(Float::plus).indexOfFirst { it >= 0.9f * steps.sum() }
+        // The way glided, frame by frame: the jump to the landing from far up shares no text with the frame before it
+        // (rows reused for others are new nodes to semantics), has no length to add, and is not part of the glide.
+        val glided = steps.map { if (it.isInfinite()) 0f else it }
+        val started = glided.indexOfFirst { it > 0f }
+        val covered = glided.runningReduce(Float::plus).indexOfFirst { it >= 0.9f * glided.sum() }
         return Jump(landed, lastMoved, covered - started + 1)
     }
 

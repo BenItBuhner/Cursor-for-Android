@@ -199,6 +199,7 @@ class ComposerExpandFlowTest {
         compose.mainClock.autoAdvance = true
         field(tag).performTouchInput(block)
         compose.mainClock.autoAdvance = false
+        compose.waitForIdle() // applies what the touch changed; the held clock does not move
     }
 
     /** [count] frames of the video, two of the app's apart (30 fps), the clock stepped between them. */
@@ -224,6 +225,7 @@ class ComposerExpandFlowTest {
 
     private fun tapExpand(tag: String) {
         compose.onAllNodes(expandButton(tag), useUnmergedTree = true).onFirst().performClick()
+        compose.waitForIdle() // applies what the touch changed; the held clock does not move
     }
 
     private fun editable(tag: String) = field(tag).fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()

@@ -36,6 +36,8 @@ import androidx.compose.ui.node.CompositionLocalConsumerModifierNode
 import androidx.compose.ui.node.DelegatingNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.PointerInputModifierNode
+import androidx.compose.ui.node.TouchBoundsExpansion
+import androidx.compose.ui.node.requireDensity
 import androidx.compose.ui.node.currentValueOf
 import androidx.compose.ui.node.requireLayoutCoordinates
 import androidx.compose.ui.platform.InspectorInfo
@@ -65,12 +67,19 @@ import kotlinx.coroutines.launch
  *   on them. A pen tap on the box, or within the margin a finger would have around it, that nothing under it took is
  *   given to the window again as that finger's tap: the field focuses and puts the caret where a finger's tap would.
  *
- * The area shares pointer input with its siblings: whatever lies under the slack still gets every finger.
+ * The slack is the node's stylus touch bounds ([PointerInputModifierNode.touchBoundsExpansion]), not layout: a finger
+ * never lands in it, so whatever lies around the box keeps every finger, wherever in the tree it is. A pen in the slack
+ * that is also directly on something else that takes pointers is that thing's, as around Compose's own fields.
+ *
+ * With [slackOverSiblings] the slack is laid out as part of the node instead and shared with the box's siblings, so
+ * a pen in it writes even over a sibling that takes pointers (a list under a search row), and the sibling still gets
+ * every finger. Compose shares only with the node's own siblings: use it only where everything the slack reaches is
+ * one, or a finger there goes nowhere.
  */
-fun Modifier.stylusWriting(enabled: Boolean = true, handwriting: Boolean = true): Modifier =
-    if (!enabled) {
-        this
-    } else {
+fun Modifier.stylusWriting(enabled: Boolean = true, handwriting: Boolean = true, slackOverSiblings: Boolean = false): Modifier = when {
+    !enabled -> this
+    !slackOverSiblings -> this then StylusWritingElement(handwriting, laidOut = false)
+    else ->
         this
             .layout { measurable, constraints ->
                 // The slack is laid out around the box and handed back: the box measures and places as it did without it.
@@ -79,9 +88,9 @@ fun Modifier.stylusWriting(enabled: Boolean = true, handwriting: Boolean = true)
                 val placeable = measurable.measure(constraints.offset(2 * horizontal, 2 * vertical))
                 layout(placeable.width - 2 * horizontal, placeable.height - 2 * vertical) { placeable.place(-horizontal, -vertical) }
             }
-            .then(StylusWritingElement(handwriting))
+            .then(StylusWritingElement(handwriting, laidOut = true))
             .padding(horizontal = WritingSlackHorizontal, vertical = WritingSlackVertical)
-    }
+}
 
 /**
  * Hosts a `BasicTextField` whose pen input is the [stylusWriting] box around it to decide. Compose's own text fields
@@ -105,20 +114,23 @@ private class WritingLeftToTheBox(platform: ViewConfiguration) : ViewConfigurati
 internal val WritingSlackVertical = 40.dp
 internal val WritingSlackHorizontal = 10.dp
 
-private data class StylusWritingElement(val handwriting: Boolean) : ModifierNodeElement<StylusWritingNode>() {
-    override fun create() = StylusWritingNode(handwriting)
+private data class StylusWritingElement(val handwriting: Boolean, val laidOut: Boolean) : ModifierNodeElement<StylusWritingNode>() {
+    override fun create() = StylusWritingNode(handwriting, laidOut)
 
     override fun update(node: StylusWritingNode) {
         node.handwriting = handwriting
+        node.laidOut = laidOut
     }
 
     override fun InspectorInfo.inspectableProperties() {
         name = "stylusWriting"
         properties["handwriting"] = handwriting
+        properties["laidOut"] = laidOut
     }
 }
 
-private class StylusWritingNode(var handwriting: Boolean) :
+/** [laidOut]: the slack is part of this node's size, around the box; otherwise the node is the box and the slack its stylus touch bounds. */
+private class StylusWritingNode(var handwriting: Boolean, var laidOut: Boolean) :
     DelegatingNode(),
     PointerInputModifierNode,
     FocusEventModifierNode,
@@ -178,8 +190,24 @@ private class StylusWritingNode(var handwriting: Boolean) :
         },
     )
 
+    /** Not laid out, a pen reaches the node from the slack around the box too; a finger only on the box. */
+    override val touchBoundsExpansion: TouchBoundsExpansion
+        get() = if (laidOut) {
+            TouchBoundsExpansion.None
+        } else {
+            with(requireDensity()) {
+                TouchBoundsExpansion.Absolute(
+                    left = WritingSlackHorizontal.roundToPx(),
+                    top = WritingSlackVertical.roundToPx(),
+                    right = WritingSlackHorizontal.roundToPx(),
+                    bottom = WritingSlackVertical.roundToPx(),
+                )
+            }
+        }
+
     /** The box without the slack around it, in this node's coordinates. */
     private fun PointerInputScope.box(): Rect {
+        if (!laidOut) return Rect(0f, 0f, size.width.toFloat(), size.height.toFloat())
         val horizontal = WritingSlackHorizontal.toPx()
         val vertical = WritingSlackVertical.toPx()
         return Rect(horizontal, vertical, size.width - horizontal, size.height - vertical)

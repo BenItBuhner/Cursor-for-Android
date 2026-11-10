@@ -173,6 +173,7 @@ class MediaViewerGesturesTest {
         settle { nodes("Wide") == 1 }
         compose.mainClock.autoAdvance = false
         compose.onAllNodes(hasContentDescription("Wide"))[0].performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.mainClock.advanceTimeBy(600)
         settle { state.phase == MediaViewerState.Phase.Open }
         compose.mainClock.advanceTimeBy(400)

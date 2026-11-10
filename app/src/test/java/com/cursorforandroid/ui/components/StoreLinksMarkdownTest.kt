@@ -62,6 +62,13 @@ class StoreLinksMarkdownTest {
     fun `a store code span reads as code and opens as a link only when there is a hand to open it`() {
         val span = "see `/cursor/stores/$store/docs/readiness-triage.md` first"
         assertThat(links(span)).containsExactly("/cursor/stores/$store/docs/readiness-triage.md")
+        // In the link colour, as a `[`path`](path)` link reads, and on the code's ground.
+        val linked = render(span)
+        assertThat(linked.getLinkAnnotations(0, linked.length).single().item.styles?.style?.let { it.color to it.background }).isEqualTo(Color.Blue to Color.DarkGray)
+        // And code that is a link's label is in the link colour too: its own span is painted over the link's style.
+        val labelled = render("see [`/cursor/stores/$store/docs/readiness-triage.md`](/cursor/stores/$store/docs/readiness-triage.md) first")
+        val path = labelled.text.indexOf("/cursor/stores/")
+        assertThat(labelled.spanStyles.filter { it.start <= path && it.end > path }.map { it.item.color to it.item.background }).contains(Color.Blue to Color.DarkGray)
         val plain = render(span, onLinkClick = null)
         assertThat(plain.getLinkAnnotations(0, plain.length)).isEmpty()
         assertThat(plain.text).isEqualTo("see  /cursor/stores/$store/docs/readiness-triage.md  first")

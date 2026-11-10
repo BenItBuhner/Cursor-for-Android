@@ -2,7 +2,6 @@ package com.cursorforandroid.ui.conversation
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.OverscrollEffect
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.unit.Velocity
@@ -52,7 +51,6 @@ class CatchUpPullTest {
             if (over != Velocity.Zero) absorbed += over
         }
         override val isInProgress: Boolean get() = false
-        override val effectModifier: Modifier get() = Modifier
     }
 
     private val platform = Platform()

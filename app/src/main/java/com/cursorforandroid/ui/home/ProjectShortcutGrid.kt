@@ -389,11 +389,13 @@ internal fun ProjectShortcutGrid(
                                 },
                             ),
                     ) {
+                        // The shortcut's source lives in the grid's map, which the press handling above reads; this only finds it.
+                        val source = remember(sources, id) { sources.getOrPut(id) { MutableInteractionSource() } }
                         ProjectShortcut(
                             row,
                             arranging = grid.arranging,
                             lifted = lifted,
-                            modifier = Modifier.clip(shape).indication(sources.getOrPut(id) { MutableInteractionSource() }, ripple(color = colors.base)),
+                            modifier = Modifier.clip(shape).indication(source, ripple(color = colors.base)),
                         )
                         if (actions != null && grid.menuFor == id) ChatRowMenu(row = row, expanded = true, onDismiss = grid::closeMenu, actions = actions, at = grid.menuAt)
                     }

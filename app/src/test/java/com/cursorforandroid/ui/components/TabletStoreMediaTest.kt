@@ -167,7 +167,7 @@ class TabletStoreMediaTest {
         assertThat(line.error).startsWith("This image took too long to load")
 
         compose.onNodeWithText("Retry").performClick()
-        repeat(2) {
+        repeat(3) {
             compose.mainClock.advanceTimeByFrame()
             compose.waitForIdle()
         }

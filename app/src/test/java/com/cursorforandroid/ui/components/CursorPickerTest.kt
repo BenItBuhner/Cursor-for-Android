@@ -107,6 +107,12 @@ class CursorPickerTest {
 
     private val picker get() = compose.onNodeWithTag(PickerTags.Picker)
 
+    /** The close is asked for from a tap, outside any frame: idled so it is applied before its animation is waited on. */
+    private fun awaitDismissed() {
+        compose.waitForIdle()
+        compose.waitUntil(10_000) { dismissed }
+    }
+
     private fun press(keyCode: Int, ctrl: Boolean = false, keyboard: Keyboard = Keyboard.Physical) {
         picker.pressKey(keyCode, keyboard = keyboard, ctrl = ctrl)
         compose.waitForIdle()
@@ -175,7 +181,7 @@ class CursorPickerTest {
         assertHighlighted("Apple")
         press(NativeKeyEvent.KEYCODE_ENTER)
         assertThat(picked).containsExactly("Apple")
-        compose.waitUntil(10_000) { dismissed }
+        awaitDismissed()
     }
 
     @Test
@@ -197,14 +203,14 @@ class CursorPickerTest {
         assertHighlighted("Add fruit")
         press(NativeKeyEvent.KEYCODE_ENTER)
         assertThat(picked).containsExactly("add")
-        compose.waitUntil(10_000) { dismissed }
+        awaitDismissed()
     }
 
     @Test
     fun `Esc closes the picker without picking`() {
         show()
         press(NativeKeyEvent.KEYCODE_ESCAPE)
-        compose.waitUntil(10_000) { dismissed }
+        awaitDismissed()
         assertThat(picked).isEmpty()
     }
 
@@ -219,7 +225,7 @@ class CursorPickerTest {
     fun `a tap outside the picker closes it`() {
         show()
         picker.performTouchInput { click(bottomRight - androidx.compose.ui.geometry.Offset(20f, 20f)) }
-        compose.waitUntil(10_000) { dismissed }
+        awaitDismissed()
         assertThat(picked).isEmpty()
     }
 
@@ -228,7 +234,7 @@ class CursorPickerTest {
         show()
         compose.onNodeWithTag(PickerTags.Backdrop).assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Close Fruit")))
         compose.onNodeWithTag(PickerTags.Backdrop).performClick()
-        compose.waitUntil(10_000) { dismissed }
+        awaitDismissed()
     }
 
     @Test
@@ -236,7 +242,7 @@ class CursorPickerTest {
         show()
         compose.onNodeWithText("Apple").performClick()
         assertThat(picked).containsExactly("Apple")
-        compose.waitUntil(10_000) { dismissed }
+        awaitDismissed()
     }
 
     @Test
@@ -258,7 +264,7 @@ class CursorPickerTest {
         compose.onNodeWithText("Banana").assertIsDisplayed()
         assertThat(dismissed).isFalse()
         press(NativeKeyEvent.KEYCODE_ESCAPE)
-        compose.waitUntil(10_000) { dismissed }
+        awaitDismissed()
     }
 
     @Test
@@ -314,7 +320,7 @@ class CursorPickerTest {
         compose.waitUntil(10_000) { !exists(PickerTags.Submenu) }
         assertThat(dismissed).isFalse()
         press(NativeKeyEvent.KEYCODE_ESCAPE)
-        compose.waitUntil(10_000) { dismissed }
+        awaitDismissed()
     }
 
     @Test

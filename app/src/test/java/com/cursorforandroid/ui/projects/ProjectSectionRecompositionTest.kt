@@ -11,7 +11,8 @@ import androidx.compose.runtime.RecomposeScope
 import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.tooling.CompositionObserver
-import androidx.compose.runtime.tooling.observe
+import androidx.compose.runtime.tooling.ObservableComposition
+import androidx.compose.runtime.tooling.setObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -40,6 +41,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.time.Duration
 import java.time.Instant
+import com.cursorforandroid.util.ScopeBodies
 
 /**
  * The panel's Project section recomposes for what it shows, not for every change to the agent list: the real
@@ -61,15 +63,32 @@ class ProjectSectionRecompositionTest {
      * ([rootScopes]) and in the list items' ([itemScopes], one entry per item recomposition).
      */
     private class Recompositions : CompositionObserver {
+        init { ScopeBodies.watch() }
         var root: Composition? = null
         var rootScopes = 0
         val itemScopes = mutableListOf<Int>()
         val scopes get() = rootScopes + itemScopes.sum()
-        override fun onBeginComposition(composition: Composition, invalidationMap: Map<RecomposeScope, Set<Any>?>) {
-            if (invalidationMap.isEmpty()) return
-            if (composition === root) rootScopes += invalidationMap.size else itemScopes += invalidationMap.size
+        private val invalidated = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<RecomposeScope, Boolean>())
+
+        /** The compositions under way, innermost last: whether each is the section's own, and the invalidated scopes it has run. */
+        private val passes = ArrayDeque<IntArray>()
+
+        override fun onBeginComposition(composition: ObservableComposition) {
+            passes.addLast(intArrayOf(if (composition === root) 1 else 0, 0))
         }
-        override fun onEndComposition(composition: Composition) = Unit
+        override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { invalidated.add(scope) }
+        override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
+        override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
+        override fun onScopeExit(scope: RecomposeScope) {
+            val ran = ScopeBodies.exit(scope)
+            if (invalidated.remove(scope) && ran) passes.lastOrNull()?.let { it[1]++ }
+        }
+        override fun onEndComposition(composition: ObservableComposition) {
+            val pass = passes.removeLastOrNull() ?: return
+            if (pass[1] == 0) return
+            if (pass[0] == 1) rootScopes += pass[1] else itemScopes += pass[1]
+        }
+        override fun onScopeDisposed(scope: RecomposeScope) { invalidated.remove(scope) }
     }
 
     @After
@@ -104,7 +123,7 @@ class ProjectSectionRecompositionTest {
         val recompositions = Recompositions()
         compose.setContent {
             val root = currentComposer.composition
-            remember(root) { recompositions.root = root; root.observe(recompositions) }
+            remember(root) { recompositions.root = root; root.setObserver(recompositions) }
             CursorTheme(mode = ThemeMode.Dark) {
                 val items = projectPanelItems(graph, ROOT, onOpenAgent = {}, onNotify = {})
                 LazyColumn(Modifier.fillMaxSize()) { items() }

@@ -89,7 +89,6 @@ class UiDispatcherRearm : TestEnvironmentLifecyclePlugin {
         private val started = field(MANAGER, "started").get(null) as AtomicBoolean
         private val sent = field(MANAGER, "sent").get(null) as AtomicBoolean
         private val ensureStarted: Method = reflect("$MANAGER.ensureStarted") { Class.forName(MANAGER).getMethod("ensureStarted") }
-        private val managerObserverChannel = field("$MANAGER\$ensureStarted\$2", "\$channel")
         private val globalWriteObservers = field(SNAPSHOTS, "globalWriteObservers")
         private val snapshotLock: Any = field(SNAPSHOTS, "lock").get(null)
 
@@ -110,12 +109,24 @@ class UiDispatcherRearm : TestEnvironmentLifecyclePlugin {
             }
         }
 
+        private fun channelOf(observer: Any): SendChannel<*> = reflect("the channel of ${observer.javaClass.name}") {
+            observer.javaClass.declaredFields.firstNotNullOf { field ->
+                field.isAccessible = true
+                field.get(observer) as? SendChannel<*>
+            }
+        }
+
         @OptIn(DelicateCoroutinesApi::class)
         private fun restartSnapshotManager() {
-            val dead = (globalWriteObservers.get(null) as List<*>).filter { observer ->
-                observer != null && managerObserverChannel.declaringClass.isInstance(observer) &&
-                    (managerObserverChannel.get(observer) as SendChannel<*>).isClosedForSend
-            }.toSet()
+            val observers = (globalWriteObservers.get(null) as List<*>).filterNotNull()
+            val own = observers.filter { it.javaClass.name.startsWith(MANAGER) }
+            // The manager's observer is told from the others by its class, and its channel by its type: what the
+            // compiler calls the lambda and the channel it captured changes from one Compose release to the next.
+            check(own.isNotEmpty() || !started.get()) {
+                "$MANAGER has started but none of the global write observers is its own (a Compose update?): " +
+                    "UiDispatcherRearm needs a new look"
+            }
+            val dead = own.filter { observer -> channelOf(observer).isClosedForSend }.toSet()
             if (dead.isEmpty()) return
             synchronized(snapshotLock) { globalWriteObservers.set(null, (globalWriteObservers.get(null) as List<*>) - dead) }
             sent.set(false)
