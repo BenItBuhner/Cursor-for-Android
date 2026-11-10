@@ -174,7 +174,8 @@ object InlineMarkdown {
         val mark = SpanStyle(background = codeBackground)
         val subscript = SpanStyle(baselineShift = BaselineShift.Subscript, fontSize = base.fontSize * 0.75f)
         val superscript = SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = base.fontSize * 0.75f)
-        val link = TextLinkStyles(style = SpanStyle(color = linkColor, textDecoration = TextDecoration.None))
+        val linkSpan = SpanStyle(color = linkColor, textDecoration = TextDecoration.None)
+        val link = TextLinkStyles(style = linkSpan)
     }
 
     /**
@@ -246,8 +247,9 @@ object InlineMarkdown {
             pushStringAnnotation(CODE_SPAN, code)
             if (store != null && listener != null) {
                 // Code in the link colour: what a `[`path`](path)` link reads as, so both spellings look the same.
-                val style = p.link.style?.let { p.code.merge(it) } ?: p.code
-                // Styled as a span of its own as well: the link's style alone no longer reaches code that opens a document.
+                // Merged from the span the link style is made of, and set as a span of its own as well as on the link:
+                // the look does not depend on what the link's style hands back or on when it is applied.
+                val style = p.code.merge(p.linkSpan)
                 withLink(LinkAnnotation.Url(url = store, styles = TextLinkStyles(style = style), linkInteractionListener = listener)) {
                     withStyle(style) { append(" $code ") }
                 }
