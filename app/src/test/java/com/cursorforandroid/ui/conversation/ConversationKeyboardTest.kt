@@ -288,6 +288,7 @@ class ConversationKeyboardTest {
         // Freeze the clock so the pop is caught on its first frame, with the chat still on screen.
         compose.mainClock.autoAdvance = false
         compose.onNodeWithContentDescription("Back").performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeByFrame()
         field.assertIsNotFocused()

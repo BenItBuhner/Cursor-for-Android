@@ -166,6 +166,7 @@ class GoalPanelFlowTest {
         compose.mainClock.autoAdvance = true
         compose.onNode(hasTestTag(STRIP)).performTouchInput(block)
         compose.mainClock.autoAdvance = false
+        compose.waitForIdle() // applies what the touch changed; the held clock does not move
     }
 
     /** A finger drawn [dyDp] along the panel in [steps] moves, held still, then lifted. */
@@ -234,6 +235,7 @@ class GoalPanelFlowTest {
         compose.onAllNodes(hasTestTag("composer-expand") and hasAnyAncestor(hasTestTag(COMPOSER)), useUnmergedTree = true)
             .fetchSemanticsNodes().takeIf { it.isNotEmpty() }?.let {
                 compose.onAllNodes(hasTestTag("composer-expand") and hasAnyAncestor(hasTestTag(COMPOSER)), useUnmergedTree = true).onFirst().performClick()
+                compose.waitForIdle() // applies what the touch changed; the held clock does not move
                 play(18)
                 frames(10)
                 check("$label: expanding the composer closed the goal", bounds(hasTestTag(STRIP)).height < 60 * density)

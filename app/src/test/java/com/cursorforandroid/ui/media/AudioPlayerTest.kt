@@ -62,6 +62,7 @@ class AudioPlayerTest {
 
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("audio-chip").performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeByFrame()
         assertThat(state.phase).isEqualTo(MediaViewerState.Phase.Opening)
@@ -105,6 +106,7 @@ class AudioPlayerTest {
         compose.setContent { ViewerScene(state, loader, entries, playerFactory = factory) }
         settle { exists("audio-chip") }
         compose.onNodeWithTag("audio-chip").performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         settle { state.phase == MediaViewerState.Phase.Open && player?.prepared == true }
 
         compose.onNodeWithTag("viewer-page-0").performTouchInput { swipeDown(startY = centerY, endY = bottom, durationMillis = 200) }

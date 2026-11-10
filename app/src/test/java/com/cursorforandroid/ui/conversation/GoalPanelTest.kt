@@ -72,7 +72,10 @@ class GoalPanelTest {
     private var harnessRef: GoalPanelHarness? = null
     private fun keyboardTop(): Float = compose.onRoot().fetchSemanticsNode().boundsInRoot.bottom - px(harnessRef!!.keyboard.value)
 
-    private fun tapStrip() = compose.onNodeWithTag("goal-strip").performClick()
+    private fun tapStrip() {
+        compose.onNodeWithTag("goal-strip").performClick()
+        compose.waitForIdle() // applies what the touch changed; the held clock does not move
+    }
 
     /** The opened strip's room: from 8dp under the header down to the queued row over the composer. */
     private fun assertMaximized(label: String) {

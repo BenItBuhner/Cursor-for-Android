@@ -117,6 +117,8 @@ class StopConfirmationTest {
     }
 
     private fun awaitDialogGone() {
+        // A dismissal from outside a frame is applied by idling; the wait below only steps the clock.
+        compose.waitForIdle()
         compose.waitUntil(10_000) { !dialogShown() }
         compose.waitForIdle()
     }
