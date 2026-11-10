@@ -6,7 +6,8 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 fresh_start
-tap "Try the demo" 60
+wait_for "Continue with Cursor" 120 >/dev/null
+tap "Try the demo" 30
 started=$SECONDS
 maybe_tap "Continue" 8
 wait_for "Cloud" 60 >/dev/null

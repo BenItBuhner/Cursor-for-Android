@@ -11,7 +11,8 @@ ACTIVITY="${DEMO_ACTIVITY:-com.cursorforandroid.MainActivity}"
 OUT="${DEMO_OUT:-demo-out}"
 mkdir -p "$OUT"
 
-log() { printf '[demo] %s\n' "$*"; }
+# To stderr: a step's stdout is the coordinates it found, read by its caller.
+log() { printf '[demo] %s\n' "$*" >&2; }
 
 # Prints "x y", the centre of the first node whose text or content description is (or, with a third argument of
 # "contains", contains) the label; fails when there is none.
@@ -73,7 +74,7 @@ wait_for() {
     sleep 0.5
   done
   log "never saw \"$label\"; what was on screen is in $OUT/failed-ui.xml and failed-screen.png, and its labels were:"
-  _labels "$OUT/.ui.xml" || true
+  _labels "$OUT/.ui.xml" >&2 || true
   cp "$OUT/.ui.xml" "$OUT/failed-ui.xml" 2>/dev/null || true
   adb exec-out screencap -p >"$OUT/failed-screen.png" 2>/dev/null || true
   return 1
