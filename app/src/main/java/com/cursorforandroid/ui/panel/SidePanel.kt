@@ -454,6 +454,11 @@ private fun sidePanelBody(
     val expand = remember(canExpand, isExpanded) {
         PanelExpand(available = canExpand, expanded = isExpanded && canExpand, toggle = { expanded.value = !expanded.value })
     }
+    // Kept by hand: this body is the root of the host's subcomposition and runs again whenever the window's locals are
+    // handed down afresh (every dp of a live resize), and a wrapper made anew each time would run the host with it.
+    val provided: @Composable () -> Unit = remember(expand, pinned, panelContent) {
+        { CompositionLocalProvider(LocalPanelExpand provides expand, LocalPanelPinned provides (pinned != null), content = panelContent) }
+    }
     SidePanelHost(
         state = state,
         panelWidth = panelWidth,
@@ -463,9 +468,7 @@ private fun sidePanelBody(
         containerColor = colors.canvas,
         contentColor = colors.textPrimary,
         scrimColor = DefaultScrim,
-        panelContent = {
-            CompositionLocalProvider(LocalPanelExpand provides expand, LocalPanelPinned provides (pinned != null), content = panelContent)
-        },
+        panelContent = provided,
         content = content,
     )
 }
