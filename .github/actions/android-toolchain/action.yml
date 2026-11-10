@@ -24,7 +24,8 @@ runs:
     - name: Set up Android SDK
       uses: android-actions/setup-android@v4
       with:
-        # android-36 is the compileSdk (androidx.core 1.17 / Live Updates); android-35 stays for Robolectric's targetSdk.
+        # The compileSdk (37) is not listed: the Android Gradle plugin installs the platform it compiles against by
+        # itself, the licences being accepted here. android-36 and android-35 stay for Robolectric and the targetSdk.
         packages: platforms;android-36 platforms;android-35 build-tools;36.0.0 platform-tools
         log-accepted-android-sdk-licenses: false
 

@@ -200,8 +200,9 @@ val appSentryProguardUuid: String = providers.gradleProperty("app.sentryProguard
 
 android {
     namespace = "com.cursorforandroid"
-    // 36 is required by androidx.core 1.17, which carries the Android 16 Live Updates notification APIs.
-    compileSdk = 36
+    // 37 is required by Compose 1.12, androidx.core 1.19, lifecycle 2.11 and Coil 3.6, which will not link against less.
+    // compileSdk only: the targetSdk below stays 35, so the app's runtime behaviour is unchanged.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.cursorforandroid"
