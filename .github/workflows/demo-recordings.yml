@@ -28,6 +28,8 @@ jobs:
       SYSTEM_IMAGE: system-images;android-35;google_apis;x86_64
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-tags: true # the version is derived from the release tags (app/build.gradle.kts)
 
       - uses: ./.github/actions/android-toolchain
         with:
