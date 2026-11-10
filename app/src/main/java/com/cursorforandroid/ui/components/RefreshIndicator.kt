@@ -5,6 +5,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -13,13 +14,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
-import androidx.compose.material3.pulltorefresh.pullToRefreshIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.center
@@ -29,7 +30,9 @@ import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -51,17 +54,17 @@ import kotlin.math.pow
  * alone, and the container colour is the theme's `elevated`: the sidebar's own colour, and a shade off the chat
  * canvas, where the shadow hardly read in the dark. The hairline is what shows the disc now, in dark as in light.
  *
- * This is the one for a [androidx.compose.material3.pulltorefresh.PullToRefreshBox]'s `indicator` slot: the box and
- * its motion are Material's own ([pullToRefreshIndicator], with its elevation at nought). Material keeps the arrow
- * private, so it is drawn here stroke for stroke ([RefreshArrow]); another indicator stands in the same disc with
- * [refreshDiscOutline] and [RefreshIndicatorContent].
+ * This is the one for a [androidx.compose.material3.pulltorefresh.PullToRefreshBox]'s `indicator` slot: the box is
+ * Material's own and the disc's motion is Material's ([refreshDisc]). Material keeps the arrow private, so it is
+ * drawn here stroke for stroke ([RefreshArrow]); another indicator stands in the same disc with [refreshDiscOutline]
+ * and [RefreshIndicatorContent].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RefreshIndicator(state: PullToRefreshState, isRefreshing: Boolean, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .pullToRefreshIndicator(state, isRefreshing, containerColor = PullToRefreshDefaults.containerColor, elevation = 0.dp)
+            .refreshDisc(state, PullToRefreshDefaults.containerColor)
             .refreshDiscOutline()
             // Inside Material's layer, so the tag's bounds are where the disc is drawn, not where it is laid out.
             .testTag(REFRESH_INDICATOR_TEST_TAG),
@@ -70,6 +73,25 @@ fun RefreshIndicator(state: PullToRefreshState, isRefreshing: Boolean, modifier:
         RefreshIndicatorContent(isRefreshing, progress = { state.distanceFraction })
     }
 }
+
+/**
+ * The disc and where the pull has it: Material 1.3's `Modifier.pullToRefreshIndicator` with no elevation, which later
+ * Material releases no longer offer. The disc is [RefreshIndicatorSize] across in [containerColor], starts its own
+ * height above the box, comes down with the pull to stand [RefreshThreshold] down at the threshold, and is not drawn
+ * above the box's top edge.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+private fun Modifier.refreshDisc(state: PullToRefreshState, containerColor: Color): Modifier =
+    size(RefreshIndicatorSize)
+        .drawWithContent {
+            clipRect(top = 0f, left = -Float.MAX_VALUE, right = Float.MAX_VALUE, bottom = Float.MAX_VALUE) { this@drawWithContent.drawContent() }
+        }
+        .graphicsLayer {
+            translationY = state.distanceFraction * RefreshThreshold.roundToPx() - size.height
+            shape = CircleShape
+            clip = true
+        }
+        .background(containerColor, CircleShape)
 
 /** The outline that tells the disc from the surface it is pulled over: the app's cards' own hairline ([dockedCard]). */
 @Composable
@@ -155,6 +177,8 @@ private fun DrawScope.drawArrowHead(arrow: Path, bounds: Rect, color: Color, alp
 
 /** Material's pull-to-refresh indicator's own measures (`PullToRefreshDefaults.Indicator`). */
 val RefreshIndicatorSize = 40.dp
+/** Material's `PullToRefreshDefaults.PositionalThreshold`: how far down the disc stands when the pull is armed. */
+private val RefreshThreshold = 80.dp
 internal val RefreshSpinnerSize = 16.dp
 internal val RefreshStrokeWidth = 2.5.dp
 private const val RefreshCrossfadeMillis = 100
