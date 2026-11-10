@@ -114,11 +114,13 @@ class RecomposeScopes : CompositionObserver {
 
     init { ScopeBodies.watch() }
 
-    override fun onBeginComposition(composition: ObservableComposition) = Unit
-    // A scope counts from the first time it is invalidated, as the scopes of an invalidation map did.
-    override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { observed.add(scope) }
+    private var composing = 0
+    override fun onBeginComposition(composition: ObservableComposition) { composing++ }
+    // A scope counts from the first time it is invalidated ahead of a composition, as the scopes of an invalidation
+    // map did. One invalidated while composing (a state written higher up in the same pass) was never in that map.
+    override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { if (composing == 0) observed.add(scope) }
     override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
-    override fun onEndComposition(composition: ObservableComposition) = Unit
+    override fun onEndComposition(composition: ObservableComposition) { if (composing > 0) composing-- }
     override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
     override fun onScopeExit(scope: RecomposeScope) {
         if (!ScopeBodies.exit(scope) || scope !in observed) return

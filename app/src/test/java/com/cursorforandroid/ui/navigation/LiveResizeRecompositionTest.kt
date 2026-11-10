@@ -93,7 +93,7 @@ class LiveResizeRecompositionTest {
 
     private fun displayed(matcher: SemanticsMatcher) = runCatching { compose.onAllNodes(matcher).onFirst().assertIsDisplayed() }.isSuccess
 
-    private class Sweep(val counts: Map<String, Int>, val stepMillis: List<Double>) {
+    private class Sweep(val counts: Map<String, Int>, val stepMillis: List<Double>, val top: String) {
         operator fun get(name: String): Int = counts.getValue(name)
 
         override fun toString(): String {
@@ -125,7 +125,7 @@ class LiveResizeRecompositionTest {
         val top = RecomposeCounter.top(25)
         compose.mainClock.autoAdvance = true
         settle()
-        return Sweep(counts, millis).also { println("LIVE-RESIZE $from→$to: $it\n  top: $top") }
+        return Sweep(counts, millis, top).also { println("LIVE-RESIZE $from→$to: $it\n  top: $top") }
     }
 
     private fun resize(width: Int, height: Int, orientation: String) {
@@ -137,7 +137,7 @@ class LiveResizeRecompositionTest {
     }
 
     private fun assertNothingRecomposed(sweep: Sweep, vararg names: String) {
-        names.forEach { assertWithMessage("$it over the sweep ($sweep)").that(sweep[it]).isEqualTo(0) }
+        names.forEach { assertWithMessage("$it over the sweep ($sweep)\n  what ran most: ${sweep.top}").that(sweep[it]).isEqualTo(0) }
     }
 
     @Test

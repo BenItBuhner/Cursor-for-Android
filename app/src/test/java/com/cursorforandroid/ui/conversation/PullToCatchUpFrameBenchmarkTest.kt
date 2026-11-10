@@ -131,12 +131,13 @@ class PullToCatchUpFrameBenchmarkTest {
         var scopes = 0
         private val observed = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<RecomposeScope, Boolean>())
 
-        override fun onBeginComposition(composition: ObservableComposition) = Unit
+        private var composing = 0
+        override fun onBeginComposition(composition: ObservableComposition) { composing++ }
         // A scope counts from the first time it is invalidated, as the scopes of an invalidation map did.
-        override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { observed.add(scope) }
+        override fun onScopeInvalidated(scope: RecomposeScope, value: Any?) { if (composing == 0) observed.add(scope) }
         override fun onReadInScope(scope: RecomposeScope, value: Any) = Unit
 
-        override fun onEndComposition(composition: ObservableComposition) = Unit
+        override fun onEndComposition(composition: ObservableComposition) { if (composing > 0) composing-- }
 
         override fun onScopeEnter(scope: RecomposeScope) = ScopeBodies.enter(scope)
 
