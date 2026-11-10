@@ -247,7 +247,10 @@ object InlineMarkdown {
             if (store != null && listener != null) {
                 // Code in the link colour: what a `[`path`](path)` link reads as, so both spellings look the same.
                 val style = p.link.style?.let { p.code.merge(it) } ?: p.code
-                withLink(LinkAnnotation.Url(url = store, styles = TextLinkStyles(style = style), linkInteractionListener = listener)) { append(" $code ") }
+                // Styled as a span of its own as well: the link's style alone no longer reaches code that opens a document.
+                withLink(LinkAnnotation.Url(url = store, styles = TextLinkStyles(style = style), linkInteractionListener = listener)) {
+                    withStyle(style) { append(" $code ") }
+                }
             } else {
                 withStyle(p.code) { append(" $code ") }
             }

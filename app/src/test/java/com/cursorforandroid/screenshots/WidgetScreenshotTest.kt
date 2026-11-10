@@ -328,6 +328,9 @@ class WidgetScreenshotTest {
         lateinit var view: AppWidgetHostView
         compose.activityRule.scenario.onActivity { activity ->
             val density = activity.resources.displayMetrics.density
+            // The wallpaper behind the widget: said here, as the dark the stills were always taken over, rather than
+            // left to whichever window background the test activity's theme resolves to.
+            activity.window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0xFF141414.toInt()))
             view = host(activity)
             activity.setContentView(view, ViewGroup.LayoutParams((size.width.value * density).toInt(), (size.height.value * density).toInt()))
         }

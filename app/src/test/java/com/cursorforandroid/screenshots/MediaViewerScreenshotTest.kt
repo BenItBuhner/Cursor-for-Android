@@ -185,6 +185,7 @@ class MediaViewerScreenshotTest {
         // Halfway through the open: the picture is between its thumbnail and its place, the scrim half in, no chrome yet.
         compose.mainClock.autoAdvance = false
         compose.onAllNodes(hasContentDescription("Tab layout, landscape, icon-only rail, Project view"))[0].performClick()
+        compose.waitForIdle() // the tap's state change is applied before the clock is stepped
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeBy(70)

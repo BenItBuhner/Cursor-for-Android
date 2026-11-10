@@ -106,7 +106,12 @@ class ComposerScrollFadeScreenshotTest {
         show(ThemeMode.Dark, lines = 40)
         compose.onNode(hasTestTag("composer-expand"), useUnmergedTree = true).performClick()
         compose.mainClock.advanceTimeBy(1_000)
-        repeat(6) { compose.onNode(hasSetTextAction()).performTouchInput { swipeUp() } }
+        // Each swipe a gesture of its own: run together, the ones the field can no longer scroll for read as taps on
+        // one spot, and the field answers those with its text toolbar.
+        repeat(6) {
+            compose.onNode(hasSetTextAction()).performTouchInput { swipeUp() }
+            compose.mainClock.advanceTimeBy(600)
+        }
         capture("682_composer_scroll_fade_expanded_end")
     }
 
