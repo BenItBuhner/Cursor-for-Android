@@ -11,7 +11,6 @@ import kotlin.concurrent.thread
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.roborazzi)
@@ -255,10 +254,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += listOf("-opt-in=kotlin.RequiresOptIn")
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -276,6 +271,13 @@ android {
         // (src/main, src/debug and src/test are all there is), so the vital pass proves nothing lintDebug does not, and
         // CI runs lintDebug on every change. It cost ten minutes of the build job and of every release cut.
         checkReleaseBuilds = false
+    }
+}
+
+// Kotlin is compiled by the Android plugin itself (AGP 9's built-in Kotlin; there is no kotlin-android plugin to apply).
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

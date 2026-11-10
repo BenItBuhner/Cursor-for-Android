@@ -67,7 +67,7 @@ fi
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sdk="${ANDROID_HOME:-$HOME/android-sdk}"
 # Keep in step with .github/actions/android-toolchain/action.yml.
-packages=("platforms;android-36" "platforms;android-35" "build-tools;35.0.0" "platform-tools")
+packages=("platforms;android-36" "platforms;android-35" "build-tools;36.0.0" "platform-tools")
 cmdline_tools_zip="commandlinetools-linux-13114758_latest.zip"
 
 if [[ ! -x /usr/lib/jvm/java-17-openjdk-amd64/bin/javac ]]; then
