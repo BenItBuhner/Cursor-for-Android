@@ -366,13 +366,13 @@ private fun startOrAsk(context: Context, voice: VoiceInput, ask: (String) -> Uni
     else ask(Manifest.permission.RECORD_AUDIO)
 }
 
-private fun openAppSettings(context: Context) {
+internal fun openAppSettings(context: Context) {
     val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
 }
 
-private tailrec fun Context.findActivity(): Activity? = when (this) {
+internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null

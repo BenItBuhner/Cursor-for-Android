@@ -139,6 +139,9 @@ import com.cursorforandroid.ui.panel.rememberPanelTabStates
 import com.cursorforandroid.ui.panel.rememberSidePanelState
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
+import com.cursorforandroid.ui.voice.VoiceChatBar
+import com.cursorforandroid.ui.voice.VoiceChatCopy
+import com.cursorforandroid.ui.voice.rememberVoiceChat
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -328,6 +331,25 @@ fun ConversationScreen(
     val pickFiles = rememberFilePicker(counts = counts, onPickedFiles = viewModel::addFiles, onError = viewModel::showMessage)
     val plusMenu = rememberComposerMenuActions(graph, onPickMedia = pickMedia, onPickFiles = if (extendedFiles) pickFiles else null)
     val voice = rememberComposerVoice(graph)
+    // A hands-free conversation with this chat's agent (see [VoiceChat]), wherever the composer can dictate: what is
+    // heard goes out as a follow-up of its own, around whatever stands typed in the composer, which is put back.
+    val voiceChat = rememberVoiceChat(voice?.let { graph.transcription }) { words ->
+        val typed = viewModel.draftText.value
+        viewModel.setDraft(words)
+        val went = viewModel.submit() != null
+        viewModel.setDraft(typed)
+        went
+    }
+    val voiceChatOn = voiceChat?.first?.state?.collectAsStateWithLifecycle()?.value?.active == true
+    if (voiceChat != null) {
+        LaunchedEffect(voiceChat.first) {
+            snapshotFlow {
+                val presented = presentedState.value
+                val reply = presented.items.lastOrNull { it is AssistantMessage } as? AssistantMessage
+                Triple(presented.state.let { it.runStatus?.isActive == true || it.isStreaming }, reply?.id, reply?.markdown)
+            }.collect { (running, id, markdown) -> voiceChat.first.agent(running, id, markdown) }
+        }
+    }
     val share by graph.share.offer.collectAsStateWithLifecycle()
     LaunchedEffect(share?.generation, share?.target) {
         val incoming = share ?: return@LaunchedEffect
@@ -520,6 +542,10 @@ fun ConversationScreen(
                         if (canOpenDesktop) {
                             CursorMenuItem("View desktop", CursorIcons.Eye) { menuOpen = false; panelActions.openDesktop(viewOnly = true) }
                             CursorMenuItem("Take control of desktop", CursorIcons.Desktop) { menuOpen = false; panelActions.openDesktop(viewOnly = false) }
+                        }
+                        // Talk to the agent instead of typing to it; an archived chat takes no follow-ups, spoken or typed.
+                        if (voiceChat != null && !voiceChatOn && agent?.isArchived != true) {
+                            CursorMenuItem(VoiceChatCopy.Start, CursorIcons.Waveform) { menuOpen = false; voiceChat.second() }
                         }
                         if (isActive) CursorMenuItem("Stop", CursorIcons.Stop) { menuOpen = false; stopConfirmation.ask(RunInterruption.Stop, agentId, viewModel::cancelRun) }
                         if (agent?.isArchived != true) {
@@ -991,7 +1017,12 @@ fun ConversationScreen(
                         modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).testTag("follow-up-composer"),
                     )
                 }
-                followUpComposer()
+                // A voice chat stands where the composer does and gives the place back when it ends.
+                if (voiceChatOn && voiceChat != null) {
+                    VoiceChatBar(voiceChat.first, Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn))
+                } else {
+                    followUpComposer()
+                }
             }
         }
     }

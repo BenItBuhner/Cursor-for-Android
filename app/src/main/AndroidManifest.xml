@@ -33,6 +33,11 @@
         <intent>
             <action android:name="android.settings.MANAGE_APP_PROMOTED_NOTIFICATIONS" />
         </intent>
+        <!-- Voice chat reads the agent's replies with the device's own text-to-speech engine, which Android 11 and
+             later hide from an app that does not say it looks for one. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <!-- largeHeap: headroom for accounts with dozens of agents working at once (a 256 MB limit on Bennett's phone);
