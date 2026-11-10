@@ -217,14 +217,14 @@ object InlineMarkdown {
      * given: the markup is read recursively on the pieces it encloses, and the command tokens ([Palette.commands])
      * are indexed in the whole.
      */
-    private fun AnnotatedString.Builder.appendInline(text: String, p: Palette, insideLink: Boolean, offset: Int) {
+    private fun AnnotatedString.Builder.appendInline(text: String, p: Palette, insideLink: Boolean, offset: Int, linkColoured: Boolean = false) {
         var i = 0
         val n = text.length
         // Where a search for an emphasis closer last ran off the end, per delimiter and run length: a later opener
         // of the same kind cannot find one either, so a paragraph of unclosed `*item` is read once, not once per star.
         val noCloserFrom = IntArray(8) { Int.MAX_VALUE }
         /** Renders [inner], the piece of [text] that starts at [at], inside the style the caller has pushed. */
-        fun recurse(inner: String, at: Int) = appendInline(inner, p, insideLink, offset + at)
+        fun recurse(inner: String, at: Int) = appendInline(inner, p, insideLink, offset + at, linkColoured)
         fun emitLink(url: String, label: String, labelAt: Int) {
             // Labels keep bold/code/italic, but not nested links — a bare-URL label would recurse forever. An address
             // nothing on the device can open is not made into a link at all (see [linkTarget]).
@@ -236,7 +236,7 @@ object InlineMarkdown {
             val listener = p.onLinkClick?.let { click -> LinkInteractionListener { click(target) } }
             withLink(LinkAnnotation.Url(url = target, styles = p.link, linkInteractionListener = listener)) {
                 if (p.agentLinkIcons && AgentLink.parse(target) != null) appendInlineContent(AgentLinkIcon.id(target))
-                appendInline(label, p, insideLink = true, offset + labelAt)
+                appendInline(label, p, insideLink = true, offset + labelAt, linkColoured = true)
             }
         }
         fun emitCode(code: String) {
@@ -247,14 +247,12 @@ object InlineMarkdown {
             pushStringAnnotation(CODE_SPAN, code)
             if (store != null && listener != null) {
                 // Code in the link colour: what a `[`path`](path)` link reads as, so both spellings look the same.
-                // Merged from the span the link style is made of, and set as a span of its own as well as on the link:
-                // the look does not depend on what the link's style hands back or on when it is applied.
                 val style = p.code.merge(p.linkSpan)
-                withLink(LinkAnnotation.Url(url = store, styles = TextLinkStyles(style = style), linkInteractionListener = listener)) {
-                    withStyle(style) { append(" $code ") }
-                }
+                withLink(LinkAnnotation.Url(url = store, styles = TextLinkStyles(style = style), linkInteractionListener = listener)) { append(" $code ") }
             } else {
-                withStyle(p.code) { append(" $code ") }
+                // Code in a link's label keeps the link's colour: a span inside a link is painted over the link's
+                // own style, so the code's colour would otherwise win.
+                withStyle(if (linkColoured) p.code.merge(p.linkSpan) else p.code) { append(" $code ") }
             }
             pop()
         }
