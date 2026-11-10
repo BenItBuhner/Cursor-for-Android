@@ -30,6 +30,7 @@ import com.github.takahirom.roborazzi.captureScreenRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import com.cursorforandroid.ui.components.ShadowOffscreenMagnifier
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
@@ -40,7 +41,8 @@ import java.io.File
  */
 @RunWith(AndroidJUnit4::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = "w411dp-h914dp-night-420dpi")
+// A drag along the text raises the field's magnifier, which Robolectric cannot show and the platform crashes dismissing.
+@Config(sdk = [35], qualifiers = "w411dp-h914dp-night-420dpi", shadows = [ShadowOffscreenMagnifier::class])
 class ComposerScrollFadeScreenshotTest {
 
     @get:Rule
