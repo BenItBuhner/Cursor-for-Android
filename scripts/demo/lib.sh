@@ -37,6 +37,25 @@ sys.exit(1)
 PY
 }
 
+# Prints every label on screen, one per line: what a failed step could have pressed instead.
+_labels() {
+  python3 - "$1" <<'PY'
+import sys, xml.etree.ElementTree as ET
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except Exception:
+    sys.exit(1)
+seen = []
+for node in root.iter("node"):
+    for key in ("text", "content-desc"):
+        value = (node.get(key) or "").strip()
+        if value and value not in seen:
+            seen.append(value)
+for value in seen:
+    print("  | " + value[:120])
+PY
+}
+
 _dump() {
   adb shell uiautomator dump /sdcard/demo-ui.xml >/dev/null 2>&1 || return 1
   adb pull /sdcard/demo-ui.xml "$OUT/.ui.xml" >/dev/null 2>&1
@@ -53,7 +72,8 @@ wait_for() {
     fi
     sleep 0.5
   done
-  log "never saw \"$label\"; what was on screen is in $OUT/failed-ui.xml and failed-screen.png"
+  log "never saw \"$label\"; what was on screen is in $OUT/failed-ui.xml and failed-screen.png, and its labels were:"
+  _labels "$OUT/.ui.xml" || true
   cp "$OUT/.ui.xml" "$OUT/failed-ui.xml" 2>/dev/null || true
   adb exec-out screencap -p >"$OUT/failed-screen.png" 2>/dev/null || true
   return 1
