@@ -54,6 +54,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cursorforandroid.AppGraph
@@ -250,6 +253,9 @@ fun HomeScreen(
             }
         }
         LaunchRefusedHaptic(stateHolder)
+        // The account's computers are listed again while the page is in front, so one that comes online is offered unasked.
+        val lifecycleOwner = LocalLifecycleOwner.current
+        LaunchedEffect(viewModel, lifecycleOwner) { lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) { viewModel.watchDevices() } }
         // Expanded, the composer runs from under its selectors to just above the pane's foot — the keyboard's edge while
         // it is up — with the lead above it given up as it grows and the page held still at the top.
         val expansion = rememberComposerExpansion()
@@ -337,6 +343,12 @@ fun HomeScreen(
                         expansion = expansion,
                         expandRoom = { pageHeight - footUnderBar() - expandedMargins - composerTop },
                         modifier = Modifier.onPlaced { composerTop = it.positionInParent().y.roundToInt() },
+                    )
+                    // One of the user's computers that is online and free, while the composer is still on Cloud.
+                    MachineOffer(
+                        offer = state.machineOffer.takeUnless { expansion.expanded },
+                        onRun = { viewModel.selectDevice(it.target) },
+                        onDismiss = viewModel::dismissMachineOffer,
                     )
                     state.error?.let { ComposerErrorLine(it, state.errorAsked, onDismiss = viewModel::dismissError) }
                 }
