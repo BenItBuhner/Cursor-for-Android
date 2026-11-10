@@ -21,9 +21,14 @@ wait_for "Refresh devices" 20 >/dev/null
 sleep 2
 while ((SECONDS - started < 18)); do sleep 1; done
 tap "Refresh devices"
+sleep 2
+# The account's computers are under Remote: the one that has just come online is listed there now.
+tap "Remote"
 wait_for "Bennetts-MacBook-Pro" 20 contains >/dev/null
 sleep 2
 adb shell input keyevent KEYCODE_BACK
+sleep 1
+maybe_tap "Close Device" 3
 wait_for "Run here" 20 >/dev/null
 sleep 3
 tap "Run here"
