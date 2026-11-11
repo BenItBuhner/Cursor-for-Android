@@ -196,19 +196,16 @@ object KnownDevices {
     }
 
     /**
-     * The machine New Chat offers by itself, as Cursor's own apps list the account's computers without being asked:
-     * one of the user's machines the fleet endpoint lists right now and that is free to take a chat, while the
-     * composer is still on Cloud. A machine past chats ran on but nothing lists is not offered (it may be off), nor
-     * is a busy one, nor one the user waved away ([dismissed], by [DeviceOption.key]). With several, the one used
-     * most recently, then by name, so the offer does not change between two listings that say the same.
+     * The user's computers that can take a chat right now, as Cursor's own apps list the account's computers without
+     * being asked: the machines the fleet endpoint lists and that are free. The device menu shows them next to Cloud,
+     * one tap away, instead of only under Remote. A machine past chats ran on but nothing lists is not one (it may be
+     * off), nor is a busy one. The one used most recently first, then by name, so the order does not change between
+     * two listings that say the same.
      */
-    fun offeredMachine(devices: List<DeviceOption>, selected: DeviceTarget, dismissed: Set<String> = emptySet()): DeviceOption? {
-        if (!selected.isCloud) return null
-        return devices.asSequence()
-            .filter { it.section == DeviceSection.Machines && it.online && !it.busy && it.worker != null && it.key !in dismissed }
+    fun readyMachines(devices: List<DeviceOption>): List<DeviceOption> =
+        devices
+            .filter { it.section == DeviceSection.Machines && it.online && !it.busy && it.worker != null }
             .sortedWith(compareByDescending<DeviceOption> { it.lastUsedAtMillis }.thenBy { it.target.label.lowercase() })
-            .firstOrNull()
-    }
 
     /** A pool or machine the agent ran on; unnamed cloud rows are not a pickable device of their own. */
     fun targetOf(agent: Agent): DeviceTarget? {

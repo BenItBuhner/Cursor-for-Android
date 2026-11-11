@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# A computer of the account's coming online while New Chat is open: the device list finds it, New Chat offers it under
-# the composer by itself, and "Run here" moves the chat onto it. The demo account's second computer comes online a
-# quarter of a minute into the session.
+# A computer of the account's coming online while New Chat is open: the device menu lists it next to Cloud by itself,
+# and one tap moves the chat onto it. The demo account's second computer comes online a quarter of a minute into the
+# session.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
@@ -22,18 +22,10 @@ sleep 2
 while ((SECONDS - started < 18)); do sleep 1; done
 tap "Refresh devices"
 sleep 2
-# The account's computers are under Remote: the one that has just come online is listed there now.
-tap "Remote"
+# The computer that has just come online is a row of the menu itself, next to Cloud.
 wait_for "Bennetts-MacBook-Pro" 20 contains >/dev/null
-sleep 2
-# Back out of Remote, then out of the device list.
-for _ in 1 2 3; do
-  adb shell input keyevent KEYCODE_BACK
-  sleep 1.5
-  wait_for "Refresh devices" 2 >/dev/null 2>&1 || break
-done
-wait_for "Run here" 20 >/dev/null
 sleep 3
-tap "Run here"
+tap "Bennetts-MacBook-Pro" 10 contains
+# The menu closes and the device chip now names the machine.
 sleep 4
 record_stop

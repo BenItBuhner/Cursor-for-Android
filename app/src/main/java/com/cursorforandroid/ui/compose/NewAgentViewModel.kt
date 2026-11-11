@@ -127,8 +127,6 @@ data class NewAgentUiState(
     /** Cloud, then live / harvested machines and pools. Always contains Cloud. */
     val devices: List<DeviceOption> = listOf(KnownDevices.cloud),
     val isLoadingDevices: Boolean = false,
-    /** The machines whose offer under the composer was closed ([DeviceOption.key]); for as long as this composer lives. */
-    val dismissedMachineOffers: Set<String> = emptySet(),
     /**
      * The repository the selected device is checked out at (see [DeviceOption.repoUrl]): what the repository
      * selector defaults to on a machine or pool, since Cursor runs a machine only in a checkout of the requested
@@ -173,8 +171,6 @@ data class NewAgentUiState(
     /** The mode pill the composer wears for the choices here; Multitask's is the prompt's own `/multitask`. */
     val modePill: ModePills.Pill? get() = ModePills.Pill.of(sentAccountMode) ?: ModePills.Pill.Plan.takeIf { planMode }
     val deviceLabel: String get() = selectedDevice.label
-    /** One of the user's machines that is online and free, offered under the composer while it is on Cloud ([KnownDevices.offeredMachine]). */
-    val machineOffer: DeviceOption? get() = KnownDevices.offeredMachine(devices, selectedDevice, dismissedMachineOffers)
     /** The machine's own checkout decides where an unpicked branch starts: what the desktop sends for a machine (no ref). */
     val startsFromCheckout: Boolean get() = machineStartEnabled && selectedDevice.type == EnvType.MACHINE && selectedRepo != null && !noRepo
     /** The branch chip's text: the ref picked, else what leaving it unpicked means here. */
@@ -951,13 +947,10 @@ class NewAgentViewModel(
 
     fun refreshDevices() = viewModelScope.launch { loadDevices(force = true) }
 
-    /** Closes the offer of [option] under the composer; the machine stays in the device picker. */
-    fun dismissMachineOffer(option: DeviceOption) = _state.update { it.copy(dismissedMachineOffers = it.dismissedMachineOffers + option.key) }
-
     /**
      * Asks the fleet again every [DEVICES_WATCH_MS] for as long as the caller stays in it (New Chat, while it is on
-     * screen), so a computer that comes online — Cursor opened on a laptop — shows up without the picker's Refresh,
-     * and one that went to sleep stops being offered. Quiet: the picker's refresh row does not spin for it.
+     * screen), so a computer that comes online — Cursor opened on a laptop — shows up in the device menu without its Refresh,
+     * and one that went to sleep leaves it. Quiet: the picker's refresh row does not spin for it.
      */
     suspend fun watchDevices() {
         while (true) {

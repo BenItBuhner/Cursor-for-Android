@@ -253,7 +253,7 @@ fun HomeScreen(
             }
         }
         LaunchRefusedHaptic(stateHolder)
-        // The account's computers are listed again while the page is in front, so one that comes online is offered unasked.
+        // The account's computers are listed again while the page is in front, so one that comes online is in the device menu unasked.
         val lifecycleOwner = LocalLifecycleOwner.current
         LaunchedEffect(viewModel, lifecycleOwner) { lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) { viewModel.watchDevices() } }
         // Expanded, the composer runs from under its selectors to just above the pane's foot — the keyboard's edge while
@@ -343,12 +343,6 @@ fun HomeScreen(
                         expansion = expansion,
                         expandRoom = { pageHeight - footUnderBar() - expandedMargins - composerTop },
                         modifier = Modifier.onPlaced { composerTop = it.positionInParent().y.roundToInt() },
-                    )
-                    // One of the user's computers that is online and free, while the composer is still on Cloud.
-                    MachineOffer(
-                        offer = state.machineOffer.takeUnless { expansion.expanded },
-                        onRun = { viewModel.selectDevice(it.target) },
-                        onDismiss = viewModel::dismissMachineOffer,
                     )
                     state.error?.let { ComposerErrorLine(it, state.errorAsked, onDismiss = viewModel::dismissError) }
                 }

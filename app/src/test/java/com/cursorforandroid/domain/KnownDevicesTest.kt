@@ -165,16 +165,13 @@ class KnownDevicesTest {
     )
 
     @Test
-    fun `a machine that is online and free is offered while the composer is on Cloud`() {
+    fun `a machine that is online and free is ready, whatever the composer is on`() {
         val devices = listOf(KnownDevices.cloud, machine("macbook"))
-        assertThat(KnownDevices.offeredMachine(devices, DeviceTarget.Cloud)?.target).isEqualTo(DeviceTarget.machine("macbook"))
-        // Once the chat is going to a machine or a pool there is nothing left to offer.
-        assertThat(KnownDevices.offeredMachine(devices, DeviceTarget.machine("macbook"))).isNull()
-        assertThat(KnownDevices.offeredMachine(devices, DeviceTarget.pool("gpu"))).isNull()
+        assertThat(KnownDevices.readyMachines(devices).map { it.target }).containsExactly(DeviceTarget.machine("macbook"))
     }
 
     @Test
-    fun `a busy machine, one nothing lists and a team pool are not offered`() {
+    fun `a busy machine, one nothing lists and a team pool are not ready`() {
         val pool = DeviceOption(target = DeviceTarget.pool("gpu"), subtitle = "2 connected", online = true, section = DeviceSection.Pools)
         val devices = listOf(
             KnownDevices.cloud,
@@ -182,33 +179,24 @@ class KnownDevicesTest {
             machine("remembered", online = false, listed = false),
             pool,
         )
-        assertThat(KnownDevices.offeredMachine(devices, DeviceTarget.Cloud)).isNull()
+        assertThat(KnownDevices.readyMachines(devices)).isEmpty()
     }
 
     @Test
-    fun `a dismissed machine is passed over for the next one`() {
-        val devices = listOf(KnownDevices.cloud, machine("macbook"), machine("studio"))
-        val first = KnownDevices.offeredMachine(devices, DeviceTarget.Cloud)!!
-        val second = KnownDevices.offeredMachine(devices, DeviceTarget.Cloud, dismissed = setOf(first.key))!!
-        assertThat(second.key).isNotEqualTo(first.key)
-        assertThat(KnownDevices.offeredMachine(devices, DeviceTarget.Cloud, dismissed = setOf(first.key, second.key))).isNull()
-    }
-
-    @Test
-    fun `of several free machines the one used most recently is offered, then by name`() {
+    fun `of several free machines the one used most recently is first, then by name`() {
         val devices = listOf(KnownDevices.cloud, machine("zeta", lastUsedAgo = hour), machine("alpha", lastUsedAgo = 3 * hour), machine("beta"))
-        assertThat(KnownDevices.offeredMachine(devices, DeviceTarget.Cloud)?.target).isEqualTo(DeviceTarget.machine("zeta"))
+        assertThat(KnownDevices.readyMachines(devices).map { it.target.label }).containsExactly("zeta", "alpha", "beta").inOrder()
         val unused = listOf(KnownDevices.cloud, machine("studio"), machine("Macbook"))
-        assertThat(KnownDevices.offeredMachine(unused, DeviceTarget.Cloud)?.target).isEqualTo(DeviceTarget.machine("Macbook"))
+        assertThat(KnownDevices.readyMachines(unused).map { it.target.label }).containsExactly("Macbook", "studio").inOrder()
     }
 
-    /** `compose` keeps what the fleet said about a listed machine, so the offer survives the merge with the agent list. */
+    /** `compose` keeps what the fleet said about a listed machine, so it is still ready after the merge with the agent list. */
     @Test
-    fun `the offer is made from the composed list`() {
+    fun `a ready machine is read from the composed list`() {
         val listed = KnownDevices.compose(
             listOf(agent("chat", EnvType.MACHINE, "macbook", updatedAgo = hour)),
             live = listOf(machine("macbook")),
         )
-        assertThat(KnownDevices.offeredMachine(listed, DeviceTarget.Cloud)?.target).isEqualTo(DeviceTarget.machine("macbook"))
+        assertThat(KnownDevices.readyMachines(listed).map { it.target }).containsExactly(DeviceTarget.machine("macbook"))
     }
 }

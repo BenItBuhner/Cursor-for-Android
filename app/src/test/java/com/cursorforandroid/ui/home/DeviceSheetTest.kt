@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -19,6 +20,7 @@ import com.cursorforandroid.domain.DeviceOption
 import com.cursorforandroid.domain.DeviceSection
 import com.cursorforandroid.domain.DeviceTarget
 import com.cursorforandroid.domain.KnownDevices
+import com.cursorforandroid.domain.MachineWorker
 import com.cursorforandroid.ui.components.PickerTags
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
@@ -56,6 +58,15 @@ class DeviceSheetTest {
         section = DeviceSection.Pools,
     )
     private val devices = listOf(KnownDevices.cloud, bennett, studio, gpu)
+
+    /** A computer the fleet lists as online and free: the only kind the menu shows outside Remote. */
+    private val macbook = DeviceOption(
+        target = DeviceTarget.machine("macbook"),
+        subtitle = "/Users/bennett/code/app",
+        online = true,
+        section = DeviceSection.Machines,
+        worker = MachineWorker(workerId = "pw_macbook", name = "macbook"),
+    )
 
     private var picked: DeviceTarget? = null
     private var dismissed = false
@@ -99,6 +110,25 @@ class DeviceSheetTest {
         compose.onNodeWithText("bennett", substring = true).assertExists()
         compose.onNodeWithText("Team pools").assertExists()
         compose.onNodeWithText("gpu", substring = true).assertExists()
+    }
+
+    @Test
+    fun `a computer that is online and free is a row of the menu itself, and one tap picks it`() {
+        show(rows = devices + macbook)
+        // In the menu, before Remote is opened; the busy and offline machines stay under Remote.
+        compose.onNodeWithText("macbook", substring = true).assertExists()
+        compose.onNodeWithText("/Users/bennett/code/app", substring = true, useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("bennett").assertDoesNotExist()
+        compose.onNodeWithText("macbook", substring = true).performClick()
+        assertThat(picked).isEqualTo(DeviceTarget.machine("macbook"))
+        compose.waitUntil(10_000) { dismissed }
+    }
+
+    @Test
+    fun `a ready computer in use is checked on its own row, not on Remote`() {
+        show(selected = macbook.target, rows = devices + macbook)
+        compose.onNodeWithText("/Users/bennett/code/app", substring = true).assertIsSelected()
+        compose.onNode(hasText(REMOTE, substring = true) and isSelected()).assertDoesNotExist()
     }
 
     @Test
