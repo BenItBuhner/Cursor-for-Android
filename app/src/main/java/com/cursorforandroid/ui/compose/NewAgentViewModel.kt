@@ -49,6 +49,7 @@ import com.cursorforandroid.ui.components.PendingFile
 import com.cursorforandroid.ui.components.withinSlots
 import com.cursorforandroid.util.AppClock
 import java.util.concurrent.ConcurrentHashMap
+import com.cursorforandroid.data.repo.CatalogRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -946,12 +947,24 @@ class NewAgentViewModel(
 
     fun refreshDevices() = viewModelScope.launch { loadDevices(force = true) }
 
-    private suspend fun loadDevices(force: Boolean = false) {
-        _state.update { it.copy(isLoadingDevices = true) }
+    /**
+     * Asks the fleet again every [DEVICES_WATCH_MS] for as long as the caller stays in it (New Chat, while it is on
+     * screen), so a computer that comes online — Cursor opened on a laptop — shows up in the device menu without its Refresh,
+     * and one that went to sleep leaves it. Quiet: the picker's refresh row does not spin for it.
+     */
+    suspend fun watchDevices() {
+        while (true) {
+            delay(DEVICES_WATCH_MS)
+            loadDevices(quiet = true)
+        }
+    }
+
+    private suspend fun loadDevices(force: Boolean = false, quiet: Boolean = false) {
+        if (!quiet) _state.update { it.copy(isLoadingDevices = true) }
         liveDevices = graph.catalog.devices.value
         _state.update { it.withPickerLists() }
         liveDevices = graph.catalog.loadDevices(force).getOrDefault(emptyList())
-        _state.update { it.copy(isLoadingDevices = false).withPickerLists() }
+        _state.update { (if (quiet) it else it.copy(isLoadingDevices = false)).withPickerLists() }
     }
 
     /**
@@ -1142,6 +1155,9 @@ class NewAgentViewModel(
 
     private companion object {
         const val DRAFT_SAVE_DELAY_MS = 400L
+
+        /** Between two of [watchDevices]'s listings: three small calls, twice the catalogue's own freshness. */
+        const val DEVICES_WATCH_MS = 2 * CatalogRepository.DEVICES_FRESH_MS
 
         fun newDraftId(): String = "draft-" + java.util.UUID.randomUUID()
     }

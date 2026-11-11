@@ -24,7 +24,8 @@ import com.cursorforandroid.ui.components.PopoverAnchor
 import com.cursorforandroid.ui.components.pickerMatches
 
 /**
- * The composer's device picker, on Cursor's Cloud / Remote dropdown: Cloud (always, and the default), and Remote,
+ * The composer's device picker, on Cursor's Cloud / Remote dropdown: Cloud (always, and the default), the user's
+ * computers that are online and free right now ([KnownDevices.readyMachines]) as rows of their own, and Remote,
  * which opens the machines and team pools — My machines that are online or that past chats ran on, then the pools,
  * an offline machine dimmed — with a search of their own. There is no "this device" row: an Android client cannot
  * host the agent. A name typed into that search that matches none of the rows is offered as a machine and as a pool,
@@ -66,13 +67,18 @@ private fun deviceEntries(
 ): List<PickerEntry> = buildList {
     val cloud = devices.firstOrNull { it.section == DeviceSection.Cloud } ?: KnownDevices.cloud
     add(PickerItem("cloud", cloud.target.label, detail = cloud.subtitle, icon = CursorIcons.Cloud, selected = selected.isCloud, onPick = { onSelect(DeviceTarget.Cloud) }))
+    // A computer that can take the chat now is one tap from the chip; Remote still lists every machine and pool.
+    val selectedKey = DeviceOption.keyOf(selected)
+    val ready = KnownDevices.readyMachines(devices)
+    ready.forEach { add(deviceRow(it, CursorIcons.Desktop, selectedKey, onSelect, key = "ready:${it.key}")) }
+    val underRemote = !selected.isCloud && ready.none { it.key == selectedKey }
     add(
         PickerItem(
             key = "remote",
             label = REMOTE,
-            detail = selected.takeUnless { it.isCloud }?.label,
-            icon = if (selected.isCloud) CursorIcons.Desktop else deviceIcon(selected),
-            selected = !selected.isCloud,
+            detail = selected.takeIf { underRemote }?.label,
+            icon = if (underRemote) deviceIcon(selected) else CursorIcons.Desktop,
+            selected = underRemote,
             submenu = PickerSubmenu(REMOTE, searchPlaceholder = "Search remote machines\u2026", width = 280.dp) { query ->
                 remoteEntries(query, devices, selected, onSelect)
             },
@@ -96,15 +102,7 @@ private fun remoteEntries(query: String, devices: List<DeviceOption>, selected: 
         !selected.apiName.equals(typed, ignoreCase = true)
     val machines = visible.filter { it.section == DeviceSection.Machines }
     val pools = visible.filter { it.section == DeviceSection.Pools }
-    fun row(option: DeviceOption, icon: ImageVector) = PickerItem(
-        key = "device:${option.key}",
-        label = option.target.label,
-        subtitle = option.subtitle,
-        icon = if (option.online) icon else CursorIcons.Plug,
-        dimmed = !option.online,
-        selected = option.key == selectedKey,
-        onPick = { onSelect(option.target) },
-    )
+    fun row(option: DeviceOption, icon: ImageVector) = deviceRow(option, icon, selectedKey, onSelect)
     if (currentUnlisted) add(PickerItem("current", selected.label, icon = deviceIcon(selected), selected = true, onPick = { onSelect(selected) }))
     if (machines.isNotEmpty()) {
         add(PickerSection("machines", "My machines"))
@@ -126,6 +124,17 @@ private fun remoteEntries(query: String, devices: List<DeviceOption>, selected: 
             add(PickerNote("empty", "No machines or team pools yet. Type a name to use one that hasn't connected."))
     }
 }
+
+/** A machine's or pool's row, the same in the menu and under Remote: its name, what it is doing, dimmed while offline. */
+private fun deviceRow(option: DeviceOption, icon: ImageVector, selectedKey: String, onSelect: (DeviceTarget) -> Unit, key: String = "device:${option.key}") = PickerItem(
+    key = key,
+    label = option.target.label,
+    subtitle = option.subtitle,
+    icon = if (option.online) icon else CursorIcons.Plug,
+    dimmed = !option.online,
+    selected = option.key == selectedKey,
+    onPick = { onSelect(option.target) },
+)
 
 internal fun deviceIcon(target: DeviceTarget): ImageVector = when (target.type) {
     EnvType.MACHINE -> CursorIcons.Desktop

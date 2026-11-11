@@ -391,7 +391,7 @@ class CatalogRepository(
                 repo != null -> repo
                 else -> "Online"
             }
-            return DeviceOption(target = target, subtitle = subtitle, online = true, section = DeviceSection.Machines, repoUrl = repoUrl, worker = machineWorker(raw))
+            return DeviceOption(target = target, subtitle = subtitle, online = true, section = DeviceSection.Machines, repoUrl = repoUrl, worker = machineWorker(raw), busy = isInUse)
         }
 
         /** The desktop's `RRe`: the id, the `name` label else the listed name else the id (`Ael`), `repoOwner/repoName`, the owner. */
