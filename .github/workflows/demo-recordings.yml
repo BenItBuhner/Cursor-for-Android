@@ -3,6 +3,10 @@ name: Demo recordings
 # Screen recordings of the app on an emulator, driven through its built-in demo account by the scripts in
 # scripts/demo (one recording per script), and uploaded as the run's `demo-recordings` artifact. Nothing here signs
 # in to Cursor or holds a secret. Runs when a pull request changes a demo or this file, and by hand.
+#
+# The recordings are also put, as GIFs, on a branch of their own that is never merged (MEDIA_BRANCH, one directory per
+# branch recorded), so a pull request's description can show them: an artifact cannot be embedded in a page. That push
+# is the only thing the write permission is for.
 
 on:
   pull_request:
@@ -12,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: demo-recordings-${{ github.ref }}
@@ -28,6 +32,7 @@ jobs:
       # avdmanager and the emulator each have their own idea of where AVDs live unless both are told.
       ANDROID_AVD_HOME: /home/runner/.android/avd
       SYSTEM_IMAGE: system-images;android-35;google_apis;x86_64
+      MEDIA_BRANCH: demo-media
     steps:
       - uses: actions/checkout@v7
         with:
@@ -83,3 +88,43 @@ jobs:
             demo-out/
             emulator.log
           if-no-files-found: warn
+
+      # Not from a fork: its token cannot push, and a stranger's recording has no business on this repository's branch.
+      - name: Publish the recordings as GIFs
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          recordings=("$DEMO_OUT"/*.mp4)
+          ((${#recordings[@]})) || { echo "nothing was recorded"; exit 0; }
+          command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null; }
+          gifs="$RUNNER_TEMP/gifs"
+          mkdir -p "$gifs"
+          for recording in "${recordings[@]}"; do
+            name="$(basename "$recording" .mp4)"
+            # Small enough to load on a page: 12 frames a second, 360 wide, one palette for the whole recording.
+            ffmpeg -loglevel error -y -i "$recording" -vf "fps=12,scale=360:-2:flags=lanczos,split[a][b];[a]palettegen=max_colors=128[p];[b][p]paletteuse=dither=bayer:bayer_scale=4" "$gifs/$name.gif"
+            [[ -f "$DEMO_OUT/$name-last-frame.png" ]] && cp "$DEMO_OUT/$name-last-frame.png" "$gifs/$name-last-frame.png"
+            echo "$name.gif: $(du -h "$gifs/$name.gif" | cut -f1)"
+          done
+          dir="${SOURCE_BRANCH//\//-}"
+          media="$RUNNER_TEMP/media"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # Another branch's run may push at the same moment: start again from what is there, a few times.
+          for attempt in 1 2 3 4; do
+            rm -rf "$media" && mkdir -p "$media" && cd "$media"
+            git init -q && git remote add origin "$remote"
+            if git fetch -q --depth 1 origin "$MEDIA_BRANCH" 2>/dev/null; then git checkout -q -B "$MEDIA_BRANCH" FETCH_HEAD; else git checkout -q --orphan "$MEDIA_BRANCH"; fi
+            rm -rf "$dir" && mkdir -p "$dir" && cp "$gifs"/* "$dir"/
+            git add -A
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Demo recordings of $SOURCE_BRANCH ($GITHUB_SHA)" || { echo "nothing changed"; exit 0; }
+            if git push -q origin "HEAD:refs/heads/$MEDIA_BRANCH"; then
+              echo "published to $MEDIA_BRANCH/$dir"
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          echo "::error::could not push the recordings to $MEDIA_BRANCH"
+          exit 1
