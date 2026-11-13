@@ -17,7 +17,8 @@ import java.io.File
 
 /**
  * What the next launch finds after the app died: the uncaught exception with the app's state at that moment, and the
- * deaths only Android saw (low memory, ANR), each once, the newest offered on the card until it is closed.
+ * deaths only Android saw (ANR, native crash), each once, the newest offered on the card until it is closed; Android's
+ * own kills (low memory) are kept for the export only, and the user's swipe or a reboot not at all.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [35])
@@ -202,6 +203,52 @@ class CrashLogTest {
         // Read again on the next launch: nothing new.
         log(dir).recordExitReasons(activityManager, context.packageName)
         assertThat(log(dir).reports()).hasSize(3)
+    }
+
+    @Test
+    fun `Android ending the app on purpose is kept for the export but never offered as a crash`() {
+        val dir = folder.newFolder("crash")
+        val shadow: ShadowActivityManager = shadowOf(activityManager)
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_LOW_MEMORY, now - 600_000, null, pssKb = 900_000))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_SIGNALED, now - 500_000, "killed"))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE, now - 400_000, null))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_USER_STOPPED, now - 300_000, null))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_USER_REQUESTED, now - 250_000, "remove task"))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_EXIT_SELF, now - 200_000, null))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_DEPENDENCY_DIED, now - 150_000, null))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_PERMISSION_CHANGE, now - 120_000, null))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_OTHER, now - 100_000, "reboot"))
+
+        val log = log(dir)
+        log.recordExitReasons(activityManager, context.packageName)
+        log.load()
+        assertThat(log.pending.value).isNull()
+        assertThat(log.reports().map { it.headline }).containsExactly("EXCESSIVE_RESOURCE_USAGE", "SIGNALED", "LOW_MEMORY").inOrder()
+        assertThat(log.export()).contains("pss=878 MB")
+    }
+
+    @Test
+    fun `an older build's low-memory exit report is not offered after the update`() {
+        val dir = folder.newFolder("crash")
+        File(dir, "report-${now - 1_000}-exit.txt").writeText("Cursor for Android ended at 2027-01-15T08:00:00Z: LOW_MEMORY\nRead by 0.3.98\n")
+        val log = log(dir).also { it.load() }
+        assertThat(log.pending.value).isNull()
+        File(dir, "report-${now - 500}-exit.txt").writeText("Cursor for Android ended at 2027-01-15T08:00:00Z: ANR\nRead by 0.3.98\n")
+        assertThat(log(dir).also { it.load() }.pending.value!!.headline).isEqualTo("ANR")
+    }
+
+    @Test
+    fun `a run of system kills never pushes a real crash out`() {
+        val dir = folder.newFolder("crash")
+        log(dir).record("main", RuntimeException("real"))
+        val shadow: ShadowActivityManager = shadowOf(activityManager)
+        repeat(CrashLog.MAX_REPORTS + 2) { i -> shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_LOW_MEMORY, now + 60_000L * (i + 1), null)) }
+        now += 3_600_000
+        val log = log(dir)
+        log.recordExitReasons(activityManager, context.packageName)
+        log.load()
+        assertThat(log.reports().count { it.headline == "LOW_MEMORY" }).isEqualTo(CrashLog.MAX_KILLS)
+        assertThat(log.pending.value!!.headline).contains("real")
     }
 
     @Test
