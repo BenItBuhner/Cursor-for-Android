@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import kotlin.concurrent.thread
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
@@ -255,10 +256,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += listOf("-opt-in=kotlin.RequiresOptIn")
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -276,6 +273,15 @@ android {
         // (src/main, src/debug and src/test are all there is), so the vital pass proves nothing lintDebug does not, and
         // CI runs lintDebug on every change. It cost ten minutes of the build job and of every release cut.
         checkReleaseBuilds = false
+    }
+}
+
+// Kotlin 2.4 rejects the android.kotlinOptions DSL (jvmTarget / freeCompilerArgs). Same bytecode target and the
+// same RequiresOptIn opt-in, expressed on the compilerOptions DSL the plugin now requires.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+        optIn.add("kotlin.RequiresOptIn")
     }
 }
 
