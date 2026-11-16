@@ -656,6 +656,18 @@ object CursorIcons {
         }
     }
 
+    /** Lucide `audio-lines`: a voice chat with the agent, as distinct from [Mic]'s dictation. */
+    val Waveform: ImageVector by lazy {
+        icon("Waveform") {
+            path("M2 10v3")
+            path("M6 6v11")
+            path("M10 3v18")
+            path("M14 8v7")
+            path("M18 5v13")
+            path("M22 10v3")
+        }
+    }
+
     /** Lucide `volume-x`: the recording muted. */
     val VolumeOff: ImageVector by lazy {
         icon("VolumeOff") {
