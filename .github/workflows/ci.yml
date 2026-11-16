@@ -116,8 +116,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  # assembleRelease exercises R8 / resource shrinking on every change (lint's release-build pass is off, see `lint {}`
-  # in app/build.gradle.kts; the `lint` job covers it). Its own runner: R8 alone takes two and a half minutes there,
+  # assembleRelease exercises R8 / resource shrinking on every change, and lintVitalRelease with it (`checkReleaseBuilds`).
+  # Its own runner: R8 alone takes two and a half minutes there,
   # and beside the debug build the two Kotlin compiles slowed each other down. The signing secrets are never passed to
   # this job, so -Papp.allowUnsignedRelease=true opts in to the debug key; without it a release build fails outright.
   # The APK it produces is for verification only - it pins no certificate and cannot be published.
@@ -143,8 +143,13 @@ jobs:
           echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
           echo "suffix=-dev.${GITHUB_RUN_NUMBER}+g${short_sha}" >> "$GITHUB_OUTPUT"
 
-      - name: Build release APK with R8
-        run: ./gradlew :app:assembleRelease -Papp.allowUnsignedRelease=true -Papp.versionNameSuffix="${{ steps.stamp.outputs.suffix }}"
+      - name: Build release APK and AAB with R8
+        run: ./gradlew :app:assembleRelease :app:bundleRelease -Papp.allowUnsignedRelease=true -Papp.versionNameSuffix="${{ steps.stamp.outputs.suffix }}"
+
+      # Fails the job when either artifact is more than 5% larger than app/size-baseline.properties. The same suffix
+      # as the build above, so Gradle does not rebuild to compare.
+      - name: Check release payload budget
+        run: ./gradlew :app:checkReleasePayloadBudget -Papp.allowUnsignedRelease=true -Papp.versionNameSuffix="${{ steps.stamp.outputs.suffix }}"
 
       - name: Collect APK
         run: |
@@ -276,6 +281,24 @@ jobs:
           path: app/build/reports/test-stalls/
           if-no-files-found: ignore
 
+  # Default detekt rules, with app/detekt-baseline.xml holding every finding that already exists. A new finding fails
+  # this job, and `ci` below requires it. `./gradlew :app:detektBaseline` rewrites the baseline on purpose.
+  detekt:
+    name: Detekt
+    needs: proof
+    if: needs.proof.outputs.run == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+
+      - uses: ./.github/actions/android-toolchain
+
+      - name: Detekt
+        run: ./gradlew :app:detekt
+
   screenshots:
     name: Screenshot tests
     needs: proof
@@ -323,7 +346,7 @@ jobs:
   ci:
     name: CI
     if: ${{ !cancelled() }}
-    needs: [proof, build, release-build, lint, unit-tests, screenshots]
+    needs: [proof, build, release-build, lint, detekt, unit-tests, screenshots]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

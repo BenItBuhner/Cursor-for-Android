@@ -1,5 +1,12 @@
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.security.KeyStore
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.TaskAction
 import java.security.MessageDigest
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -16,6 +23,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.roborazzi)
+    alias(libs.plugins.detekt)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -268,12 +276,66 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
     lint {
-        // `assembleRelease` would otherwise run lintVitalRelease - a second analysis of the same sources for the
-        // fatal-only subset of what `lintDebug` already reports in full. There is no release-only source set to check
-        // (src/main, src/debug and src/test are all there is), so the vital pass proves nothing lintDebug does not, and
-        // CI runs lintDebug on every change. It cost ten minutes of the build job and of every release cut.
-        checkReleaseBuilds = false
+        // Release packaging runs lintVitalRelease, so a fatal issue fails the APK and the AAB instead of shipping.
+        // lintDebug (the Lint CI job) treats every warning as an error. Issues already in the baseline stay allowed;
+        // a new one fails the build until the baseline is regenerated on purpose (`./gradlew :app:updateLintBaseline`).
+        checkReleaseBuilds = true
+        warningsAsErrors = true
+        abortOnError = true
+        baseline = file("lint-baseline.xml")
     }
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    parallel = true
+    ignoreFailures = false
+    baseline = file("detekt-baseline.xml")
+}
+
+// The release APK and AAB CI already builds. A growth past 5% of the recorded sizes fails the release job, which the
+// aggregate CI check requires. Shrinks are allowed. Regenerate the numbers from a fresh unsigned release build when
+// a dependency or a resource change is meant to land larger. A task class, not a script lambda: the configuration
+// cache cannot store a closure that points back at this script.
+abstract class CheckReleasePayloadBudget : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val baselineFile: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val apkFile: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val aabFile: RegularFileProperty
+
+    @TaskAction
+    fun check() {
+        val props = Properties().apply { baselineFile.get().asFile.inputStream().use(::load) }
+        fun gate(label: String, artifact: File, key: String) {
+            val baseline = props.getProperty(key)?.trim()?.toLongOrNull()
+                ?: error("$key is missing from ${baselineFile.get().asFile.name}")
+            val actual = artifact.length()
+            require(actual > 0L) { "$label at ${artifact.path} is empty" }
+            val limit = baseline * 21 / 20
+            if (actual > limit) {
+                error("$label is $actual bytes; baseline $baseline allows at most $limit (5% over).")
+            }
+            println("$label $actual bytes is within 5% of baseline $baseline (limit $limit)")
+        }
+        gate("release APK", apkFile.get().asFile, "releaseApkBytes")
+        gate("release AAB", aabFile.get().asFile, "releaseAabBytes")
+    }
+}
+
+tasks.register<CheckReleasePayloadBudget>("checkReleasePayloadBudget") {
+    group = "verification"
+    description = "Fails if the release APK or AAB is more than 5% larger than size-baseline.properties."
+    dependsOn("assembleRelease", "bundleRelease")
+    baselineFile.set(layout.projectDirectory.file("size-baseline.properties"))
+    apkFile.set(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+    aabFile.set(layout.buildDirectory.file("outputs/bundle/release/app-release.aab"))
 }
 
 // Kotlin 2.4 rejects the android.kotlinOptions DSL (jvmTarget / freeCompilerArgs). Same bytecode target and the
