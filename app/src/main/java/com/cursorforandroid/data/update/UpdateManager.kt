@@ -7,6 +7,7 @@ import com.cursorforandroid.data.local.DiskSweep
 import com.cursorforandroid.data.local.JsonDiskCache
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.domain.AppRelease
+import com.cursorforandroid.domain.UpdateChannel
 import com.cursorforandroid.domain.UpdatePhase
 import com.cursorforandroid.domain.UpdateState
 import com.cursorforandroid.util.AppClock
@@ -48,6 +49,11 @@ data class CachedUpdateCheck(
     val etag: String?,
     val checkedAtMs: Long,
     val candidate: AppRelease?,
+    /**
+     * The [UpdateChannel.key] the decision was made for. A check on another channel cannot reuse it: its ETag would
+     * answer "unchanged" with a candidate chosen by the other channel's rule.
+     */
+    val channel: String = UpdateChannel.Stable.key,
 )
 
 /**
@@ -120,7 +126,7 @@ class UpdateCache(private val cache: JsonDiskCache) {
  * Keeps the app current from its GitHub releases.
  *
  * A check reads the repository's release list (conditionally, so a repeat costs nothing), maps every `vX.Y.Z` tag
- * to the version scheme the build uses and picks the newest stable release above the installed versionCode. The APK is downloaded to the cache directory and verified against the
+ * to the version scheme the build uses and picks the newest release on the chosen [UpdateChannel] (stable unless the user opted into alpha) above the installed versionCode. The APK is downloaded to the cache directory and verified against the
  * SHA-256 GitHub published for it (the asset digest, or `SHA256SUMS.txt`), then parsed to confirm it is this
  * package, newer, and signed with the installed build's key. Installing hands the file to `PackageInstaller`; the
  * outcome comes back through [onInstallStatus]. On Android 12+ the update applies without a dialog once "Install
@@ -149,6 +155,9 @@ class UpdateManager(
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
     val autoUpdate: Flow<Boolean> get() = prefs.autoUpdate
+
+    /** The release channel checks follow; Settings' Alpha updates switch. */
+    val channel: Flow<UpdateChannel> get() = prefs.updateChannel
 
     /** One network or install operation at a time. */
     private val busy = Mutex()
@@ -195,6 +204,17 @@ class UpdateManager(
     }
 
     suspend fun setAutoUpdate(enabled: Boolean) = prefs.setAutoUpdate(enabled)
+
+    /**
+     * Moves to [channel] and checks it at once, so the Settings row answers for the channel just picked: switching to
+     * alpha offers the newest pre-release, switching back drops one that was found (or downloaded) and offers the
+     * stable release above the installed build, if there is one. A session in the installer's hands is left alone.
+     */
+    fun setChannel(channel: UpdateChannel) = launchExclusive {
+        if (prefs.updateChannel.first() == channel) return@launchExclusive
+        prefs.setUpdateChannel(channel)
+        check()
+    }
 
     /**
      * Settings' "Confirm", for an install the system is waiting on the user for — or one a previous process left
@@ -255,28 +275,30 @@ class UpdateManager(
         ensureRestored()
         // A committed session is in the installer's hands; its state must not be overwritten by a list refresh.
         if (state.value is UpdateState.Installing) return state.value
-        val previous = cache.read()
+        val channel = prefs.updateChannel.first()
+        // A decision made for the other channel is no decision for this one, and its ETag is not reused either.
+        val reusable = cache.read()?.takeIf { UpdateChannel.parse(it.channel) == channel }
         _state.value = UpdateState.Checking
         try {
-            val etag = previous?.etag
+            val etag = reusable?.etag
             // Eligibility is only knowable after mapping, so the client keeps paging while this says no.
-            val fetch = client.listReleases(etag) { seen -> newestOf(seen) != null }
+            val fetch = client.listReleases(etag) { seen -> newestOf(seen, channel) != null }
             val checkedAt = now()
             val (candidate, newEtag) = when (fetch) {
-                GitHubReleasesClient.ReleasesFetch.Unchanged -> previous?.candidate to etag
-                is GitHubReleasesClient.ReleasesFetch.Changed -> newestOf(fetch.releases) to fetch.etag
+                GitHubReleasesClient.ReleasesFetch.Unchanged -> reusable?.candidate to etag
+                is GitHubReleasesClient.ReleasesFetch.Changed -> newestOf(fetch.releases, channel) to fetch.etag
             }
             // A candidate from a 304 was newer than the build that made the decision; it may not be newer than this one.
-            val offered = candidate?.takeIf { it.versionCode > platform.installedVersionCode }
-            cache.write(CachedUpdateCheck(newEtag, checkedAt, offered))
+            val offered = candidate?.takeIf { it.versionCode > platform.installedVersionCode && (channel.includesPreReleases || !it.isPreRelease) }
+            cache.write(CachedUpdateCheck(newEtag, checkedAt, offered, channel.key))
             prefs.setUpdateLastCheckedAt(checkedAt)
             pruneDownloads(keep = offered)
             _state.value = stateFor(offered, checkedAt)
         } catch (e: CancellationException) {
-            _state.value = previous?.let { stateFor(it.candidate, it.checkedAtMs) } ?: UpdateState.Idle
+            _state.value = reusable?.let { stateFor(it.candidate, it.checkedAtMs) } ?: UpdateState.Idle
             throw e
         } catch (t: Throwable) {
-            _state.value = UpdateState.Failed(UpdatePhase.Check, t.userMessage(), previous?.candidate)
+            _state.value = UpdateState.Failed(UpdatePhase.Check, t.userMessage(), reusable?.candidate)
         }
         return _state.value
     }
@@ -521,12 +543,15 @@ class UpdateManager(
             runCatching { platform.abandonSessions() }
         }
         val cached = cache.read() ?: return
-        val candidate = cached.candidate?.takeIf { it.versionCode > platform.installedVersionCode && !it.isPreRelease }
+        val channel = prefs.updateChannel.first()
+        val candidate = cached.candidate?.takeIf {
+            it.versionCode > platform.installedVersionCode && (channel.includesPreReleases || !it.isPreRelease)
+        }
         _state.value = stateFor(candidate, cached.checkedAtMs)
     }
 
-    private fun newestOf(releases: List<GitHubReleaseDto>): AppRelease? =
-        ReleaseCatalog.newest(releases.mapNotNull(ReleaseCatalog::toRelease), platform.installedVersionCode)
+    private fun newestOf(releases: List<GitHubReleaseDto>, channel: UpdateChannel): AppRelease? =
+        ReleaseCatalog.newest(releases.mapNotNull(ReleaseCatalog::toRelease), platform.installedVersionCode, channel)
 
     private suspend fun stateFor(candidate: AppRelease?, checkedAtMs: Long): UpdateState {
         if (candidate == null) return UpdateState.UpToDate(checkedAtMs)

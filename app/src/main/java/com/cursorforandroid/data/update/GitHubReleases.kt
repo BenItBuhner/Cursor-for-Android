@@ -6,6 +6,7 @@ import com.cursorforandroid.data.repo.parseIsoMillis
 import com.cursorforandroid.domain.AppRelease
 import com.cursorforandroid.domain.AppVersion
 import com.cursorforandroid.domain.ReleaseAsset
+import com.cursorforandroid.domain.UpdateChannel
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -84,12 +85,14 @@ object ReleaseCatalog {
     }
 
     /**
-     * The newest stable release the installed build should move to, or null when it is current. Pre-releases never
-     * count, whatever the installed build is; the comparison is by versionCode.
+     * The newest release the installed build should move to on [channel], or null when it is current. On the stable
+     * channel pre-releases never count, whatever the installed build is; on alpha every release does. The comparison
+     * is by versionCode either way, so an alpha build on the stable channel is offered the first stable release above
+     * it and nothing older.
      */
-    fun newest(releases: List<AppRelease>, installedVersionCode: Int): AppRelease? =
+    fun newest(releases: List<AppRelease>, installedVersionCode: Int, channel: UpdateChannel = UpdateChannel.Stable): AppRelease? =
         releases.asSequence()
-            .filter { !it.isPreRelease }
+            .filter { channel.includesPreReleases || !it.isPreRelease }
             .filter { it.versionCode > installedVersionCode }
             .maxWithOrNull(compareBy<AppRelease> { it.versionCode }.thenBy { it.publishedAtMs })
 
