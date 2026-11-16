@@ -1,5 +1,11 @@
 package com.cursorforandroid.ui.conversation
 
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Dp
+import com.cursorforandroid.ui.components.LocalGlass
+import com.cursorforandroid.ui.components.glassBand
+import com.cursorforandroid.ui.components.glassSource
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.animateDpAsState
@@ -484,6 +490,12 @@ fun ConversationScreen(
             }
         },
     ) {
+    // The transcript runs on under the composer and the cards docked over it, which show it through themselves,
+    // blurred (see Glass): the dock's height is the room the newest row keeps clear of it at rest.
+    val glass = remember { HazeState() }
+    var dockPx by remember { mutableIntStateOf(0) }
+    val dockHeight = with(LocalDensity.current) { dockPx.toDp() }
+    CompositionLocalProvider(LocalGlass provides glass) {
     Column(Modifier.fillMaxSize().background(colors.canvas)) {
         val touchHeight = CursorDimens.minTouchTarget
         // Where the header's buttons stand in the margin beside the transcript's column (a wide pane), the header gives
@@ -567,7 +579,7 @@ fun ConversationScreen(
         val jumpShown = !following && pastTwoItems && !composerExpansion.expanded
 
         val transcriptAreaPx = remember { mutableIntStateOf(0) }
-        Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { transcriptAreaPx.intValue = it.height }) {
+        Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { transcriptAreaPx.intValue = it.height }.extendBelow(dockPx).glassSource(glass)) {
             Box(Modifier.matchParentSize().readerBackdrop(readerScroll))
             val paneWidth = Modifier.widthIn(max = CursorDimens.composerMaxWidth).fillMaxWidth()
             // The column the rows are laid out in, measured whether or not there are any rows yet.
@@ -754,11 +766,16 @@ fun ConversationScreen(
                             .fillMaxWidth()
                             .align(Alignment.TopCenter)
                             .holdingHeight(openStretches, topDown = !following)
-                            .scrollEdgeFade(listState, reverseLayout = listReversed, surface = colors.canvas)
+                            // Only the top edge fades now: at the bottom the rows go on under the dock's glass.
+                            .scrollEdgeFade(
+                                clippedAtTop = if (listReversed) listState.canScrollForward else listState.canScrollBackward,
+                                clippedAtBottom = false,
+                                surface = colors.canvas,
+                            )
                             .readerScrolling(readerScroll)
                             .catchUpLift(catchUpPull, reach = TranscriptPadding)
                             .testTag("transcript"),
-                        contentPadding = catchUpPadding(catchUpPull, TranscriptPadding),
+                        contentPadding = catchUpPadding(catchUpPull, remember(dockHeight) { transcriptPadding(dockHeight) }),
                         verticalArrangement = Arrangement.spacedBy(TranscriptItemSpacing),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -787,7 +804,7 @@ fun ConversationScreen(
                 catchUpPull,
                 viewModel.catchUpStatus,
                 onSettled = viewModel::catchUpSettled,
-                modifier = Modifier.align(Alignment.BottomCenter),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = dockHeight),
                 edgeGap = TranscriptBottomPadding,
                 onRise = { snackbar.currentSnackbarData?.dismiss() },
             )
@@ -795,7 +812,7 @@ fun ConversationScreen(
             // A word up while the jump button is out sits above its row, never over it: the button stays the reader's to
             // tap (a catch-up's answer lands there as the reader flings back to the newest message). Read at layout.
             val snackbarLift = animateDpAsState(if (jumpShown) DockedRowHeight + DockGap else 0.dp, tween(160), label = "snackbar-lift")
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).offset { IntOffset(0, -snackbarLift.value.roundToPx()) }) { data ->
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = dockHeight).offset { IntOffset(0, -snackbarLift.value.roundToPx()) }) { data ->
                 Snackbar(snackbarData = data, containerColor = colors.elevated, contentColor = colors.textPrimary, shape = CursorTheme.shapes.lg)
             }
         }
@@ -831,6 +848,11 @@ fun ConversationScreen(
         // and keeps its newest turn on the composer through the change, being a bottom-anchored list. Every card in
         // the stack is a dockedCard: stood in from the box's sides so its corners are concentric with the box's, the
         // same gap between each, whether one is stacked or five.
+        Box(Modifier.fillMaxWidth().onSizeChanged { dockPx = it.height }) {
+        // The band the dock stands on: the transcript blurred and quieted from a little above the dock's top edge down
+        // to the window's, in place of the fade the rows used to dissolve into here.
+        val rise = with(LocalDensity.current) { DockBandRise.roundToPx() }
+        Box(Modifier.matchParentSize().extendAbove(rise).glassBand(rampFraction = rise.toFloat() / (rise + dockPx).coerceAtLeast(1)))
         Column(
             Modifier.fillMaxWidth().composerDockPadding().arrivalGlide(arrival),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1028,6 +1050,8 @@ fun ConversationScreen(
                 }
             }
         }
+        }
+    }
     }
     }
 
@@ -1109,6 +1133,29 @@ private val TranscriptBottomPadding = 12.dp
 
 /** The transcript list's padding at rest; the pull to catch up adds its reach under the rows (see catchUpPadding). */
 private val TranscriptPadding = PaddingValues(start = TranscriptGutter, end = TranscriptGutter, top = 6.dp, bottom = TranscriptBottomPadding)
+
+/** [TranscriptPadding] with the dock's [dock] height under the rows, which run on beneath it. */
+private fun transcriptPadding(dock: Dp): PaddingValues =
+    PaddingValues(start = TranscriptGutter, end = TranscriptGutter, top = 6.dp, bottom = TranscriptBottomPadding + dock)
+
+/** How far above the dock's top edge its blur begins, ramping up to full where the dock starts. */
+private val DockBandRise = 28.dp
+
+/** Lays the content out [px] taller than the space given, overflowing downward, and reports the space given. */
+internal fun Modifier.extendBelow(px: Int): Modifier = layout { measurable, constraints ->
+    if (px <= 0 || !constraints.hasBoundedHeight) {
+        val placeable = measurable.measure(constraints)
+        return@layout layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+    val placeable = measurable.measure(constraints.copy(minHeight = constraints.minHeight + px, maxHeight = constraints.maxHeight + px))
+    layout(placeable.width, (placeable.height - px).coerceAtLeast(0)) { placeable.place(0, 0) }
+}
+
+/** Lays the content out [px] taller than the space given, overflowing upward, and reports the space given. */
+internal fun Modifier.extendAbove(px: Int): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minHeight = constraints.minHeight + px, maxHeight = if (constraints.hasBoundedHeight) constraints.maxHeight + px else constraints.maxHeight))
+    layout(placeable.width, (placeable.height - px).coerceAtLeast(0)) { placeable.place(0, -px) }
+}
 
 /**
  * A load that did not go through: the server's words, Retry, and "Share diagnostics" — the redacted load block

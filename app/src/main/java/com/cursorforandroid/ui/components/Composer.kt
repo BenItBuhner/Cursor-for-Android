@@ -563,7 +563,8 @@ fun ComposerBox(
             .expandableHeight(expansion, expandRoom, collapsed = { collapsedEstimate(expansion, textLayout.get?.invoke()?.size?.height, minFieldPx) })
             // Unclipped: beside the bare mic, the main button's 40dp touch area runs past the box's rounded edge
             // (see FooterSpacing), and a clip would drop those touches. What scrolls inside clips itself.
-            .cursorSurface(colors.elevated, border, shape, clip = false)
+            // Glass over the transcript where the chat runs under its dock (LocalGlass); the opaque box elsewhere.
+            .glassSurface(colors.elevated, border, shape)
             .then(if (anchor != null) Modifier.onPlaced { anchor.surface = it } else Modifier)
             .padding(start = pad, end = pad, top = pad, bottom = pad - 2.dp),
     ) {
@@ -810,7 +811,8 @@ private fun ComposerTextField(
                     .onSizeChanged { if (expansion.progress.value == 0f) expansion.fieldPx = it.height }
                     // Painted, not dissolved: the field is resized every frame the composer expands or collapses,
                     // and the composer's own fill is flat behind it.
-                    .scrollEdgeFade(textScroll, surface = colors.elevated)
+                    // Over glass the field's edges dissolve into whatever shows through rather than paint a strip.
+                    .scrollEdgeFade(textScroll, surface = if (LocalGlass.current != null) Color.Unspecified else colors.elevated)
                     .onPhysicalKey(onPhysicalKey)
                     .expandKeys { event ->
                         val chord = event.type == KeyEventType.KeyDown && shortcutBindings.matches(

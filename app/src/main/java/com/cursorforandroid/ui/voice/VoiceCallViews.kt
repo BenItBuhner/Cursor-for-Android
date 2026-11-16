@@ -69,7 +69,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.Haptic
-import com.cursorforandroid.ui.components.cursorSurface
+import com.cursorforandroid.ui.components.glassSurface
 import com.cursorforandroid.ui.components.dockedCard
 import com.cursorforandroid.ui.components.findActivity
 import com.cursorforandroid.ui.components.openAppSettings
@@ -226,7 +226,7 @@ fun VoiceCallCard(state: VoiceChatState, elapsed: String, onTap: () -> Unit, onM
     Column(
         modifier
             .fillMaxWidth()
-            .cursorSurface(colors.elevated, colors.strokeSubtle, shape)
+            .glassSurface(colors.elevated, colors.strokeSubtle, shape)
             .testTag(VoiceChatTags.Card),
     ) {
         Column(
