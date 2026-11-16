@@ -149,6 +149,23 @@ data class ReleaseNotes(
     val lead: String? = null,
 )
 
+/**
+ * Which releases the updater follows. [Stable] offers only releases that are neither tagged nor published as a
+ * pre-release; [Alpha] offers the newest release of any kind, so an alpha build hops alpha to alpha and moves on to
+ * the stable release that follows it. Android cannot downgrade an install, so leaving Alpha does not go back: an alpha
+ * build on Stable waits for the first stable release above it (a "return to stable").
+ */
+enum class UpdateChannel(val key: String) {
+    Stable("stable"),
+    Alpha("alpha");
+
+    val includesPreReleases: Boolean get() = this == Alpha
+
+    companion object {
+        fun parse(raw: String?): UpdateChannel = entries.firstOrNull { it.key.equals(raw?.trim(), ignoreCase = true) } ?: Stable
+    }
+}
+
 /** Which step of an update went wrong; decides what "Retry" does. */
 enum class UpdatePhase { Check, Download, Install }
 
