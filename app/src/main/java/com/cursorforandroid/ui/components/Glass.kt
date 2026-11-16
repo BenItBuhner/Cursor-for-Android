@@ -48,19 +48,18 @@ fun Modifier.glassSurface(fill: Color, border: Color, shape: Shape): Modifier {
 }
 
 /**
- * The band the chat's bottom dock stands on: the content under it blurred, from nothing at the band's top edge to the
- * full [GlassBlur] where the dock begins ([rampFraction] of the way down) and beyond, with a canvas tint rising the
- * same way. It replaces the fade the transcript used to dissolve into above the composer: the rows go on under the
- * dock, softened rather than cut, and the gutters beside and below the composer are as quiet as the composer is.
+ * The band the chat's bottom dock stands on: the content under it blurred and quieted with a canvas tint. With [ramp],
+ * the blur fades in down the surface, from nothing at its top edge to full at its bottom (the strip over the dock's top
+ * edge); without, it is full throughout (under the dock). It replaces the fade the transcript used to dissolve into
+ * above the composer: the rows go on under the dock, softened rather than cut.
  */
 @Composable
-fun Modifier.glassBand(rampFraction: Float): Modifier {
+fun Modifier.glassBand(ramp: Boolean): Modifier {
     val state = LocalGlass.current ?: return this
     val canvas = CursorTheme.colors.canvas
-    val ramp = rampFraction.coerceIn(0.05f, 1f)
     return hazeChild(state) {
         style = HazeStyle(backgroundColor = canvas, tint = HazeTint(canvas.copy(alpha = 0.55f)), blurRadius = GlassBlur, noiseFactor = 0f)
-        // The blurred, tinted copy fades in down the band: a progressive blur by its mask, the same on every API level.
-        mask = Brush.verticalGradient(0f to Color.Transparent, ramp to Color.Black, 1f to Color.Black)
+        // A progressive blur by its mask, the same on every API level.
+        if (ramp) mask = Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black)
     }
 }

@@ -153,7 +153,12 @@ class ToolDropdownScrollFlickerTest {
 
     private val transcript: SemanticsMatcher get() = hasScrollToIndexAction()
 
-    private fun listBounds(): Rect = compose.onNode(transcript).fetchSemanticsNode().boundsInRoot
+    /** The transcript's visible part: the list runs on under the bottom dock, whose glass blurs what is beneath it. */
+    private fun listBounds(): Rect {
+        val list = compose.onNode(transcript).fetchSemanticsNode().boundsInRoot
+        val dock = compose.onNode(hasTestTag(DOCK_TAG)).fetchSemanticsNode().boundsInRoot
+        return list.copy(bottom = minOf(list.bottom, dock.top))
+    }
 
     private fun summary(text: String): SemanticsNode =
         compose.onAllNodes(hasAnyAncestor(transcript) and hasText(text, substring = false), useUnmergedTree = true).fetchSemanticsNodes().single()
@@ -216,6 +221,12 @@ class ToolDropdownScrollFlickerTest {
         return worst.values.sortedBy { it.ratio }
     }
 
+    /** A swipe up from just above the dock: the visible transcript's, not the glass the list runs on beneath. */
+    private fun swipeToNewest() {
+        val visibleHeight = listBounds().height
+        compose.onNode(transcript).performTouchInput { swipeUp(startY = visibleHeight - 200f, endY = top + 40f, durationMillis = 120) }
+    }
+
     private fun scrollBy(dy: Float) {
         compose.onNode(transcript).performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, dy) }
     }
@@ -226,7 +237,7 @@ class ToolDropdownScrollFlickerTest {
         compose.onNode(SemanticsMatcher("node") { it.id == summary(STRETCH).id }, useUnmergedTree = true).performClick()
         compose.waitForIdle()
         // Back at the bottom: following, the open stretch's steps above the newest turn.
-        repeat(6) { compose.onNode(transcript).performTouchInput { swipeUp(startY = bottom - 200f, endY = top + 40f, durationMillis = 120) } }
+        repeat(6) { swipeToNewest() }
         compose.waitForIdle()
         compose.mainClock.advanceTimeBy(1_000)
         compose.waitForIdle()
@@ -268,9 +279,12 @@ class ToolDropdownScrollFlickerTest {
         compose.onNode(SemanticsMatcher("node") { it.id == summary("150 files").id }, useUnmergedTree = true).performClick()
         compose.waitForIdle()
         repeat(40) { if (runCatching { summary(STRETCH) }.isFailure) { scrollBy(SCROLL_PX * 4); compose.waitForIdle() } }
+        // Composed is not tappable: under the dock the tap would land on the composer. Bring it up above the dock.
+        val under = summary(STRETCH).boundsInRoot.bottom - (listBounds().bottom - 40f)
+        if (under > 0f) { scrollBy(under); compose.waitForIdle() }
         compose.onNode(SemanticsMatcher("node") { it.id == summary(STRETCH).id }, useUnmergedTree = true).performClick()
         compose.waitForIdle()
-        repeat(6) { compose.onNode(transcript).performTouchInput { swipeUp(startY = bottom - 200f, endY = top + 40f, durationMillis = 120) } }
+        repeat(6) { swipeToNewest() }
         compose.waitForIdle()
         compose.mainClock.advanceTimeBy(1_000)
         compose.waitForIdle()
