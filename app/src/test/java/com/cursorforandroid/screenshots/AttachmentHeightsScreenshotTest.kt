@@ -149,7 +149,9 @@ class AttachmentHeightsScreenshotTest {
                 }
             }
         }
-        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Attached image").fetchSemanticsNodes().isNotEmpty() }
+        // Two: the pasted one in the composer is there at once; the sent prompt's picture decodes from disk off the main
+        // thread, and waiting on "any" let a slow runner draw its placeholder instead.
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Attached image").fetchSemanticsNodes().size >= 2 }
         compose.waitForIdle()
         compose.onNodeWithTag("scene").captureRoboImage(File(outDir, "$name.png").path, RoborazziOptions())
     }
