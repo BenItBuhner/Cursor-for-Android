@@ -110,7 +110,7 @@ sealed interface VoiceState {
 }
 
 /** What the composer's send slot holds. */
-enum class SendSlot { CancelSend, Busy, Stop, Send, Mic }
+enum class SendSlot { CancelSend, Busy, Stop, Send, Mic, VoiceChat }
 
 /** The send slot, and whether the microphone sits just left of it. */
 data class ComposerButtons(val main: SendSlot, val micBeside: Boolean)
@@ -120,6 +120,9 @@ data class ComposerButtons(val main: SendSlot, val micBeside: Boolean)
  * microphone joins whatever the slot holds: beside Send while there is something to send, beside Stop while the agent
  * runs, and — with nothing typed or attached and nothing running — the white disc itself is the microphone, so an
  * empty composer offers one main action instead of a Send that cannot be pressed. A prompt in flight has no microphone.
+ *
+ * With a voice chat on offer ([voiceChat]), an empty composer over an idle agent holds Cursor's waveform button,
+ * "Start voice chat", in that slot instead, with the microphone for dictation beside it — where Cursor puts both.
  */
 fun composerButtons(
     isSending: Boolean,
@@ -128,10 +131,12 @@ fun composerButtons(
     canSend: Boolean,
     hasContent: Boolean,
     voice: Boolean,
+    voiceChat: Boolean = false,
 ): ComposerButtons = when {
     isSending && cancelOffered -> ComposerButtons(SendSlot.CancelSend, micBeside = false)
     isSending -> ComposerButtons(SendSlot.Busy, micBeside = false)
     canStop && !canSend -> ComposerButtons(SendSlot.Stop, micBeside = voice)
+    voiceChat && !canStop && !hasContent && !canSend -> ComposerButtons(SendSlot.VoiceChat, micBeside = voice)
     voice && !hasContent && !canSend -> ComposerButtons(SendSlot.Mic, micBeside = false)
     else -> ComposerButtons(SendSlot.Send, micBeside = voice)
 }

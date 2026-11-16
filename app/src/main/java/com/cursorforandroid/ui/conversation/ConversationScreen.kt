@@ -139,9 +139,10 @@ import com.cursorforandroid.ui.panel.rememberPanelTabStates
 import com.cursorforandroid.ui.panel.rememberSidePanelState
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
-import com.cursorforandroid.ui.voice.VoiceChatBar
-import com.cursorforandroid.ui.voice.VoiceChatCopy
-import com.cursorforandroid.ui.voice.rememberVoiceChat
+import com.cursorforandroid.ui.voice.VoiceCallCard
+import com.cursorforandroid.ui.voice.VoiceCallHaptics
+import com.cursorforandroid.ui.voice.VoiceCallStrip
+import com.cursorforandroid.ui.voice.rememberVoiceCallStarter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -331,25 +332,21 @@ fun ConversationScreen(
     val pickFiles = rememberFilePicker(counts = counts, onPickedFiles = viewModel::addFiles, onError = viewModel::showMessage)
     val plusMenu = rememberComposerMenuActions(graph, onPickMedia = pickMedia, onPickFiles = if (extendedFiles) pickFiles else null)
     val voice = rememberComposerVoice(graph)
-    // A hands-free conversation with this chat's agent (see [VoiceChat]), wherever the composer can dictate: what is
-    // heard goes out as a follow-up of its own, around whatever stands typed in the composer, which is put back.
-    val voiceChat = rememberVoiceChat(voice?.let { graph.transcription }) { words ->
-        val typed = viewModel.draftText.value
-        viewModel.setDraft(words)
-        val went = viewModel.submit() != null
-        viewModel.setDraft(typed)
-        went
-    }
-    val voiceChatOn = voiceChat?.first?.state?.collectAsStateWithLifecycle()?.value?.active == true
-    if (voiceChat != null) {
-        LaunchedEffect(voiceChat.first) {
-            snapshotFlow {
-                val presented = presentedState.value
-                val reply = presented.items.lastOrNull { it is AssistantMessage } as? AssistantMessage
-                Triple(presented.state.let { it.runStatus?.isActive == true || it.isStreaming }, reply?.id, reply?.markdown)
-            }.collect { (running, id, markdown) -> voiceChat.first.agent(running, id, markdown) }
-        }
-    }
+    // A hands-free conversation with this chat's agent (see [VoiceCalls]), wherever the composer can dictate: the
+    // app's, not this screen's, so it goes on with the screen off, in the background and while another chat is read.
+    // What is heard goes out through this chat's view model, which hosts the call while it lives.
+    val voiceCalls = graph.voiceCalls
+    val callLine by voiceCalls.line.collectAsStateWithLifecycle()
+    val callState by voiceCalls.state.collectAsStateWithLifecycle()
+    val voiceChatOn = callLine?.agentId == agentId && callState.active
+    val callElsewhere = callLine != null && callLine?.agentId != agentId
+    VoiceCallHaptics(voiceCalls)
+    val callTitle = agent?.name.orEmpty()
+    LaunchedEffect(callTitle, voiceChatOn) { if (voiceChatOn) voiceCalls.title(agentId, callTitle) }
+    val startVoiceChat = if (voice == null) null else rememberVoiceCallStarter(
+        start = { viewModel.startVoiceCall(callTitle) },
+        denied = { permanently -> viewModel.voiceCallPermissionDenied(callTitle, permanently) },
+    )
     val share by graph.share.offer.collectAsStateWithLifecycle()
     LaunchedEffect(share?.generation, share?.target) {
         val incoming = share ?: return@LaunchedEffect
@@ -542,10 +539,6 @@ fun ConversationScreen(
                         if (canOpenDesktop) {
                             CursorMenuItem("View desktop", CursorIcons.Eye) { menuOpen = false; panelActions.openDesktop(viewOnly = true) }
                             CursorMenuItem("Take control of desktop", CursorIcons.Desktop) { menuOpen = false; panelActions.openDesktop(viewOnly = false) }
-                        }
-                        // Talk to the agent instead of typing to it; an archived chat takes no follow-ups, spoken or typed.
-                        if (voiceChat != null && !voiceChatOn && agent?.isArchived != true) {
-                            CursorMenuItem(VoiceChatCopy.Start, CursorIcons.Waveform) { menuOpen = false; voiceChat.second() }
                         }
                         if (isActive) CursorMenuItem("Stop", CursorIcons.Stop) { menuOpen = false; stopConfirmation.ask(RunInterruption.Stop, agentId, viewModel::cancelRun) }
                         if (agent?.isArchived != true) {
@@ -1013,13 +1006,23 @@ fun ConversationScreen(
                         focusRequests = composerFocusRequests,
                         // An archived chat takes no follow-ups, so there is nothing to dictate into.
                         voice = voice.takeUnless { archived },
+                        // Cursor's waveform button in the Send slot; an archived chat takes no follow-ups, spoken or typed.
+                        onStartVoiceChat = startVoiceChat.takeUnless { archived },
                         expansion = composerExpansion,
                         modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).testTag("follow-up-composer"),
                     )
                 }
-                // A voice chat stands where the composer does and gives the place back when it ends.
-                if (voiceChatOn && voiceChat != null) {
-                    VoiceChatBar(voiceChat.first, Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn))
+                // A call with another chat docks over this one's composer, leading back to it.
+                if (callElsewhere) {
+                    VoiceCallStrip(
+                        voiceCalls,
+                        onOpen = { id -> onOpenAgent?.invoke(id) },
+                        modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).padding(bottom = 4.dp),
+                    )
+                }
+                // A voice chat stands where the composer does, in the composer's own box, and gives the place back when it ends.
+                if (voiceChatOn) {
+                    VoiceCallCard(voiceCalls, Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn))
                 } else {
                     followUpComposer()
                 }

@@ -668,6 +668,27 @@ object CursorIcons {
         }
     }
 
+    /** Lucide `mic-off`: a voice chat's microphone muted. */
+    val MicOff: ImageVector by lazy {
+        icon("MicOff") {
+            path("M12 19v3")
+            path("M15 9.34V5a3 3 0 0 0-5.68-1.33")
+            path("M16.95 16.95A7 7 0 0 1 5 12v-2")
+            path("M18.89 13.23A7 7 0 0 0 19 12v-2")
+            path("M2 2l20 20")
+            path("M9 9v3a3 3 0 0 0 5.12 2.12")
+        }
+    }
+
+    /** Lucide `phone-off`: hanging up a voice chat. */
+    val PhoneOff: ImageVector by lazy {
+        icon("PhoneOff") {
+            path("M10.1 13.9a14 14 0 0 0 3.732 2.668 1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2 18 18 0 0 1-12.728-5.272")
+            path("M22 2 2 22")
+            path("M4.76 13.582A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 .244.473")
+        }
+    }
+
     /** Lucide `volume-x`: the recording muted. */
     val VolumeOff: ImageVector by lazy {
         icon("VolumeOff") {
