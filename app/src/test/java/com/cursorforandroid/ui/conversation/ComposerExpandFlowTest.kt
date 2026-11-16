@@ -121,6 +121,13 @@ class ComposerExpandFlowTest {
 
     private fun dp(px: Float) = px / density
 
+    /** The transcript's height above the dock: the list itself runs on beneath the dock's glass. */
+    private fun visibleTranscriptHeight(): Float {
+        val list = bounds(hasTestTag("transcript"))
+        val dock = bounds(hasTestTag(DOCK_TAG))
+        return (minOf(list.bottom, dock.top) - list.top).coerceAtLeast(0f)
+    }
+
     private fun bounds(matcher: SemanticsMatcher): Rect = compose.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().first().boundsInRoot
 
     private fun rootHeight() = compose.onRoot().fetchSemanticsNode().boundsInRoot.height
@@ -274,7 +281,7 @@ class ComposerExpandFlowTest {
         assertWithMessage("$label: above the keyboard's edge").that(expanded.bottom).isAtMost(keyboardTop.toFloat())
         assertWithMessage("$label: up to just under the header").that(dp(expanded.top - transcript.top)).isAtMost(12f)
         assertWithMessage("$label: far taller than collapsed").that(expanded.height).isGreaterThan(collapsed.height * 1.3f)
-        assertWithMessage("$label: the transcript squeezed out behind it").that(dp(bounds(hasTestTag("transcript")).height)).isAtMost(12f)
+        assertWithMessage("$label: the transcript squeezed out behind it").that(dp(visibleTranscriptHeight())).isAtMost(12f)
         assertThat(named(COMPOSER, "Collapse composer")).isTrue()
 
         // Edited where it was left: a line put on the end.

@@ -225,7 +225,12 @@ class TranscriptScrollPinningTest {
 
     private val transcript: SemanticsMatcher get() = hasScrollToIndexAction()
 
-    private fun listBounds(): Rect = compose.onNode(transcript).fetchSemanticsNode().boundsInRoot
+    /** The transcript's visible part: the list runs on under the bottom dock, whose glass blurs what is beneath it. */
+    private fun listBounds(): Rect {
+        val list = compose.onNode(transcript).fetchSemanticsNode().boundsInRoot
+        val dock = compose.onAllNodes(hasTestTag(DOCK_TAG)).fetchSemanticsNodes().firstOrNull()?.boundsInRoot ?: return list
+        return list.copy(bottom = minOf(list.bottom, dock.top))
+    }
 
     private data class Seen(val id: Int, val text: String, val top: Float, val height: Int)
 
@@ -300,12 +305,14 @@ class TranscriptScrollPinningTest {
 
     /** A finger drawn down the list, clear of the jump button at the bottom's centre. */
     private fun swipeToOlder() {
-        compose.onNode(transcript).performTouchInput { swipe(Offset(left + 80f, top + 40f), Offset(left + 80f, bottom - 200f), durationMillis = 600) }
+        val visibleHeight = listBounds().height
+        compose.onNode(transcript).performTouchInput { swipe(Offset(left + 80f, top + 40f), Offset(left + 80f, visibleHeight - 200f), durationMillis = 600) }
         compose.waitForIdle()
     }
 
     private fun flingToNewest() {
-        repeat(6) { compose.onNode(transcript).performTouchInput { swipeUp(startY = bottom - 200f, endY = top + 40f, durationMillis = 120) } }
+        val visibleHeight = listBounds().height
+        repeat(6) { compose.onNode(transcript).performTouchInput { swipeUp(startY = visibleHeight - 200f, endY = top + 40f, durationMillis = 120) } }
         compose.waitForIdle()
     }
 
