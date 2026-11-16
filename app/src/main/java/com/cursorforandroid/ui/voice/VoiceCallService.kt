@@ -10,7 +10,6 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -71,7 +70,8 @@ class VoiceCallService : Service() {
                         ServiceCompat.stopForeground(this@VoiceCallService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     } else {
-                        runCatching { NotificationManagerCompat.from(this@VoiceCallService).notify(NOTIFICATION_ID, notification(l, calls.state.value)) }
+                        // Updating the service's own foreground notification needs no notification permission.
+                        runCatching { getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification(l, calls.state.value)) }
                     }
                 }
             }
