@@ -65,7 +65,7 @@ class VoiceCallService : Service() {
             val watch = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
             scope = watch
             watch.launch {
-                combine(calls.line, calls.state) { l, s -> l to VoiceChatCopy.status(s) }.distinctUntilChanged().collect { (l, _) ->
+                combine(calls.line, calls.state) { l, s -> Triple(l, VoiceChatCopy.status(s), s.muted) }.distinctUntilChanged().collect { (l, _, _) ->
                     if (l == null) {
                         ServiceCompat.stopForeground(this@VoiceCallService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                         stopSelf()
@@ -89,7 +89,7 @@ class VoiceCallService : Service() {
     private fun notification(line: VoiceCalls.Line, state: VoiceChatState): android.app.Notification {
         val caller = Person.Builder().setName(line.title).setImportant(true).build()
         val hangUp = action(ACTION_END, 1)
-        val muted = state.phase == VoiceChatPhase.Muted
+        val muted = state.muted
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_agent)
             .setContentTitle(line.title)

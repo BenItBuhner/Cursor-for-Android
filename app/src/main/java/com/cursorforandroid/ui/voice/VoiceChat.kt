@@ -3,6 +3,8 @@ package com.cursorforandroid.ui.voice
 import com.cursorforandroid.data.api.TranscriptionApi
 import com.cursorforandroid.data.media.AudioCapture
 import com.cursorforandroid.data.media.Speaker
+import com.cursorforandroid.data.media.SpeakerVoice
+import com.cursorforandroid.data.media.SpeechStyle
 import com.cursorforandroid.domain.SpokenText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -45,11 +47,20 @@ sealed interface VoiceChatPhase {
     data class Failed(val message: String, val resumes: Boolean = false, val opensSettings: Boolean = false) : VoiceChatPhase
 }
 
-/** A voice chat as the screen draws it: its [phase], the microphone's [level] (0 to 1) while it is open, and what was last heard. */
+/** One turn of a call's transcript: what [fromUser] said, or what the agent's reply read aloud. */
+data class VoiceTurn(val fromUser: Boolean, val text: String)
+
+/**
+ * A voice chat as the screen draws it: its [phase], the microphone's [level] (0 to 1) while it is open, what was last
+ * heard, whether the microphone is [muted] (Cursor's Mute: the call goes on, the agent still works and answers, and
+ * nothing is heard until it is unmuted), and the call's [turns] so far, for its transcript.
+ */
 data class VoiceChatState(
     val phase: VoiceChatPhase = VoiceChatPhase.Off,
     val level: Float = 0f,
     val lastSaid: String? = null,
+    val muted: Boolean = false,
+    val turns: List<VoiceTurn> = emptyList(),
 ) {
     val active: Boolean get() = phase != VoiceChatPhase.Off
 }
@@ -79,6 +90,15 @@ class VoiceChat(
     private val errorMessage: (Throwable) -> String,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
+    /** The language the call is held in (a BCP-47 tag), or null to let transcription tell. */
+    var language: String? = null
+
+    /** How the agent's replies are read out; told to the voice before each. */
+    fun style(style: SpeechStyle) = speaker.style(style)
+
+    /** The voices the device's engine offers for [language]; empty until it is ready. */
+    fun voices(language: String?): List<SpeakerVoice> = speaker.voices(language)
+
     private val _state = MutableStateFlow(VoiceChatState())
     val state: StateFlow<VoiceChatState> = _state.asStateFlow()
 
@@ -100,6 +120,7 @@ class VoiceChat(
     fun start() {
         if (_state.value.active) return
         _state.value = VoiceChatState()
+        speaker.prepare()
         listen()
     }
 
@@ -123,21 +144,31 @@ class VoiceChat(
     fun tap() {
         when (val now = phase) {
             is VoiceChatPhase.Listening -> if (now.heard) finish()
-            is VoiceChatPhase.Speaking, VoiceChatPhase.Muted -> listen()
+            is VoiceChatPhase.Speaking -> listen()
+            VoiceChatPhase.Muted -> toggleMute()
             is VoiceChatPhase.Failed -> if (!now.opensSettings) listen()
             VoiceChatPhase.Off, VoiceChatPhase.Transcribing, is VoiceChatPhase.Working -> Unit
         }
     }
 
-    /** Puts a listening call on hold, or takes it off; nothing while the agent works or speaks, which hold nothing open. */
+    /**
+     * Mutes the microphone, or unmutes it. Listening, the microphone closes and the call waits muted; unmuted there, it
+     * listens again. While the agent works or speaks the call carries on, and when its turn would come back to the
+     * microphone it waits muted instead.
+     */
     fun toggleMute() {
         when (phase) {
             is VoiceChatPhase.Listening -> {
                 leave()
+                _state.update { it.copy(muted = true) }
                 enter(VoiceChatPhase.Muted)
             }
-            VoiceChatPhase.Muted -> listen()
-            else -> Unit
+            VoiceChatPhase.Muted -> {
+                _state.update { it.copy(muted = false) }
+                listen()
+            }
+            VoiceChatPhase.Off, is VoiceChatPhase.Failed -> Unit
+            else -> _state.update { it.copy(muted = !it.muted) }
         }
     }
 
@@ -173,6 +204,10 @@ class VoiceChat(
 
     private fun listen() {
         leave()
+        if (_state.value.muted) {
+            enter(VoiceChatPhase.Muted)
+            return
+        }
         val next = newCapture()
         try {
             next.start()
@@ -247,7 +282,7 @@ class VoiceChat(
                     if (turn == entered) listen()
                     return@launch
                 }
-                val words = transcription.transcribe(clip.audio, clip.mimeType, language = null).text.trim()
+                val words = transcription.transcribe(clip.audio, clip.mimeType, language = language).text.trim()
                 if (turn != entered) return@launch
                 when {
                     words.isEmpty() -> listen()
@@ -255,7 +290,7 @@ class VoiceChat(
                     else -> {
                         replyAtSend = latestReplyId
                         sawRunning = false
-                        _state.update { it.copy(lastSaid = words) }
+                        _state.update { it.copy(lastSaid = words, turns = it.turns + VoiceTurn(fromUser = true, text = words)) }
                         if (send(words)) enter(VoiceChatPhase.Working(words))
                         else enter(VoiceChatPhase.Failed("That didn't send. Tap to try again."))
                     }
@@ -275,6 +310,7 @@ class VoiceChat(
             listen()
             return
         }
+        _state.update { it.copy(turns = it.turns + VoiceTurn(fromUser = false, text = text)) }
         enter(VoiceChatPhase.Speaking(text))
         val turn = entered
         // Said or not (no engine on this device), the reply is in the chat; the call carries on either way.

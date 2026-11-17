@@ -563,8 +563,7 @@ fun ComposerBox(
             .expandableHeight(expansion, expandRoom, collapsed = { collapsedEstimate(expansion, textLayout.get?.invoke()?.size?.height, minFieldPx) })
             // Unclipped: beside the bare mic, the main button's 40dp touch area runs past the box's rounded edge
             // (see FooterSpacing), and a clip would drop those touches. What scrolls inside clips itself.
-            // Glass over the transcript where the chat runs under its dock (LocalGlass); the opaque box elsewhere.
-            .glassSurface(colors.elevated, border, shape)
+            .cursorSurface(colors.elevated, border, shape, clip = false)
             .then(if (anchor != null) Modifier.onPlaced { anchor.surface = it } else Modifier)
             .padding(start = pad, end = pad, top = pad, bottom = pad - 2.dp),
     ) {
@@ -811,8 +810,7 @@ private fun ComposerTextField(
                     .onSizeChanged { if (expansion.progress.value == 0f) expansion.fieldPx = it.height }
                     // Painted, not dissolved: the field is resized every frame the composer expands or collapses,
                     // and the composer's own fill is flat behind it.
-                    // Over glass the field's edges dissolve into whatever shows through rather than paint a strip.
-                    .scrollEdgeFade(textScroll, surface = if (LocalGlass.current != null) Color.Unspecified else colors.elevated)
+                    .scrollEdgeFade(textScroll, surface = colors.elevated)
                     .onPhysicalKey(onPhysicalKey)
                     .expandKeys { event ->
                         val chord = event.type == KeyEventType.KeyDown && shortcutBindings.matches(
@@ -1010,7 +1008,7 @@ private fun ComposerMainButton(face: MainFace, voice: VoiceInput?, touchShift: D
                         MainGlyph.Send -> Icon(CursorIcons.ArrowUp, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph))
                         MainGlyph.Stop -> Icon(CursorIcons.Stop, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph))
                         MainGlyph.Mic -> Icon(CursorIcons.Mic, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph))
-                        MainGlyph.Waveform -> Icon(CursorIcons.Waveform, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph - 1.dp))
+                        MainGlyph.Waveform -> Icon(CursorIcons.CallWaveform, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph - 1.dp))
                         MainGlyph.Spinner -> SpinnerRing(color = tint, size = CursorDimens.roundButtonGlyph, strokeWidth = 1.5.dp)
                     }
                 }

@@ -286,6 +286,36 @@ class VoiceChatTest {
     }
 
     @Test
+    fun `muted while the agent works, the reply is still read and the call waits muted, with every turn kept`() = runTest {
+        val h = Harness(this)
+        h.scripts += Utterance
+        h.heard += "Run the tests again"
+        h.chat.start()
+        advanceTimeBy(4 * Tick + UtteranceMillis)
+        runCurrent()
+        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Working::class.java)
+
+        h.chat.toggleMute()
+        assertThat(h.chat.state.value.muted).isTrue()
+        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Working::class.java)
+
+        h.chat.agent(running = true, replyId = "a2", markdown = "All")
+        h.chat.agent(running = false, replyId = "a2", markdown = "All tests pass.")
+        assertThat(h.speaker.spoken).containsExactly("All tests pass.")
+        h.speaker.finish()
+        assertThat(h.phase).isEqualTo(VoiceChatPhase.Muted)
+        assertThat(h.mics).hasSize(1)
+        assertThat(h.chat.state.value.turns).containsExactly(
+            VoiceTurn(fromUser = true, text = "Run the tests again"),
+            VoiceTurn(fromUser = false, text = "All tests pass."),
+        ).inOrder()
+
+        h.chat.toggleMute()
+        assertThat(h.chat.state.value.muted).isFalse()
+        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
+    }
+
+    @Test
     fun `a quiet room restarts the clip and, after ten minutes, ends the call`() = runTest {
         val h = Harness(this)
         h.chat.start()

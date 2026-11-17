@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -18,7 +19,25 @@ interface Speaker {
     fun speak(text: String, onDone: (spoken: Boolean) -> Unit)
     fun stop()
     fun release()
+
+    /** How what is said from now on sounds. */
+    fun style(style: SpeechStyle) = Unit
+
+    /** Gets the engine ready ahead of the first [speak], so [voices] can answer. */
+    fun prepare() = Unit
+
+    /** The voices the engine offers for [language] (a BCP-47 tag; null for the device's), best first. */
+    fun voices(language: String?): List<SpeakerVoice> = emptyList()
 }
+
+/**
+ * How a [Speaker] speaks: [rate] (1 is normal), [language] (a BCP-47 tag, null for the device's) and [voice] (one of
+ * [Speaker.voices] by its id, null for the language's default).
+ */
+data class SpeechStyle(val rate: Float = 1f, val language: String? = null, val voice: String? = null)
+
+/** A voice an engine offers: [id] to choose it by, [label] to show it as. */
+data class SpeakerVoice(val id: String, val label: String)
 
 /**
  * [Speaker] on the device's own text-to-speech engine: nothing leaves the phone to be spoken, and it works on any
@@ -36,6 +55,8 @@ class TextToSpeechSpeaker(context: Context) : Speaker {
     private var pending: Pair<String, (Boolean) -> Unit>? = null
     /** The utterance whose end is still awaited, and who awaits it. */
     private var current: Pair<String, (Boolean) -> Unit>? = null
+    private var style = SpeechStyle()
+    private var applied: SpeechStyle? = null
 
     override fun speak(text: String, onDone: (Boolean) -> Unit) {
         stop()
@@ -81,7 +102,44 @@ class TextToSpeechSpeaker(context: Context) : Speaker {
         waiting?.let { (text, onDone) -> say(tts, text, onDone) }
     }
 
+    override fun style(style: SpeechStyle) {
+        this.style = style
+    }
+
+    override fun prepare() {
+        if (engine != null || failed) return
+        engine = TextToSpeech(appContext) { status -> main.post { onEngineBound(status) } }
+    }
+
+    override fun voices(language: String?): List<SpeakerVoice> {
+        val tts = engine?.takeIf { ready } ?: return emptyList()
+        val wanted = language?.let(Locale::forLanguageTag) ?: Locale.getDefault()
+        val all = runCatching { tts.voices.orEmpty() }.getOrDefault(emptySet())
+            .filter { it.locale.language == wanted.language && !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+            .sortedWith(compareBy({ it.isNetworkConnectionRequired }, { it.locale.country != wanted.country }, { -it.quality }, { it.name }))
+        return all.mapIndexed { i, v ->
+            val region = v.locale.getDisplayCountry(Locale.getDefault()).ifBlank { v.locale.getDisplayLanguage(Locale.getDefault()) }
+            SpeakerVoice(v.name, "Voice ${i + 1} · $region" + if (v.isNetworkConnectionRequired) " · online" else "")
+        }
+    }
+
+    /** Puts [style] on the engine when it changed since it was last put there. */
+    private fun apply(tts: TextToSpeech) {
+        val want = style
+        if (want == applied) return
+        applied = want
+        runCatching { tts.setSpeechRate(want.rate) }
+        val locale = want.language?.let(Locale::forLanguageTag)
+        val voice = want.voice?.let { name -> runCatching { tts.voices.orEmpty().firstOrNull { it.name == name } }.getOrNull() }
+        when {
+            voice != null -> runCatching { tts.voice = voice }
+            locale != null -> runCatching { tts.setLanguage(locale) }
+            else -> runCatching { tts.setLanguage(Locale.getDefault()) }
+        }
+    }
+
     private fun say(tts: TextToSpeech, text: String, onDone: (Boolean) -> Unit) {
+        apply(tts)
         val id = "voice-chat-${ids.incrementAndGet()}"
         current = id to onDone
         val queued = runCatching { tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), id) }.getOrDefault(TextToSpeech.ERROR)

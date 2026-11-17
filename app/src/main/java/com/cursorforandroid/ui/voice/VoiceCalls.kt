@@ -6,6 +6,8 @@ import com.cursorforandroid.data.api.TranscriptionApi
 import com.cursorforandroid.data.media.AudioCapture
 import com.cursorforandroid.data.media.MediaRecorderCapture
 import com.cursorforandroid.data.media.Speaker
+import com.cursorforandroid.data.media.SpeakerVoice
+import com.cursorforandroid.data.media.SpeechStyle
 import com.cursorforandroid.data.media.TextToSpeechSpeaker
 import com.cursorforandroid.ui.components.VoiceInput
 import kotlinx.coroutines.CoroutineScope
@@ -16,6 +18,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -33,6 +36,8 @@ class VoiceCalls(
     /** Called with true when a call starts and false when it ends, for the foreground service. */
     private val onLive: (Boolean) -> Unit = {},
     private val clock: () -> Long = SystemClock::elapsedRealtime,
+    /** Where the call's voice, speed and language are kept between calls. */
+    private val store: VoiceSettingsStore = VoiceSettingsStore.InMemory(),
 ) {
     /** The chat a call is bound to, what it is called, and when the call started ([clock] time, for the timer). */
     data class Line(val agentId: String, val title: String, val startedAtMs: Long)
@@ -47,7 +52,17 @@ class VoiceCalls(
     private val _state = MutableStateFlow(VoiceChatState())
     val state: StateFlow<VoiceChatState> = _state.asStateFlow()
 
+    private val _settings = MutableStateFlow(store.load())
+    /** The call's voice, speed and language, as its tray's settings menu sets them; they hold for later calls too. */
+    val settings: StateFlow<VoiceCallSettings> = _settings.asStateFlow()
+
+    private val _sentByVoice = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
+    /** By chat, the words its calls sent as follow-ups: those messages wear Cursor's "Voice call" label. */
+    val sentByVoice: StateFlow<Map<String, Set<String>>> = _sentByVoice.asStateFlow()
+
     private var chat: VoiceChat? = null
+    /** Whether the call's mute is the one [detach] put on, which [attach] takes off again. */
+    private var heldByDetach = false
     private var callScope: CoroutineScope? = null
     private var mirror: Job? = null
     private var host: Host? = null
@@ -66,7 +81,12 @@ class VoiceCalls(
         if (isOn(agentId)) return
         end()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        val next = newChat(scope) { words -> this.host?.send(words) ?: false }
+        val next = newChat(scope) { words ->
+            val sent = this.host?.send(words) ?: false
+            if (sent) _sentByVoice.update { it + (agentId to (it[agentId].orEmpty() + words.trim())) }
+            sent
+        }
+        configure(next, _settings.value)
         next.onPhase = { phase ->
             onPhase(phase)
             if (phase == VoiceChatPhase.Off) scope.launch { closeLine(next) }
@@ -85,14 +105,18 @@ class VoiceCalls(
         if (_line.value?.agentId != agentId) return
         val wasAway = this.host == null
         this.host = host
-        if (wasAway && _state.value.phase == VoiceChatPhase.Muted) chat?.toggleMute()
+        if (wasAway && heldByDetach && _state.value.phase == VoiceChatPhase.Muted) chat?.toggleMute()
+        heldByDetach = false
     }
 
     /** [host] is going: the call it hosted holds, mic closed, until the chat is opened again. */
     fun detach(agentId: String, host: Host) {
         if (_line.value?.agentId != agentId || this.host !== host) return
         this.host = null
-        if (_state.value.phase is VoiceChatPhase.Listening) chat?.toggleMute()
+        if (_state.value.phase is VoiceChatPhase.Listening) {
+            heldByDetach = true
+            chat?.toggleMute()
+        }
     }
 
     /** Where [agentId]'s agent stands, from its host; ignored unless the call is that chat's. */
@@ -106,7 +130,25 @@ class VoiceCalls(
     }
 
     fun tap() { chat?.tap() }
-    fun toggleMute() { chat?.toggleMute() }
+    fun toggleMute() {
+        heldByDetach = false
+        chat?.toggleMute()
+    }
+
+    /** The call's voice, speed and language from now on, this call's and the next. */
+    fun setSettings(settings: VoiceCallSettings) {
+        _settings.value = settings
+        store.save(settings)
+        chat?.let { configure(it, settings) }
+    }
+
+    /** The voices the call can speak in for its language; empty until the device's engine is ready. */
+    fun voices(): List<SpeakerVoice> = chat?.voices(_settings.value.languageTag).orEmpty()
+
+    private fun configure(chat: VoiceChat, settings: VoiceCallSettings) {
+        chat.language = settings.languageTag
+        chat.style(SpeechStyle(rate = settings.speed, language = settings.languageTag, voice = settings.voice))
+    }
     fun permissionDenied(agentId: String, title: String, host: Host, permanently: Boolean) {
         start(agentId, title, host)
         chat?.permissionDenied(permanently)
@@ -123,6 +165,7 @@ class VoiceCalls(
         if (chat !== ended) return
         chat = null
         host = null
+        heldByDetach = false
         mirror?.cancel()
         mirror = null
         ended.release()
@@ -150,6 +193,7 @@ class VoiceCalls(
                     )
                 },
                 onLive = onLive,
+                store = VoiceSettingsStore.Prefs(app),
             )
         }
     }

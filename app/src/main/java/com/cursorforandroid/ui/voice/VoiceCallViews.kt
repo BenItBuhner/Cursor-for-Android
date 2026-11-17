@@ -7,7 +7,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -28,13 +27,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,90 +44,109 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.cursorforandroid.data.media.SpeakerVoice
+import com.cursorforandroid.ui.components.CursorButton
 import com.cursorforandroid.ui.components.CursorIcons
+import com.cursorforandroid.ui.components.CursorMenu
+import com.cursorforandroid.ui.components.CursorMenuItem
+import com.cursorforandroid.ui.components.CursorMenuSeparator
+import com.cursorforandroid.ui.components.CursorSheet
+import com.cursorforandroid.ui.components.DockedRowHeight
+import com.cursorforandroid.ui.components.FlatIconButton
 import com.cursorforandroid.ui.components.Haptic
-import com.cursorforandroid.ui.components.glassSurface
+import com.cursorforandroid.ui.components.SheetHeader
+import com.cursorforandroid.ui.components.TouchTarget
+import com.cursorforandroid.ui.components.cursorSurface
 import com.cursorforandroid.ui.components.dockedCard
 import com.cursorforandroid.ui.components.findActivity
 import com.cursorforandroid.ui.components.openAppSettings
-import com.cursorforandroid.ui.components.pressable
 import com.cursorforandroid.ui.components.rememberHaptics
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
 import kotlinx.coroutines.delay
+import java.text.DateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 
-/** The voice chat's words, in one place for the card, the strip, the notification and their tests. */
+/** The voice chat's words, as Cursor's own call tray has them, in one place for the trays, the notification and their tests. */
 object VoiceChatCopy {
-    /** Cursor's own label for the waveform button in the Send slot. */
+    /** Cursor's label for the waveform button in the Send slot. */
     const val Start = "Start voice chat"
-    const val End = "End voice chat"
+    const val Title = "Voice chat"
+    const val UntitledChat = "New Agent"
     const val Mute = "Mute"
     const val Unmute = "Unmute"
-    const val Return = "Return to call"
-    const val UntitledChat = "Voice chat"
+    const val HangUp = "Hang up"
+    const val Settings = "Settings"
+    const val ViewTranscript = "View transcript"
+    const val Return = "Return"
+    const val Dismiss = "Dismiss"
+    const val VoiceCall = "Voice call"
+    const val NothingSaid = "Nothing was said on this call."
+    const val Voice = "Voice"
+    const val Speed = "Speed"
+    const val Language = "Language"
+    const val DefaultVoice = "Default"
 
-    fun title(phase: VoiceChatPhase): String = when (phase) {
+    /** The other chats' tray: "Voice chat with Fix the login bug". */
+    fun with(title: String): String = "Voice chat with ${name(title)}"
+
+    fun name(title: String): String = title.trim().ifEmpty { UntitledChat }
+
+    /**
+     * What the call is doing where there is no voice to draw: the agent's side of a call that takes turns. Null while
+     * the line itself says it (listening, speaking, muted).
+     */
+    fun waiting(phase: VoiceChatPhase): String? = when (phase) {
+        VoiceChatPhase.Transcribing -> "Thinking…"
+        is VoiceChatPhase.Working -> "Agent is working…"
+        else -> null
+    }
+
+    /** One line for the notification. */
+    fun status(state: VoiceChatState): String = when (val phase = state.phase) {
         VoiceChatPhase.Off -> ""
-        is VoiceChatPhase.Listening -> "Listening"
+        is VoiceChatPhase.Failed -> phase.message
+        is VoiceChatPhase.Listening -> if (state.muted) "Muted" else "Listening"
+        VoiceChatPhase.Muted -> "Muted"
         VoiceChatPhase.Transcribing -> "Thinking"
         is VoiceChatPhase.Working -> "Agent is working"
         is VoiceChatPhase.Speaking -> "Speaking"
-        VoiceChatPhase.Muted -> "Muted"
-        is VoiceChatPhase.Failed -> "Voice chat"
     }
 
-    /** The second line: what was said or is being read where there is something, and otherwise what a tap would do. */
-    fun detail(state: VoiceChatState): String = when (val phase = state.phase) {
-        VoiceChatPhase.Off -> ""
-        is VoiceChatPhase.Listening -> when {
-            phase.heard -> "Pause to send, or tap to send now."
-            state.lastSaid != null -> "Go on, or say goodbye to hang up."
-            else -> "Say what you want done. A pause sends it."
-        }
-        VoiceChatPhase.Transcribing -> "Catching what you said."
-        is VoiceChatPhase.Working -> "“${phase.said}”"
-        is VoiceChatPhase.Speaking -> phase.text
-        VoiceChatPhase.Muted -> "Your microphone is off. Unmute to go on."
-        is VoiceChatPhase.Failed -> phase.message
-    }
-
-    /** One line for the notification and the other chats' strip. */
-    fun status(state: VoiceChatState): String = when (val phase = state.phase) {
-        is VoiceChatPhase.Failed -> phase.message
-        VoiceChatPhase.Off -> ""
-        else -> title(phase)
-    }
-
-    /** The microphone can be muted while it is the call's: listening, or already muted. */
-    fun canMute(state: VoiceChatState): Boolean = state.phase is VoiceChatPhase.Listening || state.phase == VoiceChatPhase.Muted
+    /** Mute is the call's at any point of it, as on Cursor's tray: the agent goes on working and answering. */
+    fun canMute(state: VoiceChatState): Boolean = state.phase != VoiceChatPhase.Off && state.phase !is VoiceChatPhase.Failed
 
     /** `0:42`, `12:05`, `1:02:09`. */
     fun elapsed(millis: Long): String {
@@ -138,15 +159,53 @@ object VoiceChatCopy {
 }
 
 object VoiceChatTags {
-    const val Card = "voice-call-card"
-    const val Strip = "voice-call-strip"
+    const val Tray = "voice-call-tray"
+    const val ReturnTray = "voice-call-return"
+    const val Line = "voice-call-line"
     const val End = "voice-call-end"
     const val Mute = "voice-call-mute"
+    const val Settings = "voice-call-settings"
+    const val SettingsMenu = "voice-call-settings-menu"
+    const val Transcript = "voice-call-transcript"
+    const val TranscriptSheet = "voice-call-transcript-sheet"
+    const val Return = "voice-call-return-button"
+    const val Label = "voice-call-label"
+    const val Chip = "voice-call-chip"
+}
+
+/**
+ * The words of this chat that were said on a call rather than typed, so their bubbles wear Cursor's "Voice call"
+ * label. Provided by the conversation screen from [VoiceCalls.sentByVoice].
+ */
+val LocalVoiceSent = staticCompositionLocalOf<Set<String>> { emptySet() }
+
+/** The live call's line, for the sidebar's "Voice chat in progress" pill on the chat it is with. */
+val LocalVoiceCallLine = compositionLocalOf<VoiceCalls.Line?> { null }
+
+/**
+ * Cursor's sidebar pill on the chat a call is with: the success tone's soft fill, the waveform glyph and the call's
+ * clock, in place of the row's trailing details.
+ */
+@Composable
+fun VoiceCallChip(startedAtMs: Long, modifier: Modifier = Modifier, elapsed: String = rememberElapsed(startedAtMs)) {
+    val colors = CursorTheme.colors
+    Row(
+        modifier
+            .background(colors.green.copy(alpha = 0.14f), CircleShape)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .semantics(mergeDescendants = true) { contentDescription = "Voice chat in progress, $elapsed" }
+            .testTag(VoiceChatTags.Chip),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(CursorIcons.CallWaveform, null, tint = colors.green, modifier = Modifier.size(12.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(elapsed, style = CursorTheme.typography.small, color = colors.green, maxLines = 1)
+    }
 }
 
 /**
  * Starting a call from a chat's Send slot: the microphone permission first when it has not been granted, then
- * [start]. A refusal is told to [denied] (permanently when Android will no longer ask), which shows on the card.
+ * [start]. A refusal is told to [denied] (permanently when Android will no longer ask), which shows on the tray.
  */
 @Composable
 fun rememberVoiceCallStarter(start: () -> Unit, denied: (permanently: Boolean) -> Unit): () -> Unit {
@@ -185,173 +244,417 @@ fun VoiceCallHaptics(calls: VoiceCalls) {
     }
 }
 
-/** [VoiceCallCard] for the live call: a tap on a refused permission opens Settings, any other tap is the call's shortcut. */
+/**
+ * [VoiceCallTray] for the live call, with its settings menu and transcript sheet. After a failure, Retry listens
+ * again, or opens the app's settings page when the microphone permission is off for good.
+ */
 @Composable
-fun VoiceCallCard(calls: VoiceCalls, modifier: Modifier = Modifier) {
+fun VoiceCallTray(calls: VoiceCalls, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val state by calls.state.collectAsStateWithLifecycle()
-    val line by calls.line.collectAsStateWithLifecycle()
-    val startedAt = line?.startedAtMs ?: return
-    // The card arrives where the composer stood: it rises a little and comes into focus rather than replacing it at a cut.
-    val arrival = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { arrival.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) }
-    VoiceCallCard(
+    val settings by calls.settings.collectAsStateWithLifecycle()
+    val line = calls.line.collectAsStateWithLifecycle().value ?: return
+    var transcript by rememberSaveable { mutableStateOf(false) }
+    val elapsed = rememberElapsed(line.startedAtMs)
+    VoiceCallTray(
         state = state,
-        elapsed = rememberElapsed(startedAt),
-        onTap = { if ((state.phase as? VoiceChatPhase.Failed)?.opensSettings == true) openAppSettings(context) else calls.tap() },
+        elapsed = elapsed,
         onMute = calls::toggleMute,
-        onEnd = calls::end,
-        modifier = modifier.graphicsLayer {
-            val t = arrival.value
-            alpha = t.coerceIn(0f, 1f)
-            translationY = (1f - t) * 12.dp.toPx()
-        },
+        onHangUp = calls::end,
+        onTranscript = { transcript = true },
+        onRetry = { if ((state.phase as? VoiceChatPhase.Failed)?.opensSettings == true) openAppSettings(context) else calls.tap() },
+        settings = settings,
+        voices = { calls.voices() },
+        onSettings = calls::setSettings,
+        modifier = modifier,
     )
+    if (transcript) {
+        VoiceCallTranscriptSheet(
+            turns = state.turns,
+            startedAtMs = line.startedAtMs,
+            status = if (state.active) "Ongoing · $elapsed" else "Ended · $elapsed",
+            onDismiss = { transcript = false },
+        )
+    }
 }
 
 /**
- * A voice chat where the composer stands, in the composer's own box: the same surface, stroke, corners and padding, so
- * the chat's bottom keeps its shape through the call. The waveform and the call's state lead its top line with the
- * timer at the end; under it, what was said or is being read; and the footer keeps the composer's: Mute where the
- * footer's controls start, and in the Send slot the red disc that hangs up. The body is the call's shortcut ([onTap]).
+ * Cursor's call tray, docked over the composer as its goal and queue trays are, so the composer stays where it was
+ * and can still be typed in: a muted "Voice chat" with the call's clock, and under it the call's line across the
+ * tray (the voice as it is heard, the agent's as it is read) with the round controls at its end: Mute, Settings
+ * (voice, speed, language), View transcript and Hang up. A failure turns it into Cursor's error tray: the title,
+ * what went wrong, and Dismiss.
  */
 @Composable
-fun VoiceCallCard(state: VoiceChatState, elapsed: String, onTap: () -> Unit, onMute: () -> Unit, onEnd: () -> Unit, modifier: Modifier = Modifier) {
+fun VoiceCallTray(
+    state: VoiceChatState,
+    elapsed: String,
+    onMute: () -> Unit,
+    onHangUp: () -> Unit,
+    onTranscript: () -> Unit,
+    modifier: Modifier = Modifier,
+    onRetry: () -> Unit = {},
+    settings: VoiceCallSettings = VoiceCallSettings(),
+    voices: () -> List<SpeakerVoice> = { emptyList() },
+    onSettings: (VoiceCallSettings) -> Unit = {},
+    settingsOpen: Boolean = false,
+) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
     val phase = state.phase
-    val failed = phase is VoiceChatPhase.Failed
-    val shape = remember { RoundedCornerShape(CursorDimens.composerRadius) }
-    val pad = CursorDimens.composerPadding
+    val start = CursorDimens.composerPadding + CursorDimens.composerTextInset
     Column(
         modifier
             .fillMaxWidth()
-            .glassSurface(colors.elevated, colors.strokeSubtle, shape)
-            .testTag(VoiceChatTags.Card),
+            .dockedCard()
+            .testTag(VoiceChatTags.Tray),
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .pressable(onClick = onTap, shape = shape)
-                .padding(start = pad + CursorDimens.composerTextInset, end = pad + CursorDimens.composerTextInset, top = pad + 2.dp)
-                .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CallWave(phase = phase, level = state.level, height = 16.dp)
-                Spacer(Modifier.width(10.dp))
-                AnimatedContent(
-                    targetState = VoiceChatCopy.title(phase),
-                    transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
-                    label = "voice-call-title",
-                    modifier = Modifier.weight(1f),
-                ) { text ->
-                    Text(text, style = type.baseMedium, color = if (failed) colors.red else colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (phase is VoiceChatPhase.Failed) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = DockedRowHeight).padding(start = start, end = 6.dp).padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
+                    Text(VoiceChatCopy.Title, style = type.small, color = colors.textTertiary, maxLines = 1)
+                    Text(phase.message, style = type.base, color = colors.textSecondary, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
-                Text(elapsed, style = type.small, color = colors.textTertiary, maxLines = 1)
+                if (!phase.resumes) {
+                    Spacer(Modifier.width(8.dp))
+                    CursorButton(if (phase.opensSettings) "Settings" else "Retry", onRetry, height = CursorDimens.composerFooter)
+                }
+                Spacer(Modifier.width(2.dp))
+                FlatIconButton(CursorIcons.CallClose, VoiceChatCopy.Dismiss, onClick = onHangUp, modifier = Modifier.testTag(VoiceChatTags.End))
             }
-            AnimatedContent(
-                targetState = VoiceChatCopy.detail(state),
-                transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
-                label = "voice-call-detail",
-                modifier = Modifier.padding(top = 4.dp).heightIn(min = 44.dp),
-            ) { text ->
-                Text(text, style = type.input, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+            return@Column
         }
-        // The composer's footer, with the call's two controls in its places.
+        Row(Modifier.fillMaxWidth().padding(start = start, end = CursorDimens.composerPadding, top = 8.dp)) {
+            Text(VoiceChatCopy.Title, style = type.small, color = colors.textTertiary, maxLines = 1)
+            Text(" · $elapsed", style = type.small, color = colors.textQuaternary, maxLines = 1)
+        }
         Row(
-            Modifier.fillMaxWidth().padding(start = pad, end = pad, top = 6.dp, bottom = pad - 2.dp + 2.dp),
+            Modifier.fillMaxWidth().padding(start = start, end = 8.dp, top = 2.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val muted = phase == VoiceChatPhase.Muted
-            val canMute = VoiceChatCopy.canMute(state)
-            FooterDisc(
-                fill = if (muted) colors.textPrimary else colors.fill,
-                tint = if (muted) colors.canvas else if (canMute) colors.iconSecondary else colors.iconQuaternary,
-                icon = if (muted) CursorIcons.MicOff else CursorIcons.Mic,
-                description = if (muted) VoiceChatCopy.Unmute else VoiceChatCopy.Mute,
-                onClick = if (canMute) onMute else null,
-                modifier = Modifier.testTag(VoiceChatTags.Mute),
-            )
-            Spacer(Modifier.weight(1f))
-            FooterDisc(
-                fill = colors.red,
-                tint = Color.White,
-                icon = CursorIcons.PhoneOff,
-                description = VoiceChatCopy.End,
-                onClick = onEnd,
-                modifier = Modifier.testTag(VoiceChatTags.End),
-            )
+            Box(Modifier.weight(1f).height(TrayButton), contentAlignment = Alignment.CenterStart) {
+                AnimatedContent(
+                    targetState = VoiceChatCopy.waiting(phase),
+                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
+                    label = "voice-call-line",
+                ) { words ->
+                    if (words != null) {
+                        Text(words, style = type.base, color = colors.textTertiary, maxLines = 1, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                    } else {
+                        VoiceLine(phase = phase, level = state.level, muted = state.muted, modifier = Modifier.fillMaxWidth().testTag(VoiceChatTags.Line))
+                    }
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                MuteButton(muted = state.muted, enabled = VoiceChatCopy.canMute(state), onMute = onMute, size = TrayButton)
+                var menu by rememberSaveable { mutableStateOf(settingsOpen) }
+                Box {
+                    TrayRoundButton(
+                        icon = CursorIcons.CallSettings,
+                        description = VoiceChatCopy.Settings,
+                        onClick = { menu = true },
+                        tone = if (menu) Tone.On else Tone.Rest,
+                        size = TrayButton,
+                        modifier = Modifier.testTag(VoiceChatTags.Settings),
+                    )
+                    VoiceCallSettingsMenu(expanded = menu, onDismiss = { menu = false }, settings = settings, voices = voices, onChange = onSettings)
+                }
+                TrayRoundButton(
+                    icon = CursorIcons.CallTranscript,
+                    description = VoiceChatCopy.ViewTranscript,
+                    onClick = onTranscript,
+                    size = TrayButton,
+                    modifier = Modifier.testTag(VoiceChatTags.Transcript),
+                )
+                TrayRoundButton(
+                    icon = CursorIcons.CallHangUp,
+                    description = VoiceChatCopy.HangUp,
+                    onClick = onHangUp,
+                    tone = Tone.Danger,
+                    size = TrayButton,
+                    modifier = Modifier.testTag(VoiceChatTags.End),
+                )
+            }
         }
     }
 }
 
 /**
- * The call seen from another chat: a docked card over that chat's composer saying whose call it is and what it is
- * doing, which leads back to it ([onOpen]), with the hang-up at its end.
+ * The call seen from another chat, as Cursor's return tray has it: "Voice chat with" the call's chat and its clock,
+ * then Mute, a hang-up X and Return, which goes back to the call's chat ([onReturn]).
  */
 @Composable
-fun VoiceCallStrip(calls: VoiceCalls, onOpen: (agentId: String) -> Unit, modifier: Modifier = Modifier) {
+fun VoiceCallReturnTray(calls: VoiceCalls, onReturn: (agentId: String) -> Unit, modifier: Modifier = Modifier) {
     val state by calls.state.collectAsStateWithLifecycle()
     val line = calls.line.collectAsStateWithLifecycle().value ?: return
-    VoiceCallStrip(
+    VoiceCallReturnTray(
         title = line.title,
         state = state,
         elapsed = rememberElapsed(line.startedAtMs),
-        onOpen = { onOpen(line.agentId) },
-        onEnd = calls::end,
+        onMute = calls::toggleMute,
+        onHangUp = calls::end,
+        onReturn = { onReturn(line.agentId) },
         modifier = modifier,
     )
 }
 
 @Composable
-fun VoiceCallStrip(title: String, state: VoiceChatState, elapsed: String, onOpen: () -> Unit, onEnd: () -> Unit, modifier: Modifier = Modifier) {
+fun VoiceCallReturnTray(
+    title: String,
+    state: VoiceChatState,
+    elapsed: String,
+    onMute: () -> Unit,
+    onHangUp: () -> Unit,
+    onReturn: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
-    val shape = CursorTheme.shapes.xl
     Row(
         modifier
             .fillMaxWidth()
-            .dockedCard(shape = shape)
-            .pressable(onClick = onOpen, shape = shape)
-            .semantics { contentDescription = "${VoiceChatCopy.Return}: $title"; role = Role.Button }
-            .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp)
-            .testTag(VoiceChatTags.Strip),
+            .dockedCard()
+            .heightIn(min = DockedRowHeight)
+            .padding(start = CursorDimens.composerPadding + CursorDimens.composerTextInset, end = 6.dp, top = 6.dp, bottom = 6.dp)
+            .testTag(VoiceChatTags.ReturnTray),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CallWave(phase = state.phase, level = state.level, height = 14.dp)
-        Spacer(Modifier.width(10.dp))
-        val line = buildAnnotatedString {
-            withStyle(type.baseMedium.toSpanStyle().copy(color = colors.textPrimary)) { append(title) }
-            withStyle(type.small.toSpanStyle().copy(color = colors.textTertiary)) { append("  ·  ${VoiceChatCopy.status(state)}  ·  $elapsed") }
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                VoiceChatCopy.with(title),
+                style = type.base,
+                color = colors.textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Text(" · $elapsed", style = type.base, color = colors.textTertiary, maxLines = 1)
         }
-        Text(line, style = type.baseMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(8.dp))
-        FooterDisc(fill = colors.red, tint = Color.White, icon = CursorIcons.PhoneOff, description = VoiceChatCopy.End, onClick = onEnd)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            MuteButton(muted = state.muted, enabled = VoiceChatCopy.canMute(state), onMute = onMute, size = ReturnButton)
+            TrayRoundButton(
+                icon = CursorIcons.CallClose,
+                description = VoiceChatCopy.HangUp,
+                onClick = onHangUp,
+                tone = Tone.Danger,
+                size = ReturnButton,
+                modifier = Modifier.testTag(VoiceChatTags.End),
+            )
+            Spacer(Modifier.width(2.dp))
+            CursorButton(
+                VoiceChatCopy.Return,
+                onReturn,
+                height = CursorDimens.composerFooter,
+                modifier = Modifier
+                    .semantics { contentDescription = "Return to the voice chat with ${VoiceChatCopy.name(title)}" }
+                    .testTag(VoiceChatTags.Return),
+            )
+        }
     }
 }
 
-/** The composer's footer disc (Send's size and touch), here for Mute and Hang up. */
+/** Which list the call's settings menu shows. */
+enum class SettingsPage { Main, Voice, Speed, Language }
+
+/** Cursor's settings menu on the call tray: Voice, Speed and Language, each opening onto its choices with the current one ticked. */
 @Composable
-private fun FooterDisc(fill: Color, tint: Color, icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
-    val animatedFill by animateColorAsState(fill, tween(180), label = "disc-fill")
-    val animatedTint by animateColorAsState(tint, tween(180), label = "disc-tint")
-    Box(modifier.size(CursorDimens.roundButtonTouch), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .requiredSize(CursorDimens.roundButtonTouch)
-                .then(if (onClick != null) Modifier.pressable(onClick = onClick, shape = CircleShape) else Modifier)
-                .semantics { contentDescription = description; role = Role.Button },
-        )
-        Box(Modifier.size(CursorDimens.roundButton).background(animatedFill, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = animatedTint, modifier = Modifier.size(CursorDimens.roundButtonGlyph - 2.dp))
+fun VoiceCallSettingsMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    settings: VoiceCallSettings,
+    voices: () -> List<SpeakerVoice>,
+    onChange: (VoiceCallSettings) -> Unit,
+    initialPage: SettingsPage = SettingsPage.Main,
+) {
+    var page by remember(expanded) { mutableStateOf(initialPage) }
+    CursorMenu(expanded = expanded, onDismissRequest = onDismiss, modifier = Modifier.testTag(VoiceChatTags.SettingsMenu)) {
+        when (page) {
+            SettingsPage.Main -> {
+                val voiceLabel = settings.voice?.let { id -> voices().firstOrNull { it.id == id }?.label } ?: VoiceChatCopy.DefaultVoice
+                SettingsRow(VoiceChatCopy.Voice, voiceLabel) { page = SettingsPage.Voice }
+                SettingsRow(VoiceChatCopy.Speed, VoiceCallSettings.speedLabel(settings.speed)) { page = SettingsPage.Speed }
+                SettingsRow(VoiceChatCopy.Language, VoiceCallSettings.languageLabel(settings.language)) { page = SettingsPage.Language }
+            }
+            SettingsPage.Voice -> {
+                PageBack(VoiceChatCopy.Voice) { page = SettingsPage.Main }
+                CursorMenuSeparator()
+                Choice(VoiceChatCopy.DefaultVoice, settings.voice == null) { onChange(settings.copy(voice = null)); onDismiss() }
+                voices().forEach { voice ->
+                    Choice(voice.label, settings.voice == voice.id) { onChange(settings.copy(voice = voice.id)); onDismiss() }
+                }
+            }
+            SettingsPage.Speed -> {
+                PageBack(VoiceChatCopy.Speed) { page = SettingsPage.Main }
+                CursorMenuSeparator()
+                VoiceCallSettings.Speeds.forEach { speed ->
+                    Choice(speed.label, settings.speed == speed.value) { onChange(settings.copy(speed = speed.value)); onDismiss() }
+                }
+            }
+            SettingsPage.Language -> {
+                PageBack(VoiceChatCopy.Language) { page = SettingsPage.Main }
+                CursorMenuSeparator()
+                VoiceCallSettings.Languages.forEach { language ->
+                    // Another language has its own voices: the voice goes back to that language's default.
+                    Choice(language.label, settings.language == language.tag) {
+                        onChange(settings.copy(language = language.tag, voice = if (language.tag == settings.language) settings.voice else null))
+                        onDismiss()
+                    }
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun SettingsRow(label: String, value: String, onClick: () -> Unit) {
+    CursorMenuItem(label = label, icon = null, onClick = onClick, trailing = {
+        Text(value, style = CursorTheme.typography.base, color = CursorTheme.colors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 140.dp))
+        Spacer(Modifier.width(4.dp))
+        Icon(CursorIcons.ChevronRight, null, tint = CursorTheme.colors.iconQuaternary, modifier = Modifier.size(CursorDimens.menuIcon))
+    })
+}
+
+@Composable
+private fun PageBack(title: String, onBack: () -> Unit) {
+    CursorMenuItem(label = title, icon = CursorIcons.ChevronLeft, onClick = onBack)
+}
+
+@Composable
+private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
+    CursorMenuItem(label = label, icon = null, onClick = onClick, trailing = {
+        if (selected) Icon(CursorIcons.Check, "Selected", tint = CursorTheme.colors.iconSecondary, modifier = Modifier.size(CursorDimens.menuIcon))
+    })
+}
+
+/**
+ * The call's transcript, as Cursor's transcript panel has it: "Voice call", when it started and how it stands, then
+ * the turns in the chat's own rows (what was said in a bubble, the agent's answer as text).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VoiceCallTranscriptSheet(turns: List<VoiceTurn>, startedAtMs: Long, status: String, onDismiss: () -> Unit) {
+    CursorSheet(onDismiss = onDismiss, modifier = Modifier.testTag(VoiceChatTags.TranscriptSheet)) { dismiss ->
+        SheetHeader(VoiceChatCopy.VoiceCall, trailing = { FlatIconButton(CursorIcons.CallClose, "Close", onClick = dismiss) })
+        VoiceCallTranscript(turns = turns, started = startedClock(startedAtMs), status = status)
+    }
+}
+
+@Composable
+fun VoiceCallTranscript(turns: List<VoiceTurn>, started: String, status: String, modifier: Modifier = Modifier) {
+    val colors = CursorTheme.colors
+    val type = CursorTheme.typography
+    Column(modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 20.dp)) {
+        Text("$started · $status", style = type.small, color = colors.textTertiary)
+        Spacer(Modifier.height(16.dp))
+        if (turns.isEmpty()) {
+            Text(VoiceChatCopy.NothingSaid, style = type.base, color = colors.textTertiary, modifier = Modifier.padding(vertical = 12.dp))
+        } else {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                turns.forEach { turn ->
+                    if (turn.fromUser) {
+                        Box(Modifier.fillMaxWidth().padding(start = 32.dp), contentAlignment = Alignment.CenterEnd) {
+                            Text(
+                                turn.text,
+                                style = type.message,
+                                color = colors.textPrimary,
+                                modifier = Modifier
+                                    .cursorSurface(colors.fillFaint, colors.stroke, CursorTheme.shapes.xl)
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
+                        }
+                    } else {
+                        Text(turn.text, style = type.message, color = colors.textPrimary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Cursor's "Voice call" attribution over a message that was said on a call. */
+@Composable
+fun VoiceCallLabel(modifier: Modifier = Modifier) {
+    val colors = CursorTheme.colors
+    Row(modifier.testTag(VoiceChatTags.Label), verticalAlignment = Alignment.CenterVertically) {
+        Icon(CursorIcons.CallWaveform, null, tint = colors.iconTertiary, modifier = Modifier.size(12.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(VoiceChatCopy.VoiceCall, style = CursorTheme.typography.small, color = colors.textTertiary)
+    }
+}
+
+private enum class Tone { Rest, On, Danger }
+
+private val TrayButton = 28.dp
+private val ReturnButton = 24.dp
+
+/** Cursor's round secondary icon button: a soft fill, the accent's while its menu is open, the red's for hanging up. */
+@Composable
+private fun TrayRoundButton(
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+    size: Dp,
+    modifier: Modifier = Modifier,
+    tone: Tone = Tone.Rest,
+    enabled: Boolean = true,
+    pressed: Boolean? = null,
+) {
+    val colors = CursorTheme.colors
+    val fill by animateColorAsState(
+        when (tone) {
+            Tone.Rest -> colors.fill
+            Tone.On -> colors.accent.copy(alpha = 0.18f)
+            Tone.Danger -> colors.red.copy(alpha = 0.16f)
+        },
+        tween(160),
+        label = "tray-button-fill",
+    )
+    val tint by animateColorAsState(
+        when {
+            !enabled -> colors.iconQuaternary
+            tone == Tone.On -> colors.accent
+            tone == Tone.Danger -> colors.red
+            else -> colors.iconSecondary
+        },
+        tween(160),
+        label = "tray-button-tint",
+    )
+    TouchTarget(
+        size = size,
+        touchSize = CursorDimens.roundButtonTouch,
+        shape = CircleShape,
+        onClick = onClick,
+        enabled = enabled,
+        contentDescription = description,
+        modifier = modifier.then(if (pressed != null) Modifier.semantics { stateDescription = if (pressed) "On" else "Off" } else Modifier),
+    ) {
+        Box(Modifier.size(size).background(fill, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(if (size >= TrayButton) 16.dp else 14.dp))
+        }
+    }
+}
+
+@Composable
+private fun MuteButton(muted: Boolean, enabled: Boolean, onMute: () -> Unit, size: Dp) {
+    TrayRoundButton(
+        icon = if (muted) CursorIcons.CallMicSlash else CursorIcons.CallMic,
+        description = if (muted) VoiceChatCopy.Unmute else VoiceChatCopy.Mute,
+        onClick = onMute,
+        size = size,
+        enabled = enabled,
+        pressed = muted,
+        modifier = Modifier.testTag(VoiceChatTags.Mute),
+    )
 }
 
 /** Seconds since [startedAtMs] (elapsed-realtime), ticking once a second. */
 @Composable
-private fun rememberElapsed(startedAtMs: Long): String {
+internal fun rememberElapsed(startedAtMs: Long): String {
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(startedAtMs) {
         while (true) {
@@ -362,53 +665,55 @@ private fun rememberElapsed(startedAtMs: Long): String {
     return VoiceChatCopy.elapsed(now - startedAtMs)
 }
 
+/** The wall-clock time an elapsed-realtime start fell at, in the device's short time format: "3:42 PM". */
+private fun startedClock(startedAtMs: Long): String {
+    val wall = System.currentTimeMillis() - (SystemClock.elapsedRealtime() - startedAtMs)
+    return DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(wall))
+}
+
 /**
- * The call's waveform: Cursor's audio-lines glyph come alive. Its six bars follow the voice while the microphone
- * hears one, sweep in a wave while the agent speaks, ripple slowly while the call waits on Cursor, and lie flat when
- * muted. Green while it is yours to talk, the text colour while it is the agent's, red after a failure.
+ * The call's line, as Cursor's tray draws it: a spectrum of thin round-ended bars across the tray, 2dp wide with 3dp
+ * between, in the text colour and fading out at both ends. It follows the voice while the microphone hears one,
+ * sweeps while the agent's answer is read out, and lies flat as a row of dots while muted.
  */
 @Composable
-fun CallWave(phase: VoiceChatPhase, level: Float, height: Dp, modifier: Modifier = Modifier) {
+fun VoiceLine(phase: VoiceChatPhase, level: Float, muted: Boolean, modifier: Modifier = Modifier, height: Dp = 20.dp) {
     val colors = CursorTheme.colors
-    val tint by animateColorAsState(
-        when (phase) {
-            is VoiceChatPhase.Listening -> colors.green
-            is VoiceChatPhase.Failed -> colors.red
-            VoiceChatPhase.Muted, VoiceChatPhase.Off -> colors.iconTertiary
-            else -> colors.textPrimary
-        },
-        tween(220),
-        label = "call-wave-tint",
-    )
+    val listening = phase is VoiceChatPhase.Listening && !muted
+    val speaking = phase is VoiceChatPhase.Speaking
     val voice by animateFloatAsState(
-        if (phase is VoiceChatPhase.Listening) level.coerceIn(0f, 1f) else 0f,
+        when {
+            listening -> 0.12f + 0.88f * level.coerceIn(0f, 1f)
+            speaking -> 0.75f
+            else -> 0f
+        },
         spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "call-wave-voice",
+        label = "voice-line-amplitude",
     )
-    val motion = rememberInfiniteTransition(label = "call-wave")
-    val period = when (phase) {
-        is VoiceChatPhase.Speaking -> 900
-        else -> 1600
-    }
-    val turn by motion.animateFloat(0f, 1f, infiniteRepeatable(tween(period, easing = LinearEasing), RepeatMode.Restart), label = "call-wave-turn")
-    // Lucide audio-lines' bar heights, out of 18: the glyph at rest.
-    val rest = remember { floatArrayOf(3f, 11f, 18f, 7f, 13f, 3f) }
-    Canvas(modifier.size(width = height * 1.25f, height = height)) {
-        val bars = rest.size
-        val stroke = size.width / (bars * 2f - 1f)
-        val gap = stroke
-        repeat(bars) { i ->
-            val base = rest[i] / 18f
-            val wave = (sin(turn * 2 * PI - i * 0.8).toFloat() + 1f) / 2f
-            val share = when (phase) {
-                is VoiceChatPhase.Listening -> 0.2f + 0.8f * (0.25f * base + voice * (0.4f + 0.6f * wave))
-                is VoiceChatPhase.Speaking -> 0.25f + 0.75f * wave
-                VoiceChatPhase.Transcribing, is VoiceChatPhase.Working -> 0.2f + 0.35f * wave
-                else -> 0.18f
-            }.coerceIn(0.15f, 1f)
-            val h = size.height * share
-            val left = i * (stroke + gap)
-            drawRoundRect(tint, Offset(left, (size.height - h) / 2), Size(stroke, h), CornerRadius(stroke / 2))
+    val motion = rememberInfiniteTransition(label = "voice-line")
+    val turn by motion.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart), label = "voice-line-turn")
+    val tint = if (muted) colors.iconTertiary else colors.textPrimary
+    Canvas(modifier.height(height)) {
+        val bar = 2.dp.toPx()
+        val gap = 3.dp.toPx()
+        val count = max(1, floor((size.width + gap) / (bar + gap)).toInt())
+        val used = count * bar + (count - 1) * gap
+        val left = (size.width - used) / 2f
+        val fadeBars = max(1f, min(10f, count / 4f))
+        val t = turn * 2f * PI.toFloat()
+        repeat(count) { i ->
+            val x = i.toFloat()
+            // Two slow waves against each other read as speech rather than a sine; the middle of the line carries more.
+            val ripple = abs(sin(x * 0.42f + t * 3f) * 0.6f + sin(x * 0.17f - t * 2f) * 0.4f)
+            val centre = 1f - abs((x - count / 2f) / (count / 2f)) * 0.45f
+            val h = max(bar, size.height * voice * ripple * centre)
+            val edge = min(x + 1f, count - x).coerceAtMost(fadeBars) / fadeBars
+            drawRoundRect(
+                tint.copy(alpha = tint.alpha * edge.coerceIn(0f, 1f)),
+                Offset(left + i * (bar + gap), (size.height - h) / 2f),
+                Size(bar, h),
+                CornerRadius(bar / 2f),
+            )
         }
     }
 }

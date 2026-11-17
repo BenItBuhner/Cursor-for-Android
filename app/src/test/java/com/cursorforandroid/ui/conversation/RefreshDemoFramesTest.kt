@@ -72,7 +72,7 @@ import kotlin.math.cos
 
 /**
  * Recordings of the alpha's new surfaces on the real conversation screen over the fakes, drawn a frame at a time
- * (16 ms of the clock each), as DockDemoFramesTest draws its own: the transcript running under the glass composer,
+ * (16 ms of the clock each), as DockDemoFramesTest draws its own: the call tray over the composer,
  * and a voice call from the waveform button to hang-up with a scripted microphone, transcription and voice. Every
  * frame goes to `REFRESH_DEMO_FRAMES/<scenario>/frame-NNN.png`; without that variable set, nothing runs.
  */
@@ -307,26 +307,10 @@ class RefreshDemoFramesTest {
         node.performClick()
     }
 
-    // --- the glass composer -----------------------------------------------------------------------------------------
-
-    /** A finished chat read upward and back: the rows going on under the composer's glass rather than into a fade. */
-    private fun glass(name: String, mode: ThemeMode) {
-        open(mode, running = false)
-        begin(name)
-        frames(20)
-        drag(start = 0.3f, dyDp = 260f, moveFrames = 50, holdFrames = 10)
-        frames(30)
-        drag(start = 0.7f, dyDp = -200f, moveFrames = 60, holdFrames = 10)
-        frames(40)
-    }
-
-    @Test fun glassPhoneDark() = glass("glass-phone-dark", ThemeMode.Dark)
-    @Test @Config(qualifiers = PHONE_LIGHT) fun glassPhoneLight() = glass("glass-phone-light", ThemeMode.Light)
-
     // --- the voice call ---------------------------------------------------------------------------------------------
 
     /**
-     * Cursor's waveform button in the empty composer, tapped: the call card takes the composer's place, hears an
+     * Cursor's waveform button in the empty composer, tapped: the call tray docks over the composer, hears an
      * utterance, sends it, waits on the agent's turn, reads the reply, listens again, is muted, unmuted and hung up.
      */
     private fun call(name: String, mode: ThemeMode) {
@@ -357,7 +341,7 @@ class RefreshDemoFramesTest {
         frames(50)
         tapOn("Unmute")
         frames(40)
-        tapOn("End voice chat")
+        tapOn("Hang up")
         frames(50)
     }
 

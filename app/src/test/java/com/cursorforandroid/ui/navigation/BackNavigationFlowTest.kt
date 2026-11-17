@@ -34,7 +34,6 @@ import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.cursorforandroid.ui.conversation.DOCK_TAG
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.demo.DemoData
 import com.cursorforandroid.data.local.PreferencesStore
@@ -113,12 +112,6 @@ class BackNavigationFlowTest {
         if (restorer != null) restorer.setContent { Shell(graph) } else compose.setContent { Shell(graph) }
         compose.waitUntil(30_000) { onScreen(HOME_PLACEHOLDER) }
         compose.waitUntil(30_000) { graph.agents.state.value.let { it.hasLoaded && !it.isRefreshing } }
-    }
-
-    /** On screen above the dock: the transcript runs on beneath the dock's glass, composed but blurred there. */
-    private fun aboveDock(text: String): Boolean {
-        val dockTop = compose.onAllNodes(hasTestTag(DOCK_TAG)).fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.top ?: Float.MAX_VALUE
-        return compose.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().any { it.boundsInRoot.top < dockTop }
     }
 
     private fun onScreen(text: String) = compose.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().isNotEmpty()
@@ -224,7 +217,7 @@ class BackNavigationFlowTest {
         openWorkersGroup()
         compose.onAllNodes(transcript).onFirst().performScrollToNode(workerRow(WORKER))
         compose.waitForIdle()
-        assertThat(aboveDock(LATEST_REPLY)).isFalse()
+        assertThat(onScreen(LATEST_REPLY)).isFalse()
         val rowTop = firstWorkerRow().fetchSemanticsNode().boundsInRoot.top
 
         firstWorkerRow().performClick()
@@ -245,7 +238,7 @@ class BackNavigationFlowTest {
         // As it was left: the same stretch of the transcript on screen, the draft still in the composer.
         compose.waitUntil(20_000) { compose.onAllNodes(workerRow(WORKER)).fetchSemanticsNodes().isNotEmpty() }
         assertThat(firstWorkerRow().fetchSemanticsNode().boundsInRoot.top).isWithin(1f).of(rowTop)
-        assertThat(aboveDock(LATEST_REPLY)).isFalse()
+        assertThat(onScreen(LATEST_REPLY)).isFalse()
         compose.onNode(followUp and hasText(DRAFT, substring = true)).assertExists()
 
         // And back from the coordinator, entered from outside, is the New Chat pane, and from there the app's home.

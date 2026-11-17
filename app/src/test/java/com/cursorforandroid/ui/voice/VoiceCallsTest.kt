@@ -146,4 +146,22 @@ class VoiceCallsTest {
         calls.title("bc-2", "Other")
         assertThat(calls.line.value?.title).isEqualTo("Fix the login flow")
     }
+
+    @Test
+    fun `the call's settings are kept between calls, and what a call sent is remembered by chat`() = scope.runTest {
+        val store = VoiceSettingsStore.InMemory()
+        val calls = VoiceCalls(
+            newChat = { callScope, send ->
+                VoiceChat(callScope, TranscriptionApi { _, _, _ -> Transcription("", null) }, { QuietMic }, Voice(), send, clock = { scope.testScheduler.currentTime }, errorMessage = { "no" }, io = dispatcher)
+            },
+            clock = { scope.testScheduler.currentTime },
+            store = store,
+        )
+        calls.setSettings(VoiceCallSettings(speed = 1.5f, language = "fr"))
+        assertThat(store.load()).isEqualTo(VoiceCallSettings(speed = 1.5f, language = "fr"))
+        assertThat(calls.settings.value.languageTag).isEqualTo("fr")
+        assertThat(VoiceCallSettings.speedLabel(calls.settings.value.speed)).isEqualTo("1.5x")
+        assertThat(VoiceCallSettings.languageLabel("fr")).isEqualTo("French")
+        assertThat(calls.sentByVoice.value).isEmpty()
+    }
 }

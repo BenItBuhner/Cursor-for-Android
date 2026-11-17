@@ -8,7 +8,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -64,9 +63,7 @@ fun Modifier.dockedCard(
     surface: Modifier = Modifier,
 ): Modifier {
     val inset = composerDockInset(shape)
-    val glass = LocalGlass.current != null
-    return this.padding(start = inset.start, end = inset.end).then(surface)
-        .then(if (glass) Modifier.glassSurface(fill, border, shape).clip(shape) else Modifier.cursorSurface(fill, border, shape))
+    return this.padding(start = inset.start, end = inset.end).then(surface).cursorSurface(fill, border, shape)
 }
 
 /**

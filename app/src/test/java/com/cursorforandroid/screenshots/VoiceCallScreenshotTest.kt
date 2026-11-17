@@ -4,15 +4,18 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
@@ -24,12 +27,17 @@ import com.cursorforandroid.data.media.RecordedClip
 import com.cursorforandroid.ui.components.ComposerBox
 import com.cursorforandroid.ui.components.ComposerMenuActions
 import com.cursorforandroid.ui.components.VoiceInput
+import com.cursorforandroid.ui.components.cursorSurface
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
-import com.cursorforandroid.ui.voice.VoiceCallCard
-import com.cursorforandroid.ui.voice.VoiceCallStrip
+import com.cursorforandroid.ui.voice.VoiceCallChip
+import com.cursorforandroid.ui.voice.VoiceCallLabel
+import com.cursorforandroid.ui.voice.VoiceCallReturnTray
+import com.cursorforandroid.ui.voice.VoiceCallTranscript
+import com.cursorforandroid.ui.voice.VoiceCallTray
 import com.cursorforandroid.ui.voice.VoiceChatPhase
 import com.cursorforandroid.ui.voice.VoiceChatState
+import com.cursorforandroid.ui.voice.VoiceTurn
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import org.junit.Rule
@@ -41,9 +49,9 @@ import java.io.File
 
 /**
  * The voice chat as Cursor lays it out: the waveform "Start voice chat" button in an empty composer's Send slot with
- * dictation's microphone beside it, then the call card that stands in the composer's box through each thing a call
- * can be doing, and the strip another chat shows while the call is on. The clock is held, so the waveform's motion is
- * caught at the same instant every run.
+ * dictation's microphone beside it, then Cursor's call tray docked over the composer through each thing a call can be
+ * doing, its settings menu and transcript, and the return tray another chat shows while the call is on. The clock is
+ * held, so the line's motion is caught at the same instant every run.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @RunWith(AndroidJUnit4::class)
@@ -72,12 +80,8 @@ class VoiceCallScreenshotTest {
         captureScreenRoboImage(File(outDir, "$name.png").path, RoborazziOptions())
     }
 
-    private fun card(name: String, state: VoiceChatState, mode: ThemeMode = ThemeMode.Dark) = frame(name, mode) {
-        VoiceCallCard(state, elapsed = "1:24", onTap = {}, onMute = {}, onEnd = {})
-    }
-
-    @Test
-    fun startButton() = frame("1159_voice_chat_start_button") {
+    @Composable
+    private fun Composer(onStartVoiceChat: (() -> Unit)? = null) {
         val scope = rememberCoroutineScope()
         val voice = remember { VoiceInput(scope, NoTranscription, { SilentCapture }) }
         ComposerBox(
@@ -89,51 +93,94 @@ class VoiceCallScreenshotTest {
             modelLabel = "Claude Fable 5.1",
             onModel = {},
             voice = voice,
-            onStartVoiceChat = {},
+            onStartVoiceChat = onStartVoiceChat,
             modifier = Modifier.fillMaxWidth(),
         )
     }
 
-    @Test
-    fun waiting() = card("1160_voice_chat_waiting", VoiceChatState(VoiceChatPhase.Listening(heard = false)))
+    /** The tray where Cursor docks it, over the composer, which stays (without the start button: a call is on). */
+    private fun tray(name: String, state: VoiceChatState, mode: ThemeMode = ThemeMode.Dark, settingsOpen: Boolean = false) = frame(name, mode) {
+        VoiceCallTray(state, elapsed = "1:24", onMute = {}, onHangUp = {}, onTranscript = {}, settingsOpen = settingsOpen, modifier = Modifier.padding(bottom = 4.dp))
+        Composer()
+    }
 
     @Test
-    fun hearing() = card("1161_voice_chat_hearing", VoiceChatState(VoiceChatPhase.Listening(heard = true), level = 0.8f))
+    fun startButton() = frame("1159_voice_chat_start_button") { Composer(onStartVoiceChat = {}) }
 
     @Test
-    fun transcribing() = card("1162_voice_chat_transcribing", VoiceChatState(VoiceChatPhase.Transcribing))
+    fun listening() = tray("1160_voice_chat_listening", VoiceChatState(VoiceChatPhase.Listening(heard = false), level = 0.05f))
 
     @Test
-    fun working() = card(
-        "1163_voice_chat_working",
-        VoiceChatState(VoiceChatPhase.Working("Run the tests again and tell me which ones fail"), lastSaid = "Run the tests again and tell me which ones fail"),
-    )
+    fun hearing() = tray("1161_voice_chat_hearing", VoiceChatState(VoiceChatPhase.Listening(heard = true), level = 0.8f))
 
     @Test
-    fun speaking() = card(
-        "1164_voice_chat_speaking",
-        VoiceChatState(VoiceChatPhase.Speaking("All 412 tests pass. Two were flaky on the first run, so I ran them again in isolation and they held. The rest is in the chat.")),
-    )
+    fun thinking() = tray("1162_voice_chat_thinking", VoiceChatState(VoiceChatPhase.Transcribing))
 
     @Test
-    fun muted() = card("1165_voice_chat_on_hold", VoiceChatState(VoiceChatPhase.Muted))
+    fun working() = tray("1163_voice_chat_working", VoiceChatState(VoiceChatPhase.Working("Run the tests again and tell me which ones fail")))
 
     @Test
-    fun failed() = card("1166_voice_chat_failed", VoiceChatState(VoiceChatPhase.Failed("Couldn't reach Cursor. Check the connection and try again.", resumes = true)))
+    fun speaking() = tray("1164_voice_chat_speaking", VoiceChatState(VoiceChatPhase.Speaking("All 412 tests pass.")))
+
+    @Test
+    fun muted() = tray("1165_voice_chat_muted", VoiceChatState(VoiceChatPhase.Working("Run the tests again"), muted = true))
+
+    @Test
+    fun failed() = tray("1166_voice_chat_failed", VoiceChatState(VoiceChatPhase.Failed("Couldn't reach Cursor. Check the connection and try again.")))
 
     @Test
     @Config(sdk = [35], qualifiers = "w411dp-h220dp-notnight-420dpi")
-    fun hearingLight() = card("1167_voice_chat_hearing_light", VoiceChatState(VoiceChatPhase.Listening(heard = true), level = 0.8f), mode = ThemeMode.Light)
+    fun hearingLight() = tray("1167_voice_chat_hearing_light", VoiceChatState(VoiceChatPhase.Listening(heard = true), level = 0.8f), mode = ThemeMode.Light)
 
     @Test
-    fun stripInAnotherChat() = frame("1168_voice_chat_strip_elsewhere") {
-        VoiceCallStrip(
+    fun returnInAnotherChat() = frame("1168_voice_chat_return_elsewhere") {
+        VoiceCallReturnTray(
             title = "Fix flaky login test",
             state = VoiceChatState(VoiceChatPhase.Working("Run the tests again")),
             elapsed = "3:07",
-            onOpen = {},
-            onEnd = {},
+            onMute = {},
+            onHangUp = {},
+            onReturn = {},
+            modifier = Modifier.padding(bottom = 4.dp),
         )
+        Composer()
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h420dp-night-420dpi")
+    fun settingsMenu() = tray("1169_voice_chat_settings", VoiceChatState(VoiceChatPhase.Listening()), settingsOpen = true)
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h420dp-night-420dpi")
+    fun transcript() = frame("1171_voice_chat_transcript") {
+        VoiceCallTranscript(
+            turns = listOf(
+                VoiceTurn(fromUser = true, text = "Run the tests again and tell me which ones fail"),
+                VoiceTurn(fromUser = false, text = "All 412 tests pass. Two were flaky on the first run, so I ran them again in isolation and they held."),
+                VoiceTurn(fromUser = true, text = "Great, open a pull request for it"),
+            ),
+            started = "3:42 PM",
+            status = "Ongoing · 1:24",
+            modifier = Modifier.background(CursorTheme.colors.elevated),
+        )
+    }
+
+    @Test
+    fun pillAndLabel() = frame("1172_voice_chat_pill_and_label") {
+        // The sidebar's pill on the call's chat, and the label over a message that was said on the call.
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Fix flaky login test", style = CursorTheme.typography.row, color = CursorTheme.colors.textPrimary, modifier = Modifier.weight(1f))
+            VoiceCallChip(startedAtMs = 0L, elapsed = "3:07")
+        }
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+            VoiceCallLabel(Modifier.padding(end = 4.dp, bottom = 4.dp))
+            Text(
+                "Run the tests again and tell me which ones fail",
+                style = CursorTheme.typography.message,
+                color = CursorTheme.colors.textPrimary,
+                modifier = Modifier.cursorSurface(CursorTheme.colors.fillFaint, CursorTheme.colors.stroke, CursorTheme.shapes.xl).padding(horizontal = 10.dp, vertical = 8.dp),
+            )
+        }
     }
 
     private object SilentCapture : AudioCapture {
