@@ -33,9 +33,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -83,6 +81,7 @@ import com.cursorforandroid.ui.components.SheetHeader
 import com.cursorforandroid.ui.components.TouchTarget
 import com.cursorforandroid.ui.components.cursorSurface
 import com.cursorforandroid.ui.components.dockedCard
+import com.cursorforandroid.ui.components.fadingVerticalScroll
 import com.cursorforandroid.ui.components.findActivity
 import com.cursorforandroid.ui.components.openAppSettings
 import com.cursorforandroid.ui.components.rememberHaptics
@@ -554,7 +553,7 @@ fun VoiceCallTranscript(turns: List<VoiceTurn>, started: String, status: String,
         if (turns.isEmpty()) {
             Text(VoiceChatCopy.NothingSaid, style = type.base, color = colors.textTertiary, modifier = Modifier.padding(vertical = 12.dp))
         } else {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.fadingVerticalScroll(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 turns.forEach { turn ->
                     if (turn.fromUser) {
                         Box(Modifier.fillMaxWidth().padding(start = 32.dp), contentAlignment = Alignment.CenterEnd) {
