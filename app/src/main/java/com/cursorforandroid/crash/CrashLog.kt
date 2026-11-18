@@ -22,8 +22,12 @@ import java.time.Instant
  * Android's own record of how earlier processes ended (API 30+), so the deaths no handler sees are kept too: the
  * low-memory killer's, an ANR with its main-thread trace, a native crash, the system's signal.
  *
- * The newest report not yet dismissed is [pending]: the root's card offers it once, and the diagnostics export and
- * Settings carry every kept report ([export]). At most [MAX_REPORTS] are kept, each at most [MAX_REPORT_CHARS].
+ * The newest crash not yet dismissed is [pending]: the root's card offers it once, and the diagnostics export and
+ * Settings carry every kept report ([export]). Only a real crash reaches the card: the app's own uncaught exception, a
+ * native crash, an ANR, a failed start. Android ending the process on purpose (the low-memory killer, a kill for
+ * excessive resource use, a signal from the system) is kept quietly for the export, never offered on the card; the
+ * user's own swipe or force stop, a reboot, an update, are not kept at all. At most [MAX_REPORTS] crashes and
+ * [MAX_KILLS] system kills are kept, each at most [MAX_REPORT_CHARS].
  */
 class CrashLog(
     private val dir: File,
@@ -167,7 +171,7 @@ class CrashLog(
         val seenFile = File(dir, EXIT_SEEN)
         val seen = runCatching { seenFile.readText().trim().toLong() }.getOrDefault(0L)
         val exits = activityManager.getHistoricalProcessExitReasons(packageName, 0, MAX_EXITS_READ)
-            .filter { it.timestamp > seen && it.reason in REPORTED_REASONS }
+            .filter { it.timestamp > seen && (it.reason in CRASH_REASONS || it.reason in KILL_REASONS) }
             .sortedBy { it.timestamp }
         if (exits.isEmpty()) return
         dir.mkdirs()
@@ -178,7 +182,8 @@ class CrashLog(
                 runCatching { captured.appendText("\n---- Android's exit record ----\n" + describe(exit, withTrace = false)) }
                 continue
             }
-            val file = File(dir, "$PREFIX${exit.timestamp}-exit.txt")
+            val suffix = if (exit.reason in KILL_REASONS) KILL_SUFFIX else EXIT_SUFFIX
+            val file = File(dir, "$PREFIX${exit.timestamp}$suffix")
             val text = buildString {
                 appendLine("Cursor for Android ended at ${Instant.ofEpochMilli(exit.timestamp)}: ${reasonName(exit.reason)}")
                 appendLine("Read by $appVersion at ${Instant.ofEpochMilli(nowMillis())} from Android's exit record")
@@ -214,10 +219,10 @@ class CrashLog(
         }
     }
 
-    /** Reads the kept reports and publishes the newest undismissed one. Call off the main thread. */
+    /** Reads the kept reports and publishes the newest undismissed crash (never a system kill). Call off the main thread. */
     fun load() {
         val dismissed = runCatching { File(dir, DISMISSED).readText().trim().toLong() }.getOrDefault(0L)
-        val newest = reportFiles().lastOrNull() ?: run { _pending.value = null; return }
+        val newest = reportFiles().lastOrNull { !isKill(it) } ?: run { _pending.value = null; return }
         val at = millisOf(newest) ?: return
         if (at <= dismissed) { _pending.value = null; return }
         _pending.value = read(newest)
@@ -263,15 +268,30 @@ class CrashLog(
     private fun reportFiles(): List<File> =
         (dir.listFiles { f -> f.isFile && f.name.startsWith(PREFIX) } ?: emptyArray()).sortedBy { millisOf(it) ?: 0L }
 
+    /**
+     * A report of Android ending the process on purpose, not of a crash: written as such since this build, or an
+     * older build's exit report whose reason says so (so a low-memory kill kept before the update is not offered).
+     */
+    private fun isKill(file: File): Boolean {
+        if (file.name.endsWith(KILL_SUFFIX)) return true
+        if (!file.name.endsWith(EXIT_SUFFIX)) return false
+        val first = runCatching { file.useLines { it.firstOrNull() } }.getOrNull() ?: return false
+        return KILL_NAMES.any { first.endsWith(": $it") }
+    }
+
+    /** Crashes and system kills are capped apart, so a run of low-memory kills never pushes a real crash out. */
     private fun prune() {
-        val files = reportFiles()
-        if (files.size > MAX_REPORTS) files.take(files.size - MAX_REPORTS).forEach { it.delete() }
+        val (kills, crashes) = reportFiles().partition { isKill(it) }
+        if (crashes.size > MAX_REPORTS) crashes.take(crashes.size - MAX_REPORTS).forEach { it.delete() }
+        if (kills.size > MAX_KILLS) kills.take(kills.size - MAX_KILLS).forEach { it.delete() }
     }
 
     companion object {
         /** Under the app's files, not its cache: a report must outlive the cache clean-up and a low-storage purge. */
         const val DIRECTORY = "crash-reports"
         const val MAX_REPORTS = 8
+        /** System kills kept for the export, apart from [MAX_REPORTS]. */
+        const val MAX_KILLS = 4
         const val MAX_REPORT_CHARS = 120_000
         /** What the share sheet is handed at most: well under the binder's megabyte at two bytes a character. */
         const val SHARE_MAX_CHARS = 150_000
@@ -293,6 +313,8 @@ class CrashLog(
         /** How far apart the handler's own stamp and Android's exit record of the same crash can be. */
         private const val MATCH_WINDOW_MS = 30_000L
         private const val PREFIX = "report-"
+        private const val EXIT_SUFFIX = "-exit.txt"
+        private const val KILL_SUFFIX = "-kill.txt"
         private const val DISMISSED = "dismissed"
         private const val EXIT_SEEN = "exit-seen"
 
@@ -312,16 +334,26 @@ class CrashLog(
 
         private fun millisOf(file: File): Long? = file.name.removePrefix(PREFIX).substringBefore('-').toLongOrNull()
 
-        /** The ways a process ends that are the app's doing or the system's verdict on it, not the user's choice. */
-        private val REPORTED_REASONS = setOf(
+        /** The ways a process ends that are the app's own fault: kept, and offered on the card. */
+        private val CRASH_REASONS = setOf(
             ApplicationExitInfo.REASON_CRASH,
             ApplicationExitInfo.REASON_CRASH_NATIVE,
             ApplicationExitInfo.REASON_ANR,
+            ApplicationExitInfo.REASON_INITIALIZATION_FAILURE,
+        )
+
+        /**
+         * Android ending the process on purpose: kept for the export (a run of low-memory kills says the app holds too
+         * much), never offered on the card, which would call routine housekeeping a crash. Every other reason (the
+         * user's swipe or force stop, the app exiting itself, a permission change, a dependency dying, a reboot or an
+         * update, OTHER) is not kept at all.
+         */
+        private val KILL_REASONS = setOf(
             ApplicationExitInfo.REASON_LOW_MEMORY,
             ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
-            ApplicationExitInfo.REASON_INITIALIZATION_FAILURE,
             ApplicationExitInfo.REASON_SIGNALED,
         )
+        private val KILL_NAMES = listOf("LOW_MEMORY", "EXCESSIVE_RESOURCE_USAGE", "SIGNALED")
 
         fun reasonName(reason: Int): String = when (reason) {
             ApplicationExitInfo.REASON_CRASH -> "CRASH"
