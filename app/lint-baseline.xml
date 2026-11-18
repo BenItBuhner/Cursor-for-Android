@@ -1,0 +1,988 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.10.1" type="baseline" client="gradle" dependencies="false" name="AGP (8.10.1)" variant="all" version="8.10.1">
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 30 (current min is 26): `android.app.ApplicationExitInfo#REASON_CRASH`"
+        errorLine1="            ApplicationExitInfo.REASON_CRASH,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/crash/CrashLog.kt"
+            line="317"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 30 (current min is 26): `android.app.ApplicationExitInfo#REASON_CRASH_NATIVE`"
+        errorLine1="            ApplicationExitInfo.REASON_CRASH_NATIVE,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/crash/CrashLog.kt"
+            line="318"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 30 (current min is 26): `android.app.ApplicationExitInfo#REASON_ANR`"
+        errorLine1="            ApplicationExitInfo.REASON_ANR,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/crash/CrashLog.kt"
+            line="319"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 30 (current min is 26): `android.app.ApplicationExitInfo#REASON_LOW_MEMORY`"
+        errorLine1="            ApplicationExitInfo.REASON_LOW_MEMORY,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/crash/CrashLog.kt"
+            line="320"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 30 (current min is 26): `android.app.ApplicationExitInfo#REASON_EXCESSIVE_RESOURCE_USAGE`"
+        errorLine1="            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/crash/CrashLog.kt"
+            line="321"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 30 (current min is 26): `android.app.ApplicationExitInfo#REASON_INITIALIZATION_FAILURE`"
+        errorLine1="            ApplicationExitInfo.REASON_INITIALIZATION_FAILURE,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/crash/CrashLog.kt"
+            line="322"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 30 (current min is 26): `android.app.ApplicationExitInfo#REASON_SIGNALED`"
+        errorLine1="            ApplicationExitInfo.REASON_SIGNALED,"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/crash/CrashLog.kt"
+            line="323"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InlinedApi"
+        message="Field requires API level 28 (current min is 26): `android.view.KeyEvent#KEYCODE_ALL_APPS`"
+        errorLine1="        KeyEvent.KEYCODE_SYSRQ, KeyEvent.KEYCODE_NOTIFICATION, KeyEvent.KEYCODE_ALL_APPS, KeyEvent.KEYCODE_ASSIST,"
+        errorLine2="                                                               ~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/shortcuts/ShortcutBindings.kt"
+            line="247"
+            column="64"/>
+    </issue>
+
+    <issue
+        id="OldTargetApi"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the `android.os.Build.VERSION_CODES` javadoc for details."
+        errorLine1="        targetSdk = 35"
+        errorLine2="        ~~~~~~~~~~~~~~">
+        <location
+            file="build.gradle.kts"
+            line="212"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `previewLayout` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:previewLayout=&quot;@layout/widget_chats_preview&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_chats_info.xml"
+            line="18"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `targetCellWidth` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:targetCellWidth=&quot;4&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_chats_info.xml"
+            line="20"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `targetCellHeight` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:targetCellHeight=&quot;2&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_chats_info.xml"
+            line="21"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `widgetFeatures` is only used in API level 28 and higher (current min is 26)"
+        errorLine1="    android:widgetFeatures=&quot;reconfigurable&quot; />"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_chats_info.xml"
+            line="24"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `previewLayout` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:previewLayout=&quot;@layout/widget_compose_bar_preview&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_compose_bar_info.xml"
+            line="17"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `targetCellWidth` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:targetCellWidth=&quot;4&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_compose_bar_info.xml"
+            line="19"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `targetCellHeight` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:targetCellHeight=&quot;1&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_compose_bar_info.xml"
+            line="20"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `widgetFeatures` is only used in API level 28 and higher (current min is 26)"
+        errorLine1="    android:widgetFeatures=&quot;reconfigurable|configuration_optional&quot; />"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_compose_bar_info.xml"
+            line="23"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `previewLayout` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:previewLayout=&quot;@layout/widget_shortcut_preview&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_shortcut_info.xml"
+            line="18"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `targetCellWidth` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:targetCellWidth=&quot;1&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_shortcut_info.xml"
+            line="20"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `targetCellHeight` is only used in API level 31 and higher (current min is 26)"
+        errorLine1="    android:targetCellHeight=&quot;1&quot;"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_shortcut_info.xml"
+            line="21"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="UnusedAttribute"
+        message="Attribute `widgetFeatures` is only used in API level 28 and higher (current min is 26)"
+        errorLine1="    android:widgetFeatures=&quot;reconfigurable|configuration_optional&quot; />"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/widget_shortcut_info.xml"
+            line="24"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of Gradle than 8.11.1 is available: 8.14.7"
+        errorLine1="distributionUrl=https\://services.gradle.org/distributions/gradle-8.11.1-bin.zip"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="../gradle/wrapper/gradle-wrapper.properties"
+            line="3"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="AndroidGradlePluginVersion"
+        message="A newer version of com.android.application than 8.10.1 is available: 9.5.1"
+        errorLine1="agp = &quot;8.10.1&quot;"
+        errorLine2="      ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="2"
+            column="7"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-ktx than 1.17.0 is available: 1.19.1"
+        errorLine1="coreKtx = &quot;1.17.0&quot;"
+        errorLine2="          ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="4"
+            column="11"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.activity:activity-compose than 1.9.3 is available: 1.13.0"
+        errorLine1="activityCompose = &quot;1.9.3&quot;"
+        errorLine2="                  ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="5"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-process than 2.8.7 is available: 2.11.0"
+        errorLine1="lifecycle = &quot;2.8.7&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="6"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-compose than 2.8.7 is available: 2.11.0"
+        errorLine1="lifecycle = &quot;2.8.7&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="6"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.8.7 is available: 2.11.0"
+        errorLine1="lifecycle = &quot;2.8.7&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="6"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.compose:compose-bom than 2024.12.01 is available: 2026.09.00"
+        errorLine1="composeBom = &quot;2024.12.01&quot;"
+        errorLine2="             ~~~~~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="7"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.datastore:datastore-preferences than 1.1.1 is available: 1.3.0"
+        errorLine1="datastore = &quot;1.1.1&quot;"
+        errorLine2="            ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="8"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.security:security-crypto than 1.1.0-alpha06 is available: 1.1.0"
+        errorLine1="securityCrypto = &quot;1.1.0-alpha06&quot;"
+        errorLine2="                 ~~~~~~~~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="9"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-splashscreen than 1.0.1 is available: 1.2.0"
+        errorLine1="splashscreen = &quot;1.0.1&quot;"
+        errorLine2="               ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="10"
+            column="16"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.browser:browser than 1.8.0 is available: 1.10.0"
+        errorLine1="browser = &quot;1.8.0&quot;"
+        errorLine2="          ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="18"
+            column="11"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.media3:media3-exoplayer than 1.11.0 is available: 1.11.1"
+        errorLine1="media3 = &quot;1.11.0&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="21"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.media3:media3-ui than 1.11.0 is available: 1.11.1"
+        errorLine1="media3 = &quot;1.11.0&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="21"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.work:work-runtime-ktx than 2.10.1 is available: 2.12.0"
+        errorLine1="work = &quot;2.10.1&quot;"
+        errorLine2="       ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="26"
+            column="8"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of io.sentry:sentry-android-core than 8.16.0 is available: 8.64.0"
+        errorLine1="sentry = &quot;8.16.0&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="28"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.window:window than 1.4.0 is available: 1.5.1"
+        errorLine1="window = &quot;1.4.0&quot;"
+        errorLine2="         ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="30"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.window:window-testing than 1.4.0 is available: 1.5.1"
+        errorLine1="window = &quot;1.4.0&quot;"
+        errorLine2="         ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="30"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test.ext:junit than 1.2.1 is available: 1.3.0"
+        errorLine1="androidxTestExt = &quot;1.2.1&quot;"
+        errorLine2="                  ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="45"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.test:core-ktx than 1.6.1 is available: 1.7.0"
+        errorLine1="androidxTestCore = &quot;1.6.1&quot;"
+        errorLine2="                   ~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="46"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="SimilarGradleDependency"
+        message="There are multiple dependencies org.robolectric:android-all-instrumented but with different version"
+        errorLine1="robolectric-android-all-sdk35 = { group = &quot;org.robolectric&quot;, name = &quot;android-all-instrumented&quot;, version.ref = &quot;robolectricAndroidAllSdk35&quot; }"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="98"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="SimilarGradleDependency"
+        message="There are multiple dependencies org.robolectric:android-all-instrumented but with different version"
+        errorLine1="robolectric-android-all-sdk30 = { group = &quot;org.robolectric&quot;, name = &quot;android-all-instrumented&quot;, version.ref = &quot;robolectricAndroidAllSdk30&quot; }"
+        errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="99"
+            column="34"/>
+    </issue>
+
+    <issue
+        id="ComposableNaming"
+        message="Composable functions with a return type should start with a lowercase letter"
+        errorLine1="internal fun CoordinatorStep(call: ToolCall, modifier: Modifier = Modifier): Boolean {"
+        errorLine2="             ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/conversation/CoordinatorContent.kt"
+            line="59"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="internal fun LazyItemScope.captionFade(fadeIn: Animatable&lt;Float, AnimationVector1D>): Modifier ="
+        errorLine2="                           ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/conversation/ConversationScreen.kt"
+            line="175"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="    fun hold(key: String): Modifier = if (holding &amp;&amp; key in keys) Modifier.graphicsLayer { alpha = fade.value } else Modifier"
+        errorLine2="        ~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/conversation/ConversationScreen.kt"
+            line="198"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="    fun controls(side: Side, reachPx: Float): Modifier = Modifier.onGloballyPositioned { coordinates ->"
+        errorLine2="        ~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/components/HeaderClearance.kt"
+            line="59"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="internal fun LazyItemScope.rowMotion(row: TranscriptRow, open: OpenStretches): Modifier {"
+        errorLine2="                           ~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/conversation/OpenStretches.kt"
+            line="242"
+            column="28"/>
+    </issue>
+
+    <issue
+        id="ModifierFactoryExtensionFunction"
+        message="Modifier factory functions should be extensions on Modifier"
+        errorLine1="private fun LazyItemScope.rowMotion(animate: Boolean): Modifier ="
+        errorLine2="                          ~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/agents/Sidebar.kt"
+            line="528"
+            column="27"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/agents/AgentRowItem.kt"
+            line="114"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be named modifier"
+        errorLine1="    private fun Row(viewer: MediaViewerState? = null, onRemoveImage: (PendingAttachment) -> Unit = {}, onRemoveFile: (PendingFile) -> Unit = {}, onRetry: ((PendingFile) -> Unit)? = null, uploads: Map&lt;String, FileUploadState> = emptyMap(), files: List&lt;PendingFile> = listOf(picked, clip, pdf), images: List&lt;PendingAttachment> = listOf(pasted), width: Modifier = Modifier.width(400.dp)) {"
+        errorLine2="                                                                                                                                                                                                                                                                                                                                                       ~~~~~">
+        <location
+            file="src/test/java/com/cursorforandroid/ui/components/ComposerMediaChipTest.kt"
+            line="62"
+            column="344"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    private fun Row(viewer: MediaViewerState? = null, onRemoveImage: (PendingAttachment) -> Unit = {}, onRemoveFile: (PendingFile) -> Unit = {}, onRetry: ((PendingFile) -> Unit)? = null, uploads: Map&lt;String, FileUploadState> = emptyMap(), files: List&lt;PendingFile> = listOf(picked, clip, pdf), images: List&lt;PendingAttachment> = listOf(pasted), width: Modifier = Modifier.width(400.dp)) {"
+        errorLine2="                                                                                                                                                                                                                                                                                                                                                       ~~~~~">
+        <location
+            file="src/test/java/com/cursorforandroid/ui/components/ComposerMediaChipTest.kt"
+            line="62"
+            column="344"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Optional Modifier parameter should have a default value of `Modifier`"
+        errorLine1="    private fun Row(viewer: MediaViewerState? = null, onRemoveImage: (PendingAttachment) -> Unit = {}, onRemoveFile: (PendingFile) -> Unit = {}, onRetry: ((PendingFile) -> Unit)? = null, uploads: Map&lt;String, FileUploadState> = emptyMap(), files: List&lt;PendingFile> = listOf(picked, clip, pdf), images: List&lt;PendingAttachment> = listOf(pasted), width: Modifier = Modifier.width(400.dp)) {"
+        errorLine2="                                                                                                                                                                                                                                                                                                                                                       ~~~~~">
+        <location
+            file="src/test/java/com/cursorforandroid/ui/components/ComposerMediaChipTest.kt"
+            line="62"
+            column="344"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="internal fun EventRow(item: SystemNotification, count: Int = 1, modifier: Modifier = Modifier) {"
+        errorLine2="                                                                ~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/conversation/EventRows.kt"
+            line="59"
+            column="65"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="    modifier: Modifier = Modifier,"
+        errorLine2="    ~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/components/FileAttachments.kt"
+            line="372"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="internal fun AttachmentFileCard(attachment: MessageAttachment, alpha: Float = 1f, modifier: Modifier = Modifier) {"
+        errorLine2="                                                                                  ~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/conversation/MessageAttachments.kt"
+            line="158"
+            column="83"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="internal fun EmptyRow(text: String, detail: String? = null, modifier: Modifier = Modifier) {"
+        errorLine2="                                                            ~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/panel/PanelPrimitives.kt"
+            line="210"
+            column="61"/>
+    </issue>
+
+    <issue
+        id="ModifierParameter"
+        message="Modifier parameter should be the first optional parameter"
+        errorLine1="internal fun FailedRow(message: String, onRetry: (() -> Unit)?, secondaryLabel: String? = null, onSecondary: (() -> Unit)? = null, modifier: Modifier = Modifier) {"
+        errorLine2="                                                                                                                                   ~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/panel/PanelPrimitives.kt"
+            line="215"
+            column="132"/>
+    </issue>
+
+    <issue
+        id="ExportedReceiver"
+        message="Exported receiver does not require permission"
+        errorLine1="        &lt;receiver"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="8"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:dataExtractionRules` only applies for Android 12 and higher; since `minSdkVersion` is API 26 you should also set `android:fullBackupContent`"
+        errorLine1="        android:dataExtractionRules=&quot;@xml/data_extraction_rules&quot;"
+        errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="44"
+            column="38"/>
+    </issue>
+
+    <issue
+        id="Recycle"
+        message="This `OutputStream` should be freed up after use with `#close()`"
+        errorLine1="            val out = resolver.openOutputStream(uri, &quot;w&quot;) ?: throw IOException(&quot;Couldn&apos;t write to the gallery.&quot;)"
+        errorLine2="                               ~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/media/GallerySaver.kt"
+            line="62"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="ObsoleteSdkInt"
+        message="This folder configuration (`v26`) is unnecessary; `minSdkVersion` is 26. Merge all the resources in this folder into `mipmap-anydpi`.">
+        <location
+            file="src/main/res/mipmap-anydpi-v26"/>
+    </issue>
+
+    <issue
+        id="UseCompoundDrawables"
+        message="This tag and its children can be replaced by one `&lt;TextView/>` and a compound drawable"
+        errorLine1="            &lt;LinearLayout"
+        errorLine2="             ~~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/widget_chats_preview.xml"
+            line="36"
+            column="14"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.spotlight_action` appears to be unused"
+        errorLine1="    &lt;string name=&quot;spotlight_action&quot;>Spotlight&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="42"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.widget_configure_preview` appears to be unused"
+        errorLine1="    &lt;string name=&quot;widget_configure_preview&quot;>Preview&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="59"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.widget_configure_density` appears to be unused"
+        errorLine1="    &lt;string name=&quot;widget_configure_density&quot;>Density&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="73"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.widget_configure_subtitle` appears to be unused"
+        errorLine1="    &lt;string name=&quot;widget_configure_subtitle&quot;>What it shows and how it looks&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="79"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UnusedResources"
+        message="The resource `R.string.widget_configure_group` appears to be unused"
+        errorLine1="    &lt;string name=&quot;widget_configure_group&quot;>Show&lt;/string>"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/values/strings.xml"
+            line="80"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="    val storage = context.getSystemService(StorageManager::class.java) ?: return@runCatching dir.usableSpace"
+        errorLine2="                                                                                                 ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/update/AndroidUpdatePlatform.kt"
+            line="126"
+            column="98"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="}.getOrElse { dir.usableSpace }"
+        errorLine2="                  ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/update/AndroidUpdatePlatform.kt"
+            line="128"
+            column="19"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="        return at.cache.root.usableSpace - (after - bytes) >= MIN_FREE_BYTES"
+        errorLine2="                             ~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/data/local/TextSpill.kt"
+            line="120"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="UselessParent"
+        message="This `FrameLayout` layout or its `FrameLayout` parent is unnecessary; transfer the `background` attribute to the other view"
+        errorLine1="    &lt;FrameLayout"
+        errorLine2="     ~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/widget_compose_bar_loading.xml"
+            line="11"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="UselessParent"
+        message="This `FrameLayout` layout or its `FrameLayout` parent is unnecessary; transfer the `background` attribute to the other view"
+        errorLine1="    &lt;FrameLayout"
+        errorLine2="     ~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/widget_compose_bar_preview.xml"
+            line="11"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="UselessParent"
+        message="This `FrameLayout` layout or its `FrameLayout` parent is unnecessary; transfer the `background` attribute to the other view"
+        errorLine1="    &lt;FrameLayout"
+        errorLine2="     ~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/widget_shortcut_loading.xml"
+            line="11"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="UselessParent"
+        message="This `FrameLayout` layout or its `FrameLayout` parent is unnecessary; transfer the `background` attribute to the other view"
+        errorLine1="    &lt;FrameLayout"
+        errorLine2="     ~~~~~~~~~~~">
+        <location
+            file="src/main/res/layout/widget_shortcut_preview.xml"
+            line="11"
+            column="6"/>
+    </issue>
+
+    <issue
+        id="IconDuplicates"
+        message="The following unrelated icon files have identical contents: widget_compose_bar_preview.png, widget_shortcut_preview.png">
+        <location
+            file="src/main/res/drawable-nodpi/widget_shortcut_preview.png"/>
+        <location
+            file="src/main/res/drawable-nodpi/widget_compose_bar_preview.png"/>
+    </issue>
+
+    <issue
+        id="ReportShortcutUsage"
+        message="Calling this method indicates use of dynamic shortcuts, but there are no calls to methods that track shortcut usage, such as `pushDynamicShortcut` or `reportShortcutUsed`. Calling these methods is recommended, as they track shortcut usage and allow launchers to adjust which shortcuts appear based on activation history. Please see https://developer.android.com/develop/ui/views/launch/shortcuts/managing-shortcuts#track-usage"
+        errorLine1="            ShortcutManagerCompat.setDynamicShortcuts(context, picks.mapIndexed { rank, pick -> shortcut(context, pick, rank) })"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/shortcuts/LauncherShortcuts.kt"
+            line="113"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Bitmap.scale` instead?"
+        errorLine1="    val fitted = if (decoded.width > width || decoded.height > height) Bitmap.createScaledBitmap(decoded, width, height, true) else decoded"
+        errorLine2="                                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/components/Attachments.kt"
+            line="84"
+            column="72"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toColorInt` instead?"
+        errorLine1="    private val DEFAULT_DISC = Color.parseColor(&quot;#14120B&quot;)"
+        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/shortcuts/LauncherShortcuts.kt"
+            line="141"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bitmap = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/shortcuts/LauncherShortcuts.kt"
+            line="159"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX function `createBitmap` instead?"
+        errorLine1="        val bitmap = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)"
+        errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/widget/ProjectIconBitmaps.kt"
+            line="44"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `Canvas.withTranslation` instead?"
+        errorLine1="        canvas.save()"
+        errorLine2="        ~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/widget/ProjectIconBitmaps.kt"
+            line="53"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        return runCatching { prefs.edit().remove(KEY_API_KEY).commit() }"
+        errorLine2="                             ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/data/local/SecureKeyStore.kt"
+            line="253"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        return runCatching { prefs.edit().putBoolean(KEY_SIGNED_OUT, true).commit() }"
+        errorLine2="                             ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/data/local/SecureKeyStore.kt"
+            line="273"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        val dropped = runCatching { prefs.edit().remove(key).commit() }.getOrDefault(false)"
+        errorLine2="                                    ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/data/local/SecureKeyStore.kt"
+            line="297"
+            column="37"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            prefs.edit().apply { if (value.isNullOrBlank()) remove(key) else putString(key, value) }.commit()"
+        errorLine2="            ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/data/local/SecureKeyStore.kt"
+            line="306"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            values.isEmpty() || prefs.edit().apply { values.forEach { (key, value) -> putString(key, value) } }.commit()"
+        errorLine2="                                ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/data/local/SecureKeyStore.kt"
+            line="351"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            if (prefs.contains(LEGACY_KEY_GITHUB_TOKEN)) prefs.edit().remove(LEGACY_KEY_GITHUB_TOKEN).apply()"
+        errorLine2="                                                         ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/data/local/SecureKeyStore.kt"
+            line="373"
+            column="58"/>
+    </issue>
+
+    <issue
+        id="ModifierNodeInspectableProperties"
+        message="AbsorbingGrowthElement does not override inspectableProperties(). The layout inspector will use the default implementation of this function, which will attempt to read AbsorbingGrowthElement&apos;s properties reflectively. Override inspectableProperties() if you&apos;d like to customize this modifier&apos;s presentation in the layout inspector."
+        errorLine1="private data class AbsorbingGrowthElement(val scroll: TranscriptScroll, val key: Any, val held: RowGrowth) : ModifierNodeElement&lt;AbsorbingGrowthNode>() {"
+        errorLine2="                   ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/ui/conversation/TranscriptScroll.kt"
+            line="480"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="ClickableViewAccessibility"
+        message="Custom view `PreviewHostView` overrides `onTouchEvent` but not `performClick`"
+        errorLine1="    override fun onTouchEvent(event: MotionEvent?): Boolean = true"
+        errorLine2="                 ~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/cursorforandroid/widget/WidgetPreview.kt"
+            line="166"
+            column="18"/>
+    </issue>
+
+</issues>
