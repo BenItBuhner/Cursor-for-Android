@@ -161,7 +161,10 @@ class SiderailSearchScreenshotTest {
         compose.onNodeWithContentDescription("Search chats").performClick()
         compose.waitUntil(10_000) { tagged(PaletteTags.CARD) }
         compose.waitUntil(20_000) { onScreen(PaletteCopy.PLACEHOLDER) }
-        compose.waitUntil(20_000) { !onScreen(PaletteCopy.READING) }
+        // The palette keeps "Reading transcripts…" up until the on-device index finishes. On a loaded runner that
+        // read has taken longer than twenty seconds while the rest of the suite is also up; the golden is the
+        // settled palette, so the wait is the index, not a frame.
+        compose.waitUntil(90_000) { !onScreen(PaletteCopy.READING) }
         compose.waitForIdle()
         capture("1141_siderail_search_tablet")
     }
