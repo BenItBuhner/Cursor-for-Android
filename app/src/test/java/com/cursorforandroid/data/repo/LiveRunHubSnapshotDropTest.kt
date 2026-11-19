@@ -66,17 +66,7 @@ class LiveRunHubSnapshotDropTest {
     fun `a dropped stream keeps its snapshot and continues it after the reconnect delay`() = runTest {
         val dispatcher = UnconfinedTestDispatcher(testScheduler)
         val hubScope = CoroutineScope(coroutineContext + SupervisorJob() + dispatcher)
-        val hub = LiveRunHub(
-            session,
-            agents,
-            nowProvider = { 1_800_000_000_000L },
-            pollIntervalMs = 60_000L,
-            releaseGraceMs = 60_000L,
-            reconnectBaseMs = 1_000L,
-            reconnectMaxMs = 1_000L,
-            stallTimeoutMs = 0L,
-            scope = hubScope,
-        )
+        val hub = newHub(hubScope)
         api.addRunningAgent("bc-1", "Agent", "run-1")
         streamer.emit("run-1", RunStreamEvent.Status("run-1", RunStatus.RUNNING))
         streamer.emit("run-1", RunStreamEvent.Thinking("Reading the code."))
@@ -94,7 +84,7 @@ class LiveRunHubSnapshotDropTest {
         assertThat(dropped.finished).isFalse()
         assertThat(dropped.status).isEqualTo(RunStatus.RUNNING)
         val droppedWork = dropped.items.filterIsInstance<ActivityGroup>().single()
-        assertThat(droppedWork.thoughts.map { it.text }).containsExactly("Reading the code.")
+        assertThat(thoughtTexts(dropped)).containsExactly("Reading the code.")
         assertThat(droppedWork.calls.single().status).isEqualTo("running")
         assertThat(streamer.resumes).containsExactly(null)
         assertThat(seen.last().reconnecting).isTrue()
@@ -105,8 +95,7 @@ class LiveRunHubSnapshotDropTest {
         assertThat(streamer.resumes).containsExactly(null, "run-1#3").inOrder()
         val held = hub.current("bc-1", "run-1")!!
         assertThat(held.reconnecting).isTrue()
-        assertThat(held.items.filterIsInstance<ActivityGroup>().single().thoughts.map { it.text })
-            .containsExactly("Reading the code.")
+        assertThat(thoughtTexts(held)).containsExactly("Reading the code.")
 
         streamer.emit("run-1", tool("c1", "read_file", "completed", "README.md"))
         streamer.emit("run-1", RunStreamEvent.Assistant("Done."))
@@ -116,7 +105,7 @@ class LiveRunHubSnapshotDropTest {
         assertThat(continued.reconnecting).isFalse()
         assertThat(continued.finished).isFalse()
         val continuedWork = continued.items.filterIsInstance<ActivityGroup>().single()
-        assertThat(continuedWork.thoughts.map { it.text }).containsExactly("Reading the code.")
+        assertThat(thoughtTexts(continued)).containsExactly("Reading the code.")
         assertThat(continuedWork.thoughts.single().isStreaming).isFalse()
         assertThat(continuedWork.calls.single().status).isEqualTo("completed")
         assertThat(continued.items.filterIsInstance<AssistantMessage>().map { it.markdown }).containsExactly("Done.")
@@ -124,7 +113,7 @@ class LiveRunHubSnapshotDropTest {
         assertThat(seen.last().reconnecting).isFalse()
         val withWork = seen.filter { snap -> snap.items.any { it is ActivityGroup } }
         assertThat(withWork).isNotEmpty()
-        assertThat(withWork.map { snap -> snap.items.filterIsInstance<ActivityGroup>().single().thoughts.map { it.text } })
+        assertThat(withWork.map(::thoughtTexts))
             .containsExactlyElementsIn(List(withWork.size) { listOf("Reading the code.") })
             .inOrder()
 
@@ -132,7 +121,27 @@ class LiveRunHubSnapshotDropTest {
         hubScope.cancel()
     }
 
+    private fun newHub(scope: CoroutineScope) = LiveRunHub(
+        session,
+        agents,
+        nowProvider = { 1_800_000_000_000L },
+        pollIntervalMs = 60_000L,
+        releaseGraceMs = 60_000L,
+        reconnectBaseMs = 1_000L,
+        reconnectMaxMs = 1_000L,
+        stallTimeoutMs = 0L,
+        scope = scope,
+    )
+
+    private fun thoughtTexts(snapshot: LiveRunHub.Snapshot): List<String> =
+        snapshot.items.filterIsInstance<ActivityGroup>().single().thoughts.map { it.text }
+
     private fun tool(id: String, name: String, status: String, path: String) = RunStreamEvent.ToolCall(
-        SseToolCallDto(callId = id, name = name, status = status, args = buildJsonObject { put("path", JsonPrimitive(path)) }),
+        SseToolCallDto(
+            callId = id,
+            name = name,
+            status = status,
+            args = buildJsonObject { put("path", JsonPrimitive(path)) },
+        ),
     )
 }
