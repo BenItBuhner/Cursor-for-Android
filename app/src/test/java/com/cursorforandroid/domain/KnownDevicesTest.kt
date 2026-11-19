@@ -153,4 +153,50 @@ class KnownDevicesTest {
         // A remote that names no owner and repository is no URL to send; the registered label is what is left.
         assertThat(DeviceOption.repositoryUrl("https://github.com/acme", "acme", "app")).isEqualTo("https://github.com/acme/app")
     }
+
+    private fun machine(name: String, online: Boolean = true, busy: Boolean = false, listed: Boolean = true, lastUsedAgo: Long? = null) = DeviceOption(
+        target = DeviceTarget.machine(name),
+        subtitle = if (busy) "Busy" else "Online",
+        online = online,
+        lastUsedAtMillis = lastUsedAgo?.let { now - it } ?: 0L,
+        section = DeviceSection.Machines,
+        worker = if (listed) MachineWorker(workerId = "pw_$name", name = name) else null,
+        busy = busy,
+    )
+
+    @Test
+    fun `a machine that is online and free is ready, whatever the composer is on`() {
+        val devices = listOf(KnownDevices.cloud, machine("macbook"))
+        assertThat(KnownDevices.readyMachines(devices).map { it.target }).containsExactly(DeviceTarget.machine("macbook"))
+    }
+
+    @Test
+    fun `a busy machine, one nothing lists and a team pool are not ready`() {
+        val pool = DeviceOption(target = DeviceTarget.pool("gpu"), subtitle = "2 connected", online = true, section = DeviceSection.Pools)
+        val devices = listOf(
+            KnownDevices.cloud,
+            machine("busy-box", busy = true),
+            machine("remembered", online = false, listed = false),
+            pool,
+        )
+        assertThat(KnownDevices.readyMachines(devices)).isEmpty()
+    }
+
+    @Test
+    fun `of several free machines the one used most recently is first, then by name`() {
+        val devices = listOf(KnownDevices.cloud, machine("zeta", lastUsedAgo = hour), machine("alpha", lastUsedAgo = 3 * hour), machine("beta"))
+        assertThat(KnownDevices.readyMachines(devices).map { it.target.label }).containsExactly("zeta", "alpha", "beta").inOrder()
+        val unused = listOf(KnownDevices.cloud, machine("studio"), machine("Macbook"))
+        assertThat(KnownDevices.readyMachines(unused).map { it.target.label }).containsExactly("Macbook", "studio").inOrder()
+    }
+
+    /** `compose` keeps what the fleet said about a listed machine, so it is still ready after the merge with the agent list. */
+    @Test
+    fun `a ready machine is read from the composed list`() {
+        val listed = KnownDevices.compose(
+            listOf(agent("chat", EnvType.MACHINE, "macbook", updatedAgo = hour)),
+            live = listOf(machine("macbook")),
+        )
+        assertThat(KnownDevices.readyMachines(listed).map { it.target }).containsExactly(DeviceTarget.machine("macbook"))
+    }
 }

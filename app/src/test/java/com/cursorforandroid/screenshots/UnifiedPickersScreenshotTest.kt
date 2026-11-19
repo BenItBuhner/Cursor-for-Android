@@ -54,6 +54,8 @@ import com.cursorforandroid.ui.home.NewChatHomeFixtures
 import com.cursorforandroid.ui.navigation.SidebarRail
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.ui.theme.ThemeMode
+import com.cursorforandroid.data.demo.SECOND_MACHINE
+import com.cursorforandroid.data.demo.SECOND_MACHINE_WAKES_MS
 import com.cursorforandroid.util.AppClock
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.RoborazziOptions
@@ -210,6 +212,14 @@ class UnifiedPickersScreenshotTest {
         capture(frame)
     }
 
+    /** The demo account's second computer has come online and is free: it is a row of the menu, next to Cloud. */
+    private fun deviceReadyMachine(mode: ThemeMode, frame: String) {
+        AppClock.nowMillis = { NewChatHomeFixtures.NOW + 2 * SECOND_MACHINE_WAKES_MS }
+        openFromChip(mode) { clickChip(DEVICE_CHIP) }
+        compose.waitUntil(20_000) { devicesLoaded() && onScreen(SECOND_MACHINE) }
+        capture(frame)
+    }
+
     private fun deviceRemote(mode: ThemeMode, frame: String) {
         openFromChip(mode) { clickChip(DEVICE_CHIP) }
         compose.waitUntil(20_000) { devicesLoaded() }
@@ -315,6 +325,10 @@ class UnifiedPickersScreenshotTest {
     @Test @Config(sdk = [35], qualifiers = PHONE_LIGHT) fun deviceRemotePhoneLight() = deviceRemote(ThemeMode.Light, "1121_picker_device_remote_phone_light")
     @Test @Config(sdk = [35], qualifiers = TABLET_DARK) fun deviceRemoteTabletDark() = deviceRemote(ThemeMode.Dark, "1122_picker_device_remote_tablet_dark")
     @Test @Config(sdk = [35], qualifiers = TABLET_LIGHT) fun deviceRemoteTabletLight() = deviceRemote(ThemeMode.Light, "1123_picker_device_remote_tablet_light")
+
+    @Test fun deviceReadyMachinePhoneDark() = deviceReadyMachine(ThemeMode.Dark, "1150_picker_device_ready_machine_phone_dark")
+    @Test @Config(sdk = [35], qualifiers = PHONE_LIGHT) fun deviceReadyMachinePhoneLight() = deviceReadyMachine(ThemeMode.Light, "1151_picker_device_ready_machine_phone_light")
+    @Test @Config(sdk = [35], qualifiers = TABLET_DARK) fun deviceReadyMachineTabletDark() = deviceReadyMachine(ThemeMode.Dark, "1152_picker_device_ready_machine_tablet_dark")
 
     @Test fun chatsPhoneDark() = chatsMenu(ThemeMode.Dark, "1124_picker_chats_phone_dark")
     @Test @Config(sdk = [35], qualifiers = PHONE_LIGHT) fun chatsPhoneLight() = chatsMenu(ThemeMode.Light, "1125_picker_chats_phone_light")
