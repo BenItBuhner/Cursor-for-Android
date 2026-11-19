@@ -132,6 +132,7 @@ import com.cursorforandroid.data.repo.SlashCommandRepository
 import com.cursorforandroid.data.repo.SteeringRepository
 import com.cursorforandroid.data.repo.StoreFileRepository
 import com.cursorforandroid.data.repo.WorkspaceRepository
+import com.cursorforandroid.data.runCatchingCancellable
 import com.cursorforandroid.data.update.GitHubReleasesClient
 import com.cursorforandroid.data.update.UpdateCache
 import com.cursorforandroid.data.update.UpdateManager
@@ -649,7 +650,7 @@ class AppGraph(
      */
     suspend fun accountBranches(repoUrl: String): List<AccountBranch> {
         if (session.isDemo || !capabilities().accountSession) return emptyList()
-        return runCatching { lazyRepositoryBranches.value.branches(repoUrl) }.getOrDefault(emptyList())
+        return runCatchingCancellable { lazyRepositoryBranches.value.branches(repoUrl) }.getOrDefault(emptyList())
     }
 
     /** What the last refresh cost, stage by stage, across the list, the account round, the Projects and the badges (see [RefreshStats]). */

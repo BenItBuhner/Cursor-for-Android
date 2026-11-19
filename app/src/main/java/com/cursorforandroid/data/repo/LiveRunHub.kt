@@ -4,6 +4,7 @@ import com.cursorforandroid.crash.Breadcrumbs
 import com.cursorforandroid.data.api.RunStreamEvent
 import com.cursorforandroid.data.api.dto.RunDto
 import com.cursorforandroid.data.local.JsonDiskCache
+import com.cursorforandroid.data.runCatchingCancellable
 import com.cursorforandroid.domain.AgentLifecycle
 import com.cursorforandroid.domain.RunStatus
 import com.cursorforandroid.domain.TimelineItem
@@ -815,7 +816,7 @@ class LiveRunHub(
      */
     private suspend fun settleFromRecord(entry: Entry, self: Job?, backend: CursorBackend): Record {
         val wire = agents.documentedRunId(entry.agentId, entry.runId) ?: return Record.Unreadable
-        val run = runCatching { agents.runById(entry.agentId, wire, backend.api) }.getOrNull() ?: return Record.Unreadable
+        val run = runCatchingCancellable { agents.runById(entry.agentId, wire, backend.api) }.getOrNull() ?: return Record.Unreadable
         val status = run.statusEnum()
         if (status.isActive) return Record.Running
         if (!status.isTerminal) return Record.Unrecognised
