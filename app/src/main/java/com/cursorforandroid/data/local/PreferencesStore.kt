@@ -24,6 +24,7 @@ import com.cursorforandroid.domain.EnvType
 import com.cursorforandroid.domain.ListPreferences
 import com.cursorforandroid.domain.NewChatHome
 import com.cursorforandroid.domain.NewChatHomeChoice
+import com.cursorforandroid.domain.UpdateChannel
 import com.cursorforandroid.domain.ProjectArrangement
 import com.cursorforandroid.domain.ProjectNotificationPrefs
 import com.cursorforandroid.domain.LocalAgentState
@@ -148,6 +149,7 @@ class PreferencesStore(
         val notificationPermissionAsked = booleanPreferencesKey("notification_permission_asked")
         val recentSkills = stringPreferencesKey("recent_skills")
         val autoUpdate = booleanPreferencesKey("auto_update")
+        val updateChannel = stringPreferencesKey("update_channel")
         val updateLastCheckedAt = longPreferencesKey("update_last_checked_at")
         val pendingUpdateVersionCode = intPreferencesKey("update_pending_version_code")
         /** The versionName whose What's new page has been opened on this device. */
@@ -257,6 +259,11 @@ class PreferencesStore(
     val pendingUpdateVersionCode: Flow<Int?> = data.map { it[Keys.pendingUpdateVersionCode] }.distinctUntilChanged()
 
     suspend fun setAutoUpdate(enabled: Boolean) = edit { it[Keys.autoUpdate] = enabled }
+
+    /** The release channel the updater follows ([UpdateChannel.key]); stable unless the user opted into alpha builds. */
+    val updateChannel: Flow<UpdateChannel> = data.map { UpdateChannel.parse(it[Keys.updateChannel]) }.distinctUntilChanged()
+
+    suspend fun setUpdateChannel(channel: UpdateChannel) = edit { it[Keys.updateChannel] = channel.key }
 
     /** Deletes what removed settings left in the file; a no-op, and no write, once they are gone. */
     suspend fun forgetRetiredSettings(): Boolean {

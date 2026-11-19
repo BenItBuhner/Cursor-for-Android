@@ -75,6 +75,8 @@ import com.cursorforandroid.util.AppClock
 import com.cursorforandroid.util.TimeFormat
 import androidx.compose.ui.unit.IntOffset
 import com.cursorforandroid.ui.components.onContextClick
+import com.cursorforandroid.ui.voice.LocalVoiceCallLine
+import com.cursorforandroid.ui.voice.VoiceCallChip
 
 @Immutable
 data class AgentRowActions(
@@ -168,7 +170,12 @@ fun AgentRowItem(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            val trailing = buildList {
+            val call = LocalVoiceCallLine.current
+            if (call != null && call.agentId == agent.id) {
+                Spacer(Modifier.width(8.dp))
+                VoiceCallChip(call.startedAtMs)
+            }
+            val trailing = if (call != null && call.agentId == agent.id) emptyList() else buildList {
                 if (prefs.showWorkspace) agent.repoShortName?.let { add(it) }
                 // A stand-in's last activity is not known until its row is fetched; the slot waits for it.
                 if (prefs.showRuntime && !placeholder && !row.isStandIn) add(TimeFormat.relativeShort(agent.listedAtMillis, nowMillis))

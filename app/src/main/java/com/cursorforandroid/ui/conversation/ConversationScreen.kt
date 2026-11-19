@@ -139,6 +139,11 @@ import com.cursorforandroid.ui.panel.rememberPanelTabStates
 import com.cursorforandroid.ui.panel.rememberSidePanelState
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
+import com.cursorforandroid.ui.voice.LocalVoiceSent
+import com.cursorforandroid.ui.voice.VoiceCallHaptics
+import com.cursorforandroid.ui.voice.VoiceCallReturnTray
+import com.cursorforandroid.ui.voice.VoiceCallTray
+import com.cursorforandroid.ui.voice.rememberVoiceCallStarter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -328,6 +333,23 @@ fun ConversationScreen(
     val pickFiles = rememberFilePicker(counts = counts, onPickedFiles = viewModel::addFiles, onError = viewModel::showMessage)
     val plusMenu = rememberComposerMenuActions(graph, onPickMedia = pickMedia, onPickFiles = if (extendedFiles) pickFiles else null)
     val voice = rememberComposerVoice(graph)
+    // A hands-free conversation with this chat's agent (see [VoiceCalls]), wherever the composer can dictate: the
+    // app's, not this screen's, so it goes on with the screen off, in the background and while another chat is read.
+    // What is heard goes out through this chat's view model, which hosts the call while it lives.
+    val voiceCalls = graph.voiceCalls
+    val callLine by voiceCalls.line.collectAsStateWithLifecycle()
+    val callState by voiceCalls.state.collectAsStateWithLifecycle()
+    val voiceChatOn = callLine?.agentId == agentId && callState.active
+    val callElsewhere = callLine != null && callLine?.agentId != agentId
+    VoiceCallHaptics(voiceCalls)
+    // What was said on a call in this chat, so those bubbles wear Cursor's "Voice call" label.
+    val voiceSent = voiceCalls.sentByVoice.collectAsStateWithLifecycle().value[agentId].orEmpty()
+    val callTitle = agent?.name.orEmpty()
+    LaunchedEffect(callTitle, voiceChatOn) { if (voiceChatOn) voiceCalls.title(agentId, callTitle) }
+    val startVoiceChat = if (voice == null) null else rememberVoiceCallStarter(
+        start = { viewModel.startVoiceCall(callTitle) },
+        denied = { permanently -> viewModel.voiceCallPermissionDenied(callTitle, permanently) },
+    )
     val share by graph.share.offer.collectAsStateWithLifecycle()
     LaunchedEffect(share?.generation, share?.target) {
         val incoming = share ?: return@LaunchedEffect
@@ -719,6 +741,7 @@ fun ConversationScreen(
                     LocalDisclosureTaps provides transcriptScroll,
                     LocalOpenStretches provides openStretches,
                     LocalSentFades provides sentFades,
+                    LocalVoiceSent provides voiceSent,
                 ) {
                     LazyColumn(
                         state = listState,
@@ -987,9 +1010,19 @@ fun ConversationScreen(
                         focusRequests = composerFocusRequests,
                         // An archived chat takes no follow-ups, so there is nothing to dictate into.
                         voice = voice.takeUnless { archived },
+                        // Cursor's waveform button in the Send slot; an archived chat takes no follow-ups, spoken or typed.
+                        onStartVoiceChat = startVoiceChat.takeUnless { archived || callLine != null },
                         expansion = composerExpansion,
                         modifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).testTag("follow-up-composer"),
                     )
+                }
+                // Cursor's call tray docks over the composer, which stays to be typed in: this chat's call, or the
+                // return tray of a call with another chat, which leads back to it.
+                val trayModifier = Modifier.widthIn(max = CursorDimens.composerMaxWidth).then(headerClearance.composerColumn).padding(bottom = DockGap)
+                if (voiceChatOn) {
+                    VoiceCallTray(voiceCalls, trayModifier)
+                } else if (callElsewhere) {
+                    VoiceCallReturnTray(voiceCalls, onReturn = { id -> onOpenAgent?.invoke(id) }, modifier = trayModifier)
                 }
                 followUpComposer()
             }

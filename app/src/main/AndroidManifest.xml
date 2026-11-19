@@ -12,6 +12,8 @@
     <!-- Keeps the run streams alive while the app is in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- A voice chat keeps listening with the app out of sight, through a microphone foreground service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- Android 16 Live Updates: status-bar chip, lock-screen slot, always-on display. -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
@@ -32,6 +34,11 @@
     <queries>
         <intent>
             <action android:name="android.settings.MANAGE_APP_PROMOTED_NOTIFICATIONS" />
+        </intent>
+        <!-- Voice chat reads the agent's replies with the device's own text-to-speech engine, which Android 11 and
+             later hide from an app that does not say it looks for one. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
     </queries>
 
@@ -178,6 +185,12 @@
             android:name=".notifications.LiveNotificationService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Holds a voice chat's microphone and its call notification while the app is out of sight. -->
+        <service
+            android:name=".ui.voice.VoiceCallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Follows the one chat or Project in the Spotlight and owns its notification while it runs. -->
         <service

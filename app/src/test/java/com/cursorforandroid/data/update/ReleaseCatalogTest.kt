@@ -2,6 +2,7 @@ package com.cursorforandroid.data.update
 
 import com.cursorforandroid.data.api.CursorJson
 import com.cursorforandroid.domain.AppVersion
+import com.cursorforandroid.domain.UpdateChannel
 import com.google.common.truth.Truth.assertThat
 import kotlinx.serialization.builtins.ListSerializer
 import org.junit.Test
@@ -48,6 +49,30 @@ class ReleaseCatalogTest {
         assertThat(ReleaseCatalog.newest(mapped, dev)?.tagName).isEqualTo("v0.2.0")
         // A pre-release build is offered no other pre-release either.
         assertThat(ReleaseCatalog.newest(mapped, AppVersion.parse("0.3.0-alpha.1")!!.versionCode)).isNull()
+    }
+
+    @Test
+    fun `the alpha channel offers the newest release of any kind, and stable still waits for the next stable one`() {
+        val mapped = releases(GitHubFixtures.releasesJson)
+        val installed010 = AppVersion.parse("0.1.0")!!.versionCode
+        assertThat(ReleaseCatalog.newest(mapped, installed010, UpdateChannel.Alpha)?.tagName).isEqualTo("v0.3.0-rc.1")
+        // On 0.2.0 the rc above it is offered on alpha only.
+        val installed020 = AppVersion.parse("0.2.0")!!.versionCode
+        assertThat(ReleaseCatalog.newest(mapped, installed020, UpdateChannel.Alpha)?.tagName).isEqualTo("v0.3.0-rc.1")
+        assertThat(ReleaseCatalog.newest(mapped, installed020, UpdateChannel.Stable)).isNull()
+        // An alpha build that left the channel is offered nothing older than itself: no downgrade back to 0.2.0.
+        val alpha = AppVersion.parse("0.3.0-alpha.1")!!.versionCode
+        assertThat(ReleaseCatalog.newest(mapped, alpha, UpdateChannel.Stable)).isNull()
+        assertThat(ReleaseCatalog.newest(mapped, alpha, UpdateChannel.Alpha)?.tagName).isEqualTo("v0.3.0-rc.1")
+    }
+
+    @Test
+    fun `the channel key round-trips and anything unknown is stable`() {
+        assertThat(UpdateChannel.parse("alpha")).isEqualTo(UpdateChannel.Alpha)
+        assertThat(UpdateChannel.parse(" ALPHA ")).isEqualTo(UpdateChannel.Alpha)
+        assertThat(UpdateChannel.parse("stable")).isEqualTo(UpdateChannel.Stable)
+        assertThat(UpdateChannel.parse(null)).isEqualTo(UpdateChannel.Stable)
+        assertThat(UpdateChannel.parse("nightly")).isEqualTo(UpdateChannel.Stable)
     }
 
     @Test

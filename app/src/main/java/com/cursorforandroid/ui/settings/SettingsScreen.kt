@@ -36,9 +36,11 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.domain.AppRelease
+import com.cursorforandroid.domain.AppVersion
 import com.cursorforandroid.domain.CursorUser
 import com.cursorforandroid.domain.ProjectNotificationPrefs
 import com.cursorforandroid.domain.ReleaseNotes
+import com.cursorforandroid.domain.UpdateChannel
 import com.cursorforandroid.domain.UpdatePhase
 import com.cursorforandroid.domain.UpdateState
 import com.cursorforandroid.notifications.LiveNotifications
@@ -97,6 +99,7 @@ object SettingsTags {
     const val UNREAD_THIS_PHONE = "settings_unread_this_phone"
     const val SHORTEN_PROJECTS = "settings_shorten_projects"
     const val VERSION_ROW = "settings_version"
+    const val ALPHA_CHANNEL = "settings_alpha_channel"
     const val WHATS_NEW_ROW = "settings_whats_new"
     const val DEBUG_SHEET = "settings_debug_sheet"
     const val KEYBOARD_SHORTCUTS_ROW = "settings_keyboard_shortcuts"
@@ -372,6 +375,7 @@ private fun UpdateRows(graph: AppGraph, open: (String) -> Unit, onDebug: () -> U
     val updates = graph.updates
     val state by updates.state.collectAsStateWithLifecycle()
     val autoUpdate by updates.autoUpdate.collectAsStateWithLifecycle(initialValue = true)
+    val channel by updates.channel.collectAsStateWithLifecycle(initialValue = UpdateChannel.Stable)
     // On the main dispatcher for the reason the Extended mode switch is (see SettingsScreen): the value comes from
     // the store's thread, and the row must not miss the write that would show it.
     val whatsNew by graph.whatsNew.unread.collectAsStateWithLifecycle(initialValue = null, context = Dispatchers.Main.immediate)
@@ -389,7 +393,7 @@ private fun UpdateRows(graph: AppGraph, open: (String) -> Unit, onDebug: () -> U
 
     SettingsRow(
         title = "Version ${graph.appVersion}",
-        description = updateStatusLine(state),
+        description = updateStatusLine(state, graph.appVersion) + UpdateCopy.channelSuffix(channel),
         descriptionColor = if (state is UpdateState.Failed) colors.red else colors.textTertiary,
         modifier = Modifier.longPressable(SettingsCopy.DEBUG_ACTION, onDebug).testTag(SettingsTags.VERSION_ROW),
         trailing = {
@@ -441,6 +445,14 @@ private fun UpdateRows(graph: AppGraph, open: (String) -> Unit, onDebug: () -> U
         checked = autoUpdate,
         onCheckedChange = { scope.launch { updates.setAutoUpdate(it) } },
     )
+    HairlineDivider()
+    SettingsToggleRow(
+        title = UpdateCopy.ALPHA_TITLE,
+        description = UpdateCopy.alphaDescription(channel, graph.appVersion),
+        checked = channel == UpdateChannel.Alpha,
+        onCheckedChange = { updates.setChannel(if (it) UpdateChannel.Alpha else UpdateChannel.Stable) },
+        modifier = Modifier.testTag(SettingsTags.ALPHA_CHANNEL),
+    )
     if (!canInstall) {
         HairlineDivider()
         HintRow(
@@ -469,12 +481,12 @@ private fun Modifier.longPressable(label: String, onLongPress: () -> Unit): Modi
         .semantics { onLongClick(label) { current(); true } }
 }
 
-private fun updateStatusLine(state: UpdateState): String = when (state) {
+private fun updateStatusLine(state: UpdateState, installedVersion: String): String = when (state) {
     UpdateState.Idle -> "Not checked yet"
     UpdateState.Checking -> "Checking GitHub for a newer release…"
     is UpdateState.UpToDate -> "Up to date · ${checkedLabel(state.checkedAtMs)}"
     is UpdateState.Available ->
-        if (state.signatureMismatch) "${state.release.versionName} needs a manual reinstall" else UpdateCopy.available(state.release)
+        if (state.signatureMismatch) "${state.release.versionName} needs a manual reinstall" else UpdateCopy.available(state.release, installedVersion)
     is UpdateState.Downloading -> state.fraction?.let { "Downloading ${state.release.versionName}… ${(it * 100).toInt()}%" }
         ?: "Downloading ${state.release.versionName}… ${"%.1f".format(Locale.US, state.bytesRead / 1_048_576.0)} MB"
     is UpdateState.Downloaded -> "${state.release.versionName} is ready · the app closes while it installs"
@@ -485,8 +497,30 @@ private fun updateStatusLine(state: UpdateState): String = when (state) {
 
 /** The updater's words that more than one surface shows: the Settings status line and the sidebar's hint row say the same thing. */
 object UpdateCopy {
-    /** "Update available: v0.3.9" — the version with the tag's `v`, so it reads as the release it names. */
-    fun available(release: AppRelease): String = "Update available: v${release.versionName}"
+    /**
+     * "Update available: v0.3.9" — the version with the tag's `v`, so it reads as the release it names. An alpha build
+     * offered a stable release reads "Return to stable: v0.5.0", and a pre-release names itself "Alpha available".
+     */
+    fun available(release: AppRelease, installedVersion: String? = null): String = when {
+        release.isPreRelease -> "Alpha available: v${release.versionName}"
+        installedVersion?.let(AppVersion::parse)?.let { it.isPreRelease && !it.isDevBuild } == true -> "Return to stable: v${release.versionName}"
+        else -> "Update available: v${release.versionName}"
+    }
+
+    const val ALPHA_TITLE = "Alpha updates"
+
+    /** What the Alpha switch does, and on the way out, what leaving it means for an alpha build already installed. */
+    fun alphaDescription(channel: UpdateChannel, installedVersion: String): String {
+        val onAlphaBuild = AppVersion.parse(installedVersion)?.let { it.isPreRelease && !it.isDevBuild } == true
+        return when {
+            channel == UpdateChannel.Alpha -> "You get pre-release builds as soon as they're published. They may be unfinished or unstable."
+            onAlphaBuild -> "Off. This alpha stays installed until the next stable release, since Android can't go back a version."
+            else -> "Get pre-release builds early, before they reach stable. They may be unfinished or unstable."
+        }
+    }
+
+    /** " · Alpha channel" after the version row's status while the alpha channel is on. */
+    fun channelSuffix(channel: UpdateChannel): String = if (channel == UpdateChannel.Alpha) " · Alpha channel" else ""
 
     /**
      * The sidebar's hint for [state], or null when there is nothing to lead the user to Settings for. This row is

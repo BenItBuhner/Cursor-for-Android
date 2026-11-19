@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.cursorforandroid.ui.voice.VoiceCalls
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.api.userMessage
 import com.cursorforandroid.data.repo.AgentRepository
@@ -66,6 +67,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -264,6 +266,46 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
         return PresentedTranscript(state, presented, lastPresented).also { lastPresented = it }
     }
 
+    /**
+     * This chat's side of a voice chat (see [VoiceCalls]): an utterance goes out as the chat's next follow-up, around
+     * whatever stands in the composer, which is put back as it was. Hosted for as long as this view model lives, so a
+     * call goes on with the screen off and the app in the background; when it goes, the call holds.
+     */
+    private val voiceHost = VoiceCalls.Host { words -> sendSpoken(words) }
+
+    private fun sendSpoken(words: String): Boolean {
+        val typed = draft.value
+        val images = attachments.value
+        val attached = files.value
+        attachments.value = emptyList()
+        files.value = emptyList()
+        draft.value = words
+        val went = submit() != null
+        draft.value = typed
+        attachments.value = images
+        files.value = attached
+        return went
+    }
+
+    /** Starts a voice chat with this chat's agent, called [title] on the strip and the notification. */
+    fun startVoiceCall(title: String) = graph.voiceCalls.start(agentId, title, voiceHost)
+
+    fun voiceCallPermissionDenied(title: String, permanently: Boolean) = graph.voiceCalls.permissionDenied(agentId, title, voiceHost, permanently)
+
+    init {
+        // While this chat holds the call: host it, and tell it where the agent's turn stands, screen or no screen.
+        viewModelScope.launch {
+            graph.voiceCalls.line.map { it?.agentId == agentId }.distinctUntilChanged().collectLatest { ours ->
+                if (!ours) return@collectLatest
+                graph.voiceCalls.attach(agentId, voiceHost)
+                presented.map { p ->
+                    val reply = p.items.lastOrNull { it is AssistantMessage } as? AssistantMessage
+                    Triple(p.state.runStatus?.isActive == true || p.state.isStreaming, reply?.id, reply?.markdown)
+                }.distinctUntilChanged().collect { (running, id, markdown) -> graph.voiceCalls.agent(agentId, running, id, markdown) }
+            }
+        }
+    }
+
     val draftText: StateFlow<String> = draft.asStateFlow()
     val pendingAttachments: StateFlow<List<PendingAttachment>> = attachments.asStateFlow()
     val pendingFiles: StateFlow<List<PendingFile>> = files.asStateFlow()
@@ -423,6 +465,7 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     }
 
     override fun onCleared() {
+        graph.voiceCalls.detach(agentId, voiceHost)
         // The sends go on in the graph's scope; only this composer stops hearing of them.
         if (outgoing.listener === outgoingListener) outgoing.listener = null
         graph.conversations.detach(agentId)
