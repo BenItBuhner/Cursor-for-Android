@@ -123,7 +123,6 @@ class VoiceCallService : Service() {
         private const val ACTION_MUTE = "com.cursorforandroid.voice.MUTE"
 
         fun ensureChannel(context: Context) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val manager = context.getSystemService(NotificationManager::class.java) ?: return
             if (manager.getNotificationChannel(CHANNEL) != null) return
             manager.createNotificationChannel(

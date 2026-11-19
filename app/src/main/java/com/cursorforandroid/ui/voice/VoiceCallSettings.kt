@@ -1,6 +1,7 @@
 package com.cursorforandroid.ui.voice
 
 import android.content.Context
+import androidx.core.content.edit
 
 /**
  * A call's voice, speed and language: the three rows of the settings menu on Cursor's call tray. [voice] is one of the
@@ -88,7 +89,11 @@ interface VoiceSettingsStore {
         )
 
         override fun save(settings: VoiceCallSettings) {
-            prefs.edit().putString("voice", settings.voice).putFloat("speed", settings.speed).putString("language", settings.language).apply()
+            prefs.edit {
+                putString("voice", settings.voice)
+                putFloat("speed", settings.speed)
+                putString("language", settings.language)
+            }
         }
     }
 }
