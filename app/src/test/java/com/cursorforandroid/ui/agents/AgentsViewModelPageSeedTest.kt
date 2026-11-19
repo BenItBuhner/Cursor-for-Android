@@ -47,7 +47,7 @@ class AgentsViewModelPageSeedTest {
     private fun graph(): AppGraph {
         val (demoApi, demoStreamer) = DemoBackendFactory.create()
         val api = object : CursorApi by demoApi {
-            override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean): ListAgentsResponseDto {
+            override suspend fun listAgents(limit: Int, cursor: String?, includeArchived: Boolean, prUrl: String?): ListAgentsResponseDto {
                 listGate.await()
                 return demoApi.listAgents(limit, cursor, includeArchived)
             }

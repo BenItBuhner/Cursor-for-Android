@@ -22,6 +22,7 @@ import com.cursorforandroid.domain.RepoContents
 import com.cursorforandroid.domain.RunUsage
 import com.cursorforandroid.domain.ScmHost
 import com.cursorforandroid.domain.TokenUsage
+import com.cursorforandroid.domain.UsageCost
 import com.cursorforandroid.util.AppClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
@@ -62,7 +63,7 @@ fun interface DemoReviewSource {
 class ReviewRepository(
     private val gitHub: () -> GitHubApi,
     private val origin: () -> OriginApi,
-    private val usageApi: suspend (agentId: String) -> AgentUsage,
+    private val usageApi: suspend (agentId: String, runId: String?) -> AgentUsage,
     private val isDemo: () -> Boolean = { false },
     private val demo: DemoReviewSource? = null,
     private val now: () -> Long = AppClock::now,
@@ -245,13 +246,13 @@ class ReviewRepository(
         }
     }
 
-    /** The agent's token usage, total and by run (`GET /v1/agents/{id}/usage`). */
-    suspend fun usage(agentId: String, force: Boolean = false): AgentUsage {
-        val key = "usage:$agentId"
+    /** The agent's token usage, total and by run (`GET /v1/agents/{id}/usage`). [runId] scopes it to one run. */
+    suspend fun usage(agentId: String, force: Boolean = false, runId: String? = null): AgentUsage {
+        val key = if (runId == null) "usage:$agentId" else "usage:$agentId:$runId"
         if (!force) fresh(usages, key)?.let { return it }
         return lock(key).withLock {
             if (!force) fresh(usages, key)?.let { return@withLock it }
-            usageApi(agentId).also { synchronized(usages) { usages[key] = Cached(it, now()) } }
+            usageApi(agentId, runId).also { synchronized(usages) { usages[key] = Cached(it, now()) } }
         }
     }
 
@@ -286,9 +287,23 @@ class ReviewRepository(
         const val ENDPOINT_CHANGED = "Cursor changed a private endpoint; this pull request cannot be read here until the app is updated."
 
         /** The typed usage the documented endpoint's DTOs map to. */
-        fun usageOf(dto: com.cursorforandroid.data.api.dto.AgentUsageResponseDto): AgentUsage = AgentUsage(
-            total = dto.totalUsage.let { TokenUsage(it.inputTokens, it.outputTokens, it.cacheWriteTokens, it.cacheReadTokens, it.totalTokens) },
-            runs = dto.runs.map { run -> RunUsage(run.id, run.usage.let { TokenUsage(it.inputTokens, it.outputTokens, it.cacheWriteTokens, it.cacheReadTokens, it.totalTokens) }) },
-        )
+        fun usageOf(dto: com.cursorforandroid.data.api.dto.AgentUsageResponseDto): AgentUsage {
+            fun tokens(t: com.cursorforandroid.data.api.dto.UsageTokensDto) = TokenUsage(
+                inputTokens = t.inputTokens,
+                outputTokens = t.outputTokens,
+                cacheWriteTokens = t.cacheWriteTokens,
+                cacheReadTokens = t.cacheReadTokens,
+                totalTokens = t.totalTokens,
+                reasoningTokens = t.reasoningTokens?.takeIf { it > 0 },
+            )
+            fun cost(c: com.cursorforandroid.data.api.dto.UsageCostDto?) = c?.let { UsageCost(it.rawCostCents, it.chargedCents) }
+            return AgentUsage(
+                total = tokens(dto.totalUsage),
+                runs = dto.runs.map { run ->
+                    RunUsage(run.id, tokens(run.usage), cost = cost(run.cost), usageUuid = run.usageUuid)
+                },
+                cost = cost(dto.cost),
+            )
+        }
     }
 }

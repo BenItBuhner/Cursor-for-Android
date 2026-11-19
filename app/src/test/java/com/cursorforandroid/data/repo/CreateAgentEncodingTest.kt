@@ -32,7 +32,7 @@ class CreateAgentEncodingTest {
         assertThat(encode(request)).isEqualTo(
             """{"prompt":{"text":"Add a README with setup instructions"},""" +
                 """"agentId":"bc-00000000-0000-0000-0000-000000000001",""" +
-                """"model":{"id":"composer-2","params":[{"id":"fast","value":"true"}]},""" +
+                """"model":{"id":"composer-2.5","params":[{"id":"fast","value":"true"}]},""" +
                 """"repos":[{"url":"https://github.com/your-org/your-repo","startingRef":"main"}]}""",
         )
     }
@@ -49,7 +49,7 @@ class CreateAgentEncodingTest {
         assertThat(body).isEqualTo(
             """{"prompt":{"text":"Add a README with setup instructions"},""" +
                 """"agentId":"bc-00000000-0000-0000-0000-000000000001",""" +
-                """"model":{"id":"composer-2","params":[{"id":"fast","value":"true"}]},""" +
+                """"model":{"id":"composer-2.5","params":[{"id":"fast","value":"true"}]},""" +
                 """"repos":[]}""",
         )
         assertThat(body).doesNotContain("\"env\"")
@@ -94,5 +94,30 @@ class CreateAgentEncodingTest {
             """{"prompt":{"text":"Add a README with setup instructions"},""" +
                 """"repos":[{"url":"https://github.com/your-org/your-repo","startingRef":"main"}],"mode":"plan"}""",
         )
+    }
+
+    @Test
+    fun `retired Composer 2 ids and the desktop default remap on the wire, and Auto is left alone`() {
+        assertThat(encode(request.copy(modelId = "composer-2-fast", modelParams = emptyList())))
+            .contains(""""model":{"id":"composer-2.5","params":[{"id":"fast","value":"true"}]}""")
+        assertThat(encode(request.copy(modelId = "auto-smart", modelParams = emptyList())))
+            .contains(""""model":{"id":"auto-smart","params":[{"id":"optimize_for","value":"balanced"}]}""")
+        assertThat(encode(request.copy(modelId = "default", modelParams = emptyList())))
+            .contains(""""model":{"id":"auto-smart","params":[{"id":"optimize_for","value":"balanced"}]}""")
+        assertThat(encode(request.copy(modelId = "auto-smart", modelParams = listOf(ModelParam("optimize_for", "cost")))))
+            .contains(""""model":{"id":"auto-smart","params":[{"id":"optimize_for","value":"cost"}]}""")
+        assertThat(encode(request.copy(modelId = "auto", modelParams = emptyList())))
+            .contains(""""model":{"id":"auto"}""")
+        assertThat(encode(request.copy(modelId = "auto", modelParams = emptyList()))).doesNotContain("optimize_for")
+    }
+
+    @Test
+    fun `envVars drop CURSOR_ names and omit the minted agentId, and openAsCursorGithubApp is sent only when on`() {
+        val secrets = encode(request.copy(envVars = mapOf("FOO" to "bar", "CURSOR_SECRET" to "no", " " to "x")))
+        assertThat(secrets).contains(""""envVars":{"FOO":"bar"}""")
+        assertThat(secrets).doesNotContain("agentId")
+        assertThat(secrets).doesNotContain("CURSOR_SECRET")
+        assertThat(encode(request.copy(openAsCursorGithubApp = true))).contains(""""openAsCursorGithubApp":true""")
+        assertThat(encode(request)).doesNotContain("openAsCursorGithubApp")
     }
 }

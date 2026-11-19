@@ -262,6 +262,8 @@ class AgentStartApiTest {
         assertThat(ConnectAgentStartApi.mcpConfigJson(listOf(McpServer("1", "off", url = "https://x", enabled = false)))).isNull()
         val json = ConnectAgentStartApi.mcpConfigJson(listOf(McpServer("1", "docs", McpTransport.Http, url = "https://docs/mcp")))!!
         assertThat(Json.parseToJsonElement(json).jsonObject["mcpServers"]!!.jsonObject["docs"]!!.jsonObject.mapValues { it.value.jsonPrimitive.content }).containsExactly("url", "https://docs/mcp")
+        val sse = ConnectAgentStartApi.mcpConfigJson(listOf(McpServer("2", "events", McpTransport.Sse, url = "https://events/sse")))!!
+        assertThat(Json.parseToJsonElement(sse).jsonObject["mcpServers"]!!.jsonObject["events"]!!.jsonObject.mapValues { it.value.jsonPrimitive.content }).containsExactly("url", "https://events/sse")
     }
 
     private fun session(token: String) = MockResponse().setBody("""{"accessToken":"$token","refreshToken":"rt"}""")

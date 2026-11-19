@@ -73,6 +73,19 @@ object LaunchIdempotency {
         }
         // Last, and only when set, so a draft in Agent or Plan mode hashes exactly as it did before Ask and Debug.
         request.accountMode?.let { field(it.name) }
+        if (request.envVars.isNotEmpty()) {
+            field(request.envVars.size.toString())
+            request.envVars.forEach { (key, value) -> field(key); field(value) }
+        }
+        if (request.openAsCursorGithubApp) field("openAsCursorGithubApp")
+        servers.forEach { server ->
+            server.auth?.let { auth ->
+                field(auth.CLIENT_ID)
+                field(auth.CLIENT_SECRET)
+                field(auth.scopes?.size?.toString())
+                auth.scopes?.forEach { field(it) }
+            }
+        }
         return "bc-" + UUID.nameUUIDFromBytes(digest.digest())
     }
 

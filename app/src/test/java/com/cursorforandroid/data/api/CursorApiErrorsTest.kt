@@ -83,4 +83,30 @@ class CursorApiErrorsTest {
         assertThat(UnknownHostException("api.cursor.com").isTransientFailure()).isFalse()
         assertThat(IllegalStateException("No active run.").isTransientFailure()).isFalse()
     }
+
+    @Test
+    fun `requestId is taken from the error body, then from the response headers`() {
+        val fromBody = failure(400, "invalid_request", "Bad prompt.")
+        assertThat(fromBody.toCursorError()?.requestId).isNull()
+
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(400)
+                .setHeader("Content-Type", "application/json")
+                .setHeader("x-request-id", "hdr-1")
+                .setBody("""{"error":{"code":"invalid_request","message":"Bad prompt.","requestId":"body-1"}}"""),
+        )
+        val api = CursorApiFactory.retrofit(OkHttpClient(), server.url("/").toString())
+        val bodyId = runBlocking { runCatching { api.me() }.exceptionOrNull() }!!.toCursorError()
+        assertThat(bodyId?.requestId).isEqualTo("body-1")
+
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(502)
+                .setHeader("x-cursor-request-id", "hdr-2")
+                .setBody("Bad Gateway"),
+        )
+        val headerId = runBlocking { runCatching { api.me() }.exceptionOrNull() }!!.toCursorError()
+        assertThat(headerId?.requestId).isEqualTo("hdr-2")
+    }
 }

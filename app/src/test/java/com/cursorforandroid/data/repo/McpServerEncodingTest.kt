@@ -4,6 +4,7 @@ import com.cursorforandroid.data.api.CursorJson
 import com.cursorforandroid.data.api.dto.CreateAgentRequestDto
 import com.cursorforandroid.data.api.dto.CreateRunRequestDto
 import com.cursorforandroid.data.api.dto.PromptDto
+import com.cursorforandroid.domain.McpOAuth
 import com.cursorforandroid.domain.McpServer
 import com.cursorforandroid.domain.McpTransport
 import com.google.common.truth.Truth.assertThat
@@ -54,5 +55,24 @@ class McpServerEncodingTest {
 
         val followUp = CreateRunRequestDto(prompt = PromptDto("Also add troubleshooting steps"), mcpServers = emptyList<McpServer>().toInlineServers())
         assertThat(CursorJson.encodeToString(CreateRunRequestDto.serializer(), followUp)).isEqualTo("""{"prompt":{"text":"Also add troubleshooting steps"}}""")
+    }
+
+    @Test
+    fun `sse servers carry type sse with url and optional oauth`() {
+        val docs = McpServer(
+            id = "d",
+            name = "docs",
+            transport = McpTransport.Sse,
+            url = "https://example.com/sse",
+            auth = McpOAuth(clientId = "cid", clientSecret = "secret", scopes = listOf("read", "write")),
+        )
+        assertThat(CursorJson.encodeToString(com.cursorforandroid.data.api.dto.McpServerDto.serializer(), docs.toDto()))
+            .isEqualTo(
+                """{"name":"docs","type":"sse","url":"https://example.com/sse",""" +
+                    """"auth":{"CLIENT_ID":"cid","CLIENT_SECRET":"secret","scopes":["read","write"]}}""",
+            )
+        val bare = docs.copy(auth = McpOAuth(clientId = "cid")).toDto()
+        assertThat(CursorJson.encodeToString(com.cursorforandroid.data.api.dto.McpServerDto.serializer(), bare))
+            .isEqualTo("""{"name":"docs","type":"sse","url":"https://example.com/sse","auth":{"CLIENT_ID":"cid"}}""")
     }
 }
