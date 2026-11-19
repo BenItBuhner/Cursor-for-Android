@@ -22,6 +22,9 @@ import com.cursorforandroid.data.repo.LoginProgress
 import com.cursorforandroid.data.repo.SessionState
 import com.cursorforandroid.share.ShareIntent
 import com.cursorforandroid.ui.CursorRoot
+import com.cursorforandroid.ui.components.CaptionBarAppearance
+import com.cursorforandroid.ui.components.CaptionBarHost
+import com.cursorforandroid.ui.components.CaptionReportedShape
 import com.cursorforandroid.ui.panel.Hinge
 import com.cursorforandroid.ui.panel.LocalHinge
 import com.cursorforandroid.ui.panel.WindowHinge
@@ -53,6 +56,12 @@ class MainActivity : ComponentActivity() {
     /** A fold splitting the window, as the platform last reported it ([followHinge]). */
     internal val hinge = WindowHinge()
 
+    /**
+     * How the window reports its caption chrome. The system default is discrete minimize / maximize / close;
+     * `cursor.caption.shape=bar` (debug / desktop demo) is the one-bar Samsung report.
+     */
+    private var captionShape by mutableStateOf(CaptionReportedShape.System)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -73,25 +82,28 @@ class MainActivity : ComponentActivity() {
             val themeMode by graph.prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.System)
             val oledBlack by graph.prefs.oledBlack.collectAsStateWithLifecycle(initialValue = false)
             CursorTheme(mode = themeMode, oledBlack = oledBlack) {
+                CaptionBarAppearance(this, dark = CursorTheme.colors.isDark)
                 CompositionLocalProvider(LocalKeyboardShortcuts provides shortcuts, LocalHinge provides hinge) {
-                    CursorRoot(
-                        graph = graph,
-                        deepLinkAgentId = pendingAgentId,
-                        onDeepLinkConsumed = {
-                            pendingAgentId = null
-                            DeepLinks.clearAgentLink(intent)
-                        },
-                        newChatRequested = pendingNewChat,
-                        onNewChatConsumed = {
-                            pendingNewChat = false
-                            DeepLinks.clearAction(intent, ACTION_NEW_CHAT)
-                        },
-                        searchRequested = pendingSearch,
-                        onSearchConsumed = {
-                            pendingSearch = false
-                            DeepLinks.clearAction(intent, ACTION_SEARCH)
-                        },
-                    )
+                    CaptionBarHost(reportedShape = captionShape) {
+                        CursorRoot(
+                            graph = graph,
+                            deepLinkAgentId = pendingAgentId,
+                            onDeepLinkConsumed = {
+                                pendingAgentId = null
+                                DeepLinks.clearAgentLink(intent)
+                            },
+                            newChatRequested = pendingNewChat,
+                            onNewChatConsumed = {
+                                pendingNewChat = false
+                                DeepLinks.clearAction(intent, ACTION_NEW_CHAT)
+                            },
+                            searchRequested = pendingSearch,
+                            onSearchConsumed = {
+                                pendingSearch = false
+                                DeepLinks.clearAction(intent, ACTION_SEARCH)
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -138,6 +150,10 @@ class MainActivity : ComponentActivity() {
         DeepLinks.agentId(intent)?.let { pendingAgentId = it }
         if (intent?.action == ACTION_NEW_CHAT) pendingNewChat = true
         if (intent?.action == ACTION_SEARCH) pendingSearch = true
+        captionShape = when (intent?.getStringExtra(EXTRA_CAPTION_SHAPE)) {
+            "bar", "single", "single_bar" -> CaptionReportedShape.SingleBar
+            else -> CaptionReportedShape.System
+        }
         appGraph.share.receive(intent) { ShareIntent.clear(intent) }
     }
 
@@ -193,5 +209,7 @@ class MainActivity : ComponentActivity() {
         /** Opens the app on the New Chat pane, whatever it was showing: the home-screen widget's "+". */
         const val ACTION_NEW_CHAT = "com.cursorforandroid.action.NEW_CHAT"
         const val ACTION_SEARCH = "com.cursorforandroid.action.SEARCH"
+        /** Demo / test: force the Samsung one-bar caption report. */
+        const val EXTRA_CAPTION_SHAPE = "cursor.caption.shape"
     }
 }

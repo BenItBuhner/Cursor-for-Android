@@ -5,14 +5,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -46,16 +50,18 @@ fun CursorHeader(
 ) {
     val colors = CursorTheme.colors
     val type = CursorTheme.typography
+    val caption = LocalCaptionBar.current
+    var headerRightPx by remember(caption) { mutableStateOf(0f) }
     Row(
         modifier
             .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .heightIn(min = CursorDimens.headerHeight)
-            .padding(horizontal = 6.dp)
+            .then(if (caption != null) Modifier.captionRow(caption) else Modifier.windowInsetsPadding(HeaderTopInsets).heightIn(min = CursorDimens.headerHeight))
+            .then(if (caption != null) Modifier else Modifier.padding(horizontal = 6.dp))
+            .onGloballyPositioned { headerRightPx = it.positionInWindow().x + it.size.width }
             .testTag("cursor-header"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        leading?.invoke(this)
+        if (leading != null) Row(Modifier.captionControls(caption), verticalAlignment = Alignment.CenterVertically) { leading() }
         if (title != null) {
             Spacer(Modifier.width(if (leading != null) 4.dp else 10.dp))
             Column(Modifier.weight(1f)) {
@@ -68,7 +74,14 @@ fun CursorHeader(
         } else {
             Spacer(Modifier.weight(1f))
         }
-        trailing?.invoke(this)
+        if (trailing != null) {
+            if (caption != null) {
+                CaptionTrailing(caption) { trailing() }
+                Spacer(Modifier.captionEndReserve(caption, headerRightPx))
+            } else {
+                trailing()
+            }
+        }
     }
 }
 
@@ -88,6 +101,12 @@ fun CursorHeader(
  * of it the row gives its band back: it still draws the buttons in the same place, over the transcript, and takes
  * only the status bar's height from what follows (see [HeaderClearance]). The title is measured with the start's
  * controls, so a title reaching the column keeps the band.
+ *
+ * In a desktop window's caption bar ([LocalCaptionBar]) the row is the bar's row instead, its buttons and title
+ * centred on the system's controls and kept clear of them, and it keeps its band: the transcript never runs up under
+ * the window's controls. Only the buttons claim their touches; the title, like the row's empty stretch, still drags
+ * the window. Trailing chrome hugs the window controls in the caption's pixel space, even when a pinned panel stands
+ * between the chat column and those controls.
  */
 @Composable
 fun ChatHeader(
@@ -99,31 +118,40 @@ fun ChatHeader(
     leading: (@Composable RowScope.() -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
+    val caption = LocalCaptionBar.current
+    val bandClearance = clearance.takeIf { caption == null }
     val reach = with(LocalDensity.current) { HeaderClearance.ControlReach.toPx() }
-    val band = clearance?.let { rememberHeaderBandRelease(it) }
+    val band = bandClearance?.let { rememberHeaderBandRelease(it) }
+    val align = if (caption != null) Alignment.CenterVertically else Alignment.Bottom
+    var headerRightPx by remember(caption) { mutableStateOf(0f) }
     Row(
         modifier
             .zIndex(1f)
             .then(if (band != null) Modifier.headerBand(band) else Modifier)
             .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .heightIn(min = CursorDimens.chatHeaderHeight)
-            .padding(horizontal = 6.dp)
+            .then(if (caption != null) Modifier.captionRow(caption) else Modifier.windowInsetsPadding(HeaderTopInsets).heightIn(min = CursorDimens.chatHeaderHeight))
+            .then(if (caption != null) Modifier else Modifier.padding(horizontal = 6.dp))
+            .onGloballyPositioned { headerRightPx = it.positionInWindow().x + it.size.width }
             .semantics {
                 contentDescription = label
                 heading()
             }
             .testTag("chat-header"),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Bottom,
+        verticalAlignment = align,
     ) {
         // Weighted so the end's controls are measured first and the title gets what they leave; not filled, so the
         // start's span is only as wide as what it draws.
-        Row(Modifier.weight(1f, fill = false).then(clearance?.controls(HeaderClearance.Side.Start, reach) ?: Modifier), verticalAlignment = Alignment.Bottom) {
-            leading?.invoke(this)
+        Row(Modifier.weight(1f, fill = false).then(bandClearance?.controls(HeaderClearance.Side.Start, reach) ?: Modifier), verticalAlignment = align) {
+            if (caption != null) Row(Modifier.captionControls(caption), verticalAlignment = align) { leading?.invoke(this) } else leading?.invoke(this)
             if (title != null) ChatHeaderTitle(title, titleIcon, Modifier.weight(1f, fill = false))
         }
-        Row(clearance?.controls(HeaderClearance.Side.End, reach) ?: Modifier, verticalAlignment = Alignment.Bottom) { trailing?.invoke(this) }
+        if (caption != null) {
+            if (trailing != null) CaptionTrailing(caption) { trailing() }
+            Spacer(Modifier.captionEndReserve(caption, headerRightPx))
+        } else {
+            Row(bandClearance?.controls(HeaderClearance.Side.End, reach) ?: Modifier, verticalAlignment = align) { trailing?.invoke(this) }
+        }
     }
 }
 
