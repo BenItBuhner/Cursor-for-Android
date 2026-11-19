@@ -1094,6 +1094,7 @@
     <ID>LongMethod:ListInvariantsPropertyTest.kt:ListInvariantsPropertyTest$@Test fun `pinned shown, primaries never hidden, evidence children never primary, running as the server has it, nothing project-scoped notified`()</ID>
     <ID>LongMethod:LiveRunHub.kt:LiveRunHub$@OptIn(ExperimentalCoroutinesApi::class) private suspend fun follow(entry: Entry, self: Job?, backend: CursorBackend, resumeFrom: String?, historical: Boolean, stallMs: Long = stallTimeoutMs): Pass</ID>
     <ID>LongMethod:LiveRunHub.kt:LiveRunHub$private suspend fun stream(entry: Entry, historical: Boolean, resumeFrom: String? = null, unpark: Boolean = false)</ID>
+    <ID>LongMethod:LiveRunHubSnapshotDropTest.kt:LiveRunHubSnapshotDropTest$@Test fun `a dropped stream keeps its snapshot and continues it after the reconnect delay`()</ID>
     <ID>LongMethod:LiveRunMonitorTest.kt:LiveRunMonitorTest$@Test fun `tracks running agents, shares one stream with the conversation and reports finishes once`()</ID>
     <ID>LongMethod:LongProject.kt:LongProject$fun turns( firstAt: Long, turns: Int = TURNS, seed: Int = 20, /** Which turns (1-based) the `/v0` transcript has no message for (see [Turn.promptless]); never a user's turn. */ promptless: (Int) -&gt; Boolean = { false }, /** The newest turn is the user's, whatever [USER_EVERY] says: the live turn started on the reader's own prompt. */ lastIsUser: Boolean = false, ): List&lt;Turn&gt;</ID>
     <ID>LongMethod:LongSessionMemoryBenchmarkTest.kt:LongSessionMemoryBenchmarkTest$@Test fun `thirty-one agents working through a long session keep the heap bounded`()</ID>
@@ -3487,6 +3488,7 @@
     <ID>MaxLineLength:AppScreenshotTest.kt:AppScreenshotTest$val list = compose.onAllNodes(hasScrollToNodeAction() and hasAnyDescendant(hasText("PR #215 (usage aggregation) is", substring = true))).onFirst()</ID>
     <ID>MaxLineLength:AppScreenshotTest.kt:AppScreenshotTest$val watching = CoroutineScope(Dispatchers.IO).launch { graph.prefs.localAgentState.collect { markers.set(it.readMarkers) } }</ID>
     <ID>MaxLineLength:AppUpdate.kt:AppVersion$val</ID>
+    <ID>MaxLineLength:AppUpdate.kt:UpdateChannel.Companion$fun parse(raw: String?): UpdateChannel</ID>
     <ID>MaxLineLength:AppUpdate.kt:UpdateState$Failed : UpdateState</ID>
     <ID>MaxLineLength:AppUpdate.kt:UpdateState.Available$data</ID>
     <ID>MaxLineLength:AppVersionTest.kt:AppVersionTest$listOf("", "latest", "1.2", "1.2.3.4", "v1.2.3-", "1.2.3 beta", "0.100.0", "0.0.100", "2000.0.0", "nightly-2026")</ID>
@@ -3510,7 +3512,6 @@
     <ID>MaxLineLength:AttachmentCarouselTest.kt:AttachmentCarouselTest$val chipEdge = width - 1 - (MediaBadgeRoom.value * compose.activity.resources.displayMetrics.density).roundToInt() - 2</ID>
     <ID>MaxLineLength:AttachmentHeightsScreenshotTest.kt:AttachmentHeightsScreenshotTest$CompositionLocalProvider</ID>
     <ID>MaxLineLength:AttachmentHeightsScreenshotTest.kt:AttachmentHeightsScreenshotTest$MessageAttachment.file(zip.path, "Burrow diagnostics- samsung SM-S948U.zip", "application/zip", zip.length())</ID>
-    <ID>MaxLineLength:AttachmentHeightsScreenshotTest.kt:AttachmentHeightsScreenshotTest$compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Attached image").fetchSemanticsNodes().isNotEmpty() }</ID>
     <ID>MaxLineLength:AttachmentHeightsScreenshotTest.kt:AttachmentHeightsScreenshotTest$fileUploads = mapOf(recording.id to FileUploadState.DONE, spec.id to FileUploadState(progress = 0.62f), trace.id to FileUploadState(failed = true))</ID>
     <ID>MaxLineLength:AttachmentHeightsScreenshotTest.kt:AttachmentHeightsScreenshotTest$private fun pasted(): PendingAttachment</ID>
     <ID>MaxLineLength:AttachmentHeightsScreenshotTest.kt:AttachmentHeightsScreenshotTest$private val diagnostics = PendingFile("f-zip", PromptFile(ByteArray(102 * 1024), "Burrow diagnostics- samsung SM-S948U.zip", "application/zip"))</ID>
@@ -7730,6 +7731,7 @@
     <ID>MaxLineLength:GitHubReleases.kt:GitHubReleasesClient$val url = apiBaseUrl.toHttpUrl().newBuilder().addPathSegments("repos/$repo/releases/tags").addPathSegment(tag).build()</ID>
     <ID>MaxLineLength:GitHubReleases.kt:ReleaseCatalog$.</ID>
     <ID>MaxLineLength:GitHubReleases.kt:ReleaseCatalog$checksumsUrl = dto.assets.firstOrNull { it.name.equals(CHECKSUMS_ASSET, ignoreCase = true) }?.browserDownloadUrl</ID>
+    <ID>MaxLineLength:GitHubReleases.kt:ReleaseCatalog$fun</ID>
     <ID>MaxLineLength:GitHubReleasesClientTest.kt:GitHubReleasesClientTest$assertThat(first.releases.map { it.tagName }).containsExactly("v0.3.0-rc.1", "v0.3.0", "screenshots-2026-09", "v0.2.0", "v0.1.1", "v0.1.0").inOrder()</ID>
     <ID>MaxLineLength:GitHubReleasesClientTest.kt:GitHubReleasesClientTest$assertThat(request.path).isEqualTo("/repos/BenItBuhner/cursor-for-android/releases/tags/${WhatsNewFixtures.TAG}")</ID>
     <ID>MaxLineLength:GitHubReleasesClientTest.kt:GitHubReleasesClientTest$assertThat(runCatching { client.listReleases(null) }.exceptionOrNull()).isInstanceOf(UpdateCheckException::class.java)</ID>
@@ -8717,6 +8719,8 @@
     <ID>MaxLineLength:LiveRunHubSamplingTest.kt:LiveRunHubSamplingTest$private fun LiveRunHub.Snapshot.reply(): String</ID>
     <ID>MaxLineLength:LiveRunHubSamplingTest.kt:LiveRunHubSamplingTest$val notification = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 60_000).collect { seen.value = it } }</ID>
     <ID>MaxLineLength:LiveRunHubSamplingTest.kt:LiveRunHubSamplingTest$val observer = scope.launch { hub.snapshots("bc-1", "run-1", watched = MutableStateFlow(false)).collect { published += it } }</ID>
+    <ID>MaxLineLength:LiveRunHubSnapshotDropTest.kt:LiveRunHubSnapshotDropTest$SseToolCallDto(callId = id, name = name, status = status, args = buildJsonObject { put("path", JsonPrimitive(path)) })</ID>
+    <ID>MaxLineLength:LiveRunHubSnapshotDropTest.kt:LiveRunHubSnapshotDropTest$assertThat(withWork.map { snap -&gt; snap.items.filterIsInstance&lt;ActivityGroup&gt;().single().thoughts.map { it.text } })</ID>
     <ID>MaxLineLength:LiveRunHubTest.kt:LiveRunHubTest$/** A stream gone for good after it said the run ended: finished on its word, not polled for as long as the record lags it. */</ID>
     <ID>MaxLineLength:LiveRunHubTest.kt:LiveRunHubTest$/** The agent's record still names the run it was on before: nothing is streamed under either id until it names the new one. */</ID>
     <ID>MaxLineLength:LiveRunHubTest.kt:LiveRunHubTest$// A long tool call: nothing reaches the connection for many stall windows, and it is held rather than taken up again.</ID>
@@ -10986,6 +10990,7 @@
     <ID>MaxLineLength:PreferencesStore.kt:PreferencesStore$*</ID>
     <ID>MaxLineLength:PreferencesStore.kt:PreferencesStore$/** Folds the sidebar group [sectionKey] closed, or opens it again; idempotent, so a repeated tap settles rather than flips. */</ID>
     <ID>MaxLineLength:PreferencesStore.kt:PreferencesStore$/** Lists the long sidebar group [sectionKey] in full, or cuts it back to its first rows; idempotent, like the folds. */</ID>
+    <ID>MaxLineLength:PreferencesStore.kt:PreferencesStore$/** The release channel the updater follows ([UpdateChannel.key]); stable unless the user opted into alpha builds. */</ID>
     <ID>MaxLineLength:PreferencesStore.kt:PreferencesStore$/** The sidebar rail's width on a wide window, in dp, as last dragged; null until it has been. The device's, like [panelWidthFraction]. */</ID>
     <ID>MaxLineLength:PreferencesStore.kt:PreferencesStore$/** True once a build with the Extended mode setting has run on this install, so the one-time upgrade steps run once. */</ID>
     <ID>MaxLineLength:PreferencesStore.kt:PreferencesStore$/** When the user acknowledged what Extended mode involves (epoch millis); null until they have, which is what keeps it off. */</ID>
@@ -14096,9 +14101,12 @@
     <ID>MaxLineLength:SettingsScreen.kt:SettingsDebugSheet(graph = graph, isDemo = isDemo, extendedMode = extendedMode, open = uriHandler::openUri, onDismiss = { debugOpen = false })</ID>
     <ID>MaxLineLength:SettingsScreen.kt:Text(SettingsCopy.DISCLAIMER, style = type.small, color = colors.textQuaternary, modifier = Modifier.padding(top = GroupGap, start = 2.dp))</ID>
     <ID>MaxLineLength:SettingsScreen.kt:UpdateCopy$/** The updater's words that more than one surface shows: the Settings status line and the sidebar's hint row say the same thing. */</ID>
+    <ID>MaxLineLength:SettingsScreen.kt:UpdateCopy$channel == UpdateChannel.Alpha -&gt; "You get pre-release builds as soon as they're published. They may be unfinished or unstable."</ID>
+    <ID>MaxLineLength:SettingsScreen.kt:UpdateCopy$installedVersion?.let(AppVersion::parse)?.let { it.isPreRelease &amp;&amp; !it.isDevBuild } == true -&gt; "Return to stable: v${release.versionName}"</ID>
+    <ID>MaxLineLength:SettingsScreen.kt:UpdateCopy$onAlphaBuild -&gt; "Off. This alpha stays installed until the next stable release, since Android can't go back a version."</ID>
     <ID>MaxLineLength:SettingsScreen.kt:context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, "package:${context.packageName}".toUri()))</ID>
     <ID>MaxLineLength:SettingsScreen.kt:description</ID>
-    <ID>MaxLineLength:SettingsScreen.kt:if (state.signatureMismatch) "${state.release.versionName} needs a manual reinstall" else UpdateCopy.available(state.release)</ID>
+    <ID>MaxLineLength:SettingsScreen.kt:if (state.signatureMismatch) "${state.release.versionName} needs a manual reinstall" else UpdateCopy.available(state.release, installedVersion)</ID>
     <ID>MaxLineLength:SettingsScreen.kt:is UpdateState.Downloading</ID>
     <ID>MaxLineLength:SettingsScreen.kt:is UpdateState.Downloading -&gt; CursorButton("Cancel", onClick = updates::cancelDownload, height = ControlHeight)</ID>
     <ID>MaxLineLength:SettingsScreen.kt:is UpdateState.Installing -&gt; if (state.awaitingConfirmation) "Waiting for you to confirm the installation" else "Installing ${state.release.versionName}…"</ID>
@@ -17188,6 +17196,7 @@
     <ID>MaxLineLength:UpdateManager.kt:UpdateManager$suspend</ID>
     <ID>MaxLineLength:UpdateManager.kt:UpdateManager$throw IOException("${release.versionName} is built as ${info.packageName}; this build is ${platform.applicationId} and can't be updated with it.")</ID>
     <ID>MaxLineLength:UpdateManager.kt:UpdateManager$throw IOException("The APK in release ${release.tagName} is build ${info.versionCode}, not the ${release.versionCode} that tag stands for.")</ID>
+    <ID>MaxLineLength:UpdateManager.kt:UpdateManager$val offered = candidate?.takeIf { it.versionCode &gt; platform.installedVersionCode &amp;&amp; (channel.includesPreReleases || !it.isPreRelease) }</ID>
     <ID>MaxLineLength:UpdateManager.kt:UpdateManager.Companion$const val SIGNATURE_MISMATCH_MESSAGE = "This release is signed with a different key than the installed build, so Android can't update it in place. Uninstall Cursor, then install the APK from the release page; you'll sign in again afterwards."</ID>
     <ID>MaxLineLength:UpdateManagerTest.kt:UpdateManagerTest$/** Whether the release list carries the stable APK's GitHub asset digest; without it, its `SHA256SUMS.txt` is the proof. */</ID>
     <ID>MaxLineLength:UpdateManagerTest.kt:UpdateManagerTest$after.onInstallStatus(release.versionCode, session, PackageInstaller.STATUS_PENDING_USER_ACTION, null, Intent("confirm"))</ID>
