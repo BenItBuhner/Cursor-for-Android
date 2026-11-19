@@ -149,9 +149,12 @@ class AttachmentHeightsScreenshotTest {
                 }
             }
         }
-        // Two: the pasted one in the composer is there at once; the sent prompt's picture decodes from disk off the main
-        // thread, and waiting on "any" let a slow runner draw its placeholder instead.
-        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Attached image").fetchSemanticsNodes().size >= 2 }
+        // The composer chip is an in-memory bitmap and is described as soon as it is composed. The transcript's
+        // picture is decoded off that, and until it is ready the slot is empty — capturing then records a blank
+        // thumbnail against a golden that already has the swatch. Two nodes means both have decoded.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("Attached image").fetchSemanticsNodes().size >= 2
+        }
         compose.waitForIdle()
         compose.onNodeWithTag("scene").captureRoboImage(File(outDir, "$name.png").path, RoborazziOptions())
     }
