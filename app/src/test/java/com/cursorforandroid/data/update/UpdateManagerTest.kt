@@ -10,6 +10,7 @@ import com.cursorforandroid.data.local.JsonDiskCache
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.domain.AppRelease
 import com.cursorforandroid.domain.UpdatePhase
+import com.cursorforandroid.domain.UpdateChannel
 import com.cursorforandroid.domain.UpdateState
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
@@ -185,6 +186,31 @@ class UpdateManagerTest {
         assertThat(apk(20099).exists()).isFalse()
         withTimeout(5_000) { while (prefs.pendingUpdateVersionCode.first() != null) delay(10) }
         watcher.cancel()
+    }
+
+    @Test
+    fun `switching to alpha offers the pre-release at once, and switching back offers stable again without the old ETag`() = runBlocking {
+        val manager = manager()
+        assertThat((manager.check() as UpdateState.Available).release.tagName).isEqualTo("v0.2.0")
+        assertThat(listRequests).hasSize(1)
+
+        manager.setChannel(UpdateChannel.Alpha)
+        val alpha = manager.awaitState { it is UpdateState.Available && it.release.tagName == "v0.3.0-rc.1" }
+        assertThat(alpha.release?.isPreRelease).isTrue()
+        assertThat(prefs.updateChannel.first()).isEqualTo(UpdateChannel.Alpha)
+        // The stable decision's ETag would have answered 304 with the stable candidate; the alpha check asks afresh.
+        assertThat(listRequests[1].getHeader("If-None-Match")).isNull()
+        assertThat(cache.read()?.channel).isEqualTo("alpha")
+
+        manager.setChannel(UpdateChannel.Stable)
+        manager.awaitState { it is UpdateState.Available && it.release.tagName == "v0.2.0" }
+        assertThat(listRequests[2].getHeader("If-None-Match")).isNull()
+
+        // A fresh process on stable never restores an alpha decision left on disk.
+        cache.write(CachedUpdateCheck(releasesEtag, now, alpha.release, UpdateChannel.Alpha.key))
+        val restored = manager()
+        restored.ensureRestored()
+        assertThat(restored.state.value).isInstanceOf(UpdateState.UpToDate::class.java)
     }
 
     @Test
