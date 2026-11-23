@@ -96,7 +96,7 @@
         errorLine2="        ~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="212"
+            line="219"
             column="9"/>
     </issue>
 
@@ -245,12 +245,12 @@
 
     <issue
         id="AndroidGradlePluginVersion"
-        message="A newer version of com.android.application than 8.10.1 is available: 9.5.1"
+        message="A newer version of com.android.application than 8.10.1 is available: 9.5.2"
         errorLine1="agp = &quot;8.10.1&quot;"
         errorLine2="      ~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="2"
+            line="3"
             column="7"/>
     </issue>
 
@@ -261,7 +261,7 @@
         errorLine2="          ~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="4"
+            line="5"
             column="11"/>
     </issue>
 
@@ -272,51 +272,51 @@
         errorLine2="                  ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="5"
+            line="6"
             column="19"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.lifecycle:lifecycle-process than 2.8.7 is available: 2.11.0"
+        message="A newer version of androidx.lifecycle:lifecycle-process than 2.8.7 is available: 2.11.1"
         errorLine1="lifecycle = &quot;2.8.7&quot;"
         errorLine2="            ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="6"
+            line="7"
             column="13"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.lifecycle:lifecycle-runtime-compose than 2.8.7 is available: 2.11.0"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-compose than 2.8.7 is available: 2.11.1"
         errorLine1="lifecycle = &quot;2.8.7&quot;"
         errorLine2="            ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="6"
+            line="7"
             column="13"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.8.7 is available: 2.11.0"
+        message="A newer version of androidx.lifecycle:lifecycle-viewmodel-compose than 2.8.7 is available: 2.11.1"
         errorLine1="lifecycle = &quot;2.8.7&quot;"
         errorLine2="            ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="6"
+            line="7"
             column="13"/>
     </issue>
 
     <issue
         id="GradleDependency"
-        message="A newer version of androidx.compose:compose-bom than 2024.12.01 is available: 2026.09.00"
+        message="A newer version of androidx.compose:compose-bom than 2024.12.01 is available: 2026.11.01"
         errorLine1="composeBom = &quot;2024.12.01&quot;"
         errorLine2="             ~~~~~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="7"
+            line="8"
             column="14"/>
     </issue>
 
@@ -327,7 +327,7 @@
         errorLine2="            ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="8"
+            line="9"
             column="13"/>
     </issue>
 
@@ -338,7 +338,7 @@
         errorLine2="                 ~~~~~~~~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="9"
+            line="10"
             column="18"/>
     </issue>
 
@@ -349,7 +349,7 @@
         errorLine2="               ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="10"
+            line="11"
             column="16"/>
     </issue>
 
@@ -360,7 +360,7 @@
         errorLine2="          ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="18"
+            line="19"
             column="11"/>
     </issue>
 
@@ -371,7 +371,7 @@
         errorLine2="         ~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="21"
+            line="22"
             column="10"/>
     </issue>
 
@@ -382,7 +382,7 @@
         errorLine2="         ~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="21"
+            line="22"
             column="10"/>
     </issue>
 
@@ -393,7 +393,7 @@
         errorLine2="       ~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="26"
+            line="27"
             column="8"/>
     </issue>
 
@@ -404,7 +404,7 @@
         errorLine2="         ~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="28"
+            line="29"
             column="10"/>
     </issue>
 
@@ -415,7 +415,7 @@
         errorLine2="         ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="30"
+            line="31"
             column="10"/>
     </issue>
 
@@ -426,7 +426,7 @@
         errorLine2="         ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="30"
+            line="31"
             column="10"/>
     </issue>
 
@@ -437,7 +437,7 @@
         errorLine2="                  ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="45"
+            line="46"
             column="19"/>
     </issue>
 
@@ -448,7 +448,7 @@
         errorLine2="                   ~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="46"
+            line="47"
             column="20"/>
     </issue>
 
@@ -459,7 +459,7 @@
         errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="98"
+            line="99"
             column="34"/>
     </issue>
 
@@ -470,7 +470,7 @@
         errorLine2="                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="../gradle/libs.versions.toml"
-            line="99"
+            line="100"
             column="34"/>
     </issue>
 
@@ -492,7 +492,7 @@
         errorLine2="                           ~~~~~~~~~~~">
         <location
             file="src/main/java/com/cursorforandroid/ui/conversation/ConversationScreen.kt"
-            line="175"
+            line="180"
             column="28"/>
     </issue>
 
@@ -503,7 +503,7 @@
         errorLine2="        ~~~~">
         <location
             file="src/main/java/com/cursorforandroid/ui/conversation/ConversationScreen.kt"
-            line="198"
+            line="203"
             column="9"/>
     </issue>
 
@@ -547,7 +547,7 @@
         errorLine2="    ~~~~~~~~">
         <location
             file="src/main/java/com/cursorforandroid/ui/agents/AgentRowItem.kt"
-            line="114"
+            line="116"
             column="5"/>
     </issue>
 
@@ -657,7 +657,7 @@
         errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="44"
+            line="51"
             column="38"/>
     </issue>
 
