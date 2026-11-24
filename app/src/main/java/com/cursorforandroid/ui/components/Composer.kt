@@ -249,6 +249,8 @@ fun ComposerBox(
      * always was. Given, a microphone joins it — see [composerButtons] — and the words go in at the caret, unsent.
      */
     voice: VoiceInput? = null,
+    /** Cursor's "Start voice chat": given, an empty composer over an idle agent offers it in the Send slot. */
+    onStartVoiceChat: (() -> Unit)? = null,
     /** Where the text stands, for a send that lifts it off into its bubble (see [SendMotion]); null for a composer that never does. */
     anchor: ComposerAnchor? = null,
     /** Whether the composer is grown over the window's height; hoisted by an owner that lays out around it. */
@@ -677,6 +679,7 @@ fun ComposerBox(
                 canSend = canSend,
                 hasContent = hasText || shownImages.isNotEmpty() || shownFiles.isNotEmpty(),
                 voice = micTap != null,
+                voiceChat = onStartVoiceChat != null,
             )
             val micBeside = buttons.micBeside && voice != null && micTap != null
             val dictating = voice != null && micTap != null && voice.state != VoiceState.Idle
@@ -736,6 +739,7 @@ fun ComposerBox(
                 SendSlot.Stop -> MainFace(MainGlyph.Stop, "Stop", onClick = { onStop?.invoke() })
                 // The tap is felt, not a hardware Enter: a physical keyboard's keys are their own feedback.
                 SendSlot.Send -> MainFace(MainGlyph.Send, "Send", onClick = { haptics.perform(Haptic.Confirm); send() }, prominent = canSend, enabled = sendsNow)
+                SendSlot.VoiceChat -> MainFace(MainGlyph.Waveform, "Start voice chat", onClick = { haptics.perform(Haptic.Confirm); onStartVoiceChat?.invoke() })
                 SendSlot.Mic -> when (voiceState) {
                     is VoiceState.Recording -> MainFace(MainGlyph.Mic, "Stop recording", onClick = micTap, recording = true)
                     VoiceState.Transcribing -> MainFace(MainGlyph.Spinner, "Transcribing", onClick = null)
@@ -929,7 +933,7 @@ private fun ComposerPlaceholder(field: TextFieldState, placeholder: String, modi
     }
 }
 
-internal enum class MainGlyph { Send, Stop, Mic, Spinner }
+internal enum class MainGlyph { Send, Stop, Mic, Waveform, Spinner }
 
 /**
  * What the send slot's disc shows: its glyph, its name, its tap ([onClick] null while a send or a transcription is
@@ -1004,6 +1008,7 @@ private fun ComposerMainButton(face: MainFace, voice: VoiceInput?, touchShift: D
                         MainGlyph.Send -> Icon(CursorIcons.ArrowUp, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph))
                         MainGlyph.Stop -> Icon(CursorIcons.Stop, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph))
                         MainGlyph.Mic -> Icon(CursorIcons.Mic, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph))
+                        MainGlyph.Waveform -> Icon(CursorIcons.CallWaveform, null, tint = tint, modifier = Modifier.size(CursorDimens.roundButtonGlyph - 1.dp))
                         MainGlyph.Spinner -> SpinnerRing(color = tint, size = CursorDimens.roundButtonGlyph, strokeWidth = 1.5.dp)
                     }
                 }

@@ -40,6 +40,7 @@ import com.cursorforandroid.ui.settings.SettingsScreen
 import com.cursorforandroid.ui.settings.SettingsTags
 import com.cursorforandroid.ui.settings.ThemeSwitchTags
 import com.cursorforandroid.ui.theme.CursorTheme
+import com.cursorforandroid.domain.UpdateChannel
 import com.cursorforandroid.ui.theme.ThemeMode
 import com.cursorforandroid.util.AppClock
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
@@ -237,6 +238,17 @@ class SettingsScreenshotTest {
         compose.onNodeWithText("Check for updates automatically").assertIsDisplayed()
         assertAlone()
         capture("66_settings_extended_off")
+    }
+
+    /** The Updates card with Alpha updates on: the switch, its words, and the version row naming the channel. */
+    @Test
+    fun alphaChannelOn() {
+        runBlocking { graph.prefs.setUpdateChannel(UpdateChannel.Alpha) }
+        composeSettings()
+        compose.onNodeWithTag(SettingsTags.ALPHA_CHANNEL).performScrollTo()
+        compose.waitUntil(30_000) { compose.onAllNodes(hasText("Alpha channel", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag(SettingsTags.ALPHA_CHANNEL).performScrollTo()
+        capture("1170_settings_alpha_channel_on")
     }
 
     @Test

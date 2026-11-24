@@ -283,6 +283,9 @@ android {
         warningsAsErrors = true
         abortOnError = true
         baseline = file("lint-baseline.xml")
+        // "A newer version is available" checks read live Maven/Gradle metadata, so they start failing CI
+        // whenever anything upstream publishes, with no change in this repo. Upgrades are tracked separately.
+        disable += setOf("GradleDependency", "AndroidGradlePluginVersion", "NewerVersionAvailable")
     }
 }
 
