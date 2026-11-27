@@ -13177,19 +13177,6 @@
     <ID>MaxLineLength:RefreshBenchmarkTest.kt:RefreshBenchmarkTest.Process$val agents = AgentRepository(session, prefs, AttachmentStore(context), cache, scope, persistDelayMs = 1, capabilities = capabilities, recordOf = { id -&gt; account.record(id) }, stats = stats)</ID>
     <ID>MaxLineLength:RefreshBenchmarkTest.kt:RefreshBenchmarkTest.Process$val projects = ProjectRepository(session, agents, account, scope = scope, pollIntervalMs = 60_000, capabilities = capabilities, retryDelaysMs = listOf(50L, 50L, 50L), stats = stats).also { it.watchList() }</ID>
     <ID>MaxLineLength:RefreshBenchmarkTest.kt:RefreshBenchmarkTest.Process$val session = SessionManager(SecureKeyStore(context), prefs, CursorBackend(api, FakeRunStreamer(), isDemo = false), CursorBackend(api, FakeRunStreamer(), isDemo = true), capabilities = capabilities)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$/** One frame: the compose clock and the main looper's (the view model's delays) on by 16 ms, then drawn and kept. */</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$File(dir, "frame-%03d.png".format(framesKept++)).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$api.addFinishedAgent(agentId, "Fee table checks", *prompts, firstRunAt = Instant.ofEpochMilli(now - TURNS * 3_600_000L).toString())</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$api.agents[agentId] = api.agents.getValue(agentId).copy(status = "ACTIVE", latestRunId = live, updatedAt = api.runs.getValue(live).createdAt)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$compose.waitUntil(10_000) { compose.onAllNodes(hasContentDescription(text, substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() || onScreen(text) }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$compose.waitUntil(120_000) { presentation().state.let { !it.isLoading &amp;&amp; it.isStreaming == running &amp;&amp; it.traceStatus.pending == 0 } }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$graph = AppGraph(context, SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, demo = fake, voiceInputOverride = true)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$if (withGoal) compose.waitUntil(30_000) { compose.onAllNodes(hasTestTag("goal-strip"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$private fun onScreen(text: String)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$private fun presentation()</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$private fun viewModel()</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$result = buildJsonObject { put("success", buildJsonObject { put("content", JsonPrimitive("val x = $n")); put("path", JsonPrimitive("app/src/Turn${turn}File$n.kt")) }) }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$transcript.performTouchInput { down(Offset(centerX, top + height * start)); moveBy(Offset(0f, sign * (viewConfiguration.touchSlop + 1f))) }</ID>
     <ID>MaxLineLength:RefreshFaultsTest.kt:RefreshFaultsTest$assertThat(unreachable.agents.state.value.error).isEqualTo("Cursor couldn't be reached. Check your connection.")</ID>
     <ID>MaxLineLength:RefreshFaultsTest.kt:RefreshFaultsTest$assertWithMessage("rows after the failed refresh").that(list.agents.map { it.id }).containsExactly("bc-0", "bc-1", "bc-2", "bc-3", "bc-4")</ID>
     <ID>MaxLineLength:RefreshFaultsTest.kt:RefreshFaultsTest$assertWithMessage("the retry waited out the Retry-After").that(attempts[1].atMillis - attempts[0].atMillis).isAtLeast(2_000L)</ID>
