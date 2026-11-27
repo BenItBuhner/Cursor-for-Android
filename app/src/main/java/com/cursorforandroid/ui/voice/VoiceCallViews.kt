@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.cursorforandroid.ui.auth.openLoginPage
 import com.cursorforandroid.ui.components.CursorButton
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.CursorMenu
@@ -250,6 +251,7 @@ fun VoiceCallHaptics(calls: VoiceCalls) {
  */
 @Composable
 fun VoiceCallTray(calls: VoiceCalls, modifier: Modifier = Modifier) {
+    val canvas = CursorTheme.colors.canvas
     val context = LocalContext.current
     val state by calls.state.collectAsStateWithLifecycle()
     val settings by calls.settings.collectAsStateWithLifecycle()
@@ -262,7 +264,16 @@ fun VoiceCallTray(calls: VoiceCalls, modifier: Modifier = Modifier) {
         onMute = calls::toggleMute,
         onHangUp = calls::end,
         onTranscript = { transcript = true },
-        onRetry = { if ((state.phase as? VoiceChatPhase.Failed)?.opensSettings == true) openAppSettings(context) else calls.tap() },
+        onRetry = {
+            val failed = state.phase as? VoiceChatPhase.Failed
+            when {
+                failed?.opensSettings == true -> openAppSettings(context)
+                failed?.connectsAccount == true -> calls.connectAccount { url ->
+                    check(openLoginPage(context, url, canvas)) { "No browser is set up to open Cursor's sign-in." }
+                }
+                else -> calls.tap()
+            }
+        },
         settings = settings,
         voices = { calls.voices() },
         onSettings = calls::setSettings,
@@ -320,7 +331,13 @@ fun VoiceCallTray(
                 }
                 if (!phase.resumes) {
                     Spacer(Modifier.width(8.dp))
-                    CursorButton(if (phase.opensSettings) "Settings" else "Retry", onRetry, height = CursorDimens.composerFooter)
+                    CursorButton(
+                        when {
+                            phase.opensSettings -> "Settings"
+                            phase.connectsAccount -> "Connect"
+                            else -> "Retry"
+                        },
+                        onRetry, height = CursorDimens.composerFooter)
                 }
                 Spacer(Modifier.width(2.dp))
                 FlatIconButton(CursorIcons.CallClose, VoiceChatCopy.Dismiss, onClick = onHangUp, modifier = Modifier.testTag(VoiceChatTags.End))

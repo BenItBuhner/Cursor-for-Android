@@ -3,6 +3,7 @@ package com.cursorforandroid.ui.voice
 import com.cursorforandroid.data.api.RealtimeVoiceApi
 import com.cursorforandroid.data.api.RealtimeVoicePlan
 import com.cursorforandroid.data.api.RealtimeVoiceSession
+import com.cursorforandroid.data.auth.SessionUnavailableException
 import com.cursorforandroid.data.api.RealtimeVoiceWire
 import com.cursorforandroid.data.voice.CallMicrophone
 import com.cursorforandroid.data.voice.CallSpeaker
@@ -56,7 +57,13 @@ sealed interface VoiceChatPhase {
      * Something did not work. [opensSettings]: the microphone permission is off for good, and the tap opens the
      * app's settings page; otherwise a tap calls again.
      */
-    data class Failed(val message: String, val resumes: Boolean = false, val opensSettings: Boolean = false) : VoiceChatPhase
+    data class Failed(
+        val message: String,
+        val resumes: Boolean = false,
+        val opensSettings: Boolean = false,
+        /** The account session calls need is not kept: the tap connects the Cursor account in the browser. */
+        val connectsAccount: Boolean = false,
+    ) : VoiceChatPhase
 }
 
 /** One turn of a call's transcript: what [fromUser] said, or what the voice agent said. */
@@ -165,6 +172,34 @@ class VoiceChat(
     /** Starts the call; does nothing while one is under way. */
     fun start() {
         if (_state.value.active && phase !is VoiceChatPhase.Failed) return
+        dial()
+    }
+
+    /**
+     * After a [VoiceChatPhase.Failed.connectsAccount]: [connect] opens the browser sign-in and returns once the
+     * account session is kept, and the call then starts again. Hanging up meanwhile abandons it.
+     */
+    fun connectAccount(connect: suspend () -> Unit) {
+        if ((phase as? VoiceChatPhase.Failed)?.connectsAccount != true) return
+        leave()
+        enter(VoiceChatPhase.Connecting)
+        val call = generation
+        connecting = scope.launch {
+            try {
+                connect()
+                if (call == generation) {
+                    connecting = null
+                    dial()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (call == generation) fail(errorMessage(e))
+            }
+        }
+    }
+
+    private fun dial() {
         leave()
         val turns = _state.value.turns
         _state.value = VoiceChatState(muted = muted, turns = turns)
@@ -183,6 +218,14 @@ class VoiceChat(
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: SessionUnavailableException) {
+                if (call != generation) return@launch
+                if (e.code == SessionUnavailableException.NO_ACCOUNT_SESSION) {
+                    leave()
+                    enter(VoiceChatPhase.Failed(e.message ?: "Connect your Cursor account for calls.", connectsAccount = true))
+                } else {
+                    fail(errorMessage(e))
+                }
             } catch (e: Exception) {
                 if (call == generation) fail(errorMessage(e))
             }
@@ -442,7 +485,7 @@ class VoiceChat(
     /** The shortcut of the moment: after a failure, calls again; while the agent speaks, lets the caller in. */
     fun tap() {
         when (val now = phase) {
-            is VoiceChatPhase.Failed -> if (!now.opensSettings) start()
+            is VoiceChatPhase.Failed -> if (!now.opensSettings && !now.connectsAccount) start()
             is VoiceChatPhase.Speaking -> speaker?.interrupt()?.let { heard -> send(RealtimeWire.truncate(heard.itemId, heard.contentIndex, heard.audioEndMs)) }
             VoiceChatPhase.Muted -> toggleMute()
             else -> Unit

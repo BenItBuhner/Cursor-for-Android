@@ -23,12 +23,15 @@ class SessionUnavailableException(message: String, val code: String? = null, cau
      * True when trying again later cannot help: the key is rejected, the account's policy forbids this device, or
      * Extended mode is off and nothing on `api2` may be called until it is turned on (which resets the callers).
      */
-    val isPermanent: Boolean get() = code == SIGN_IN_POLICY_VIOLATION || code == KEY_REJECTED || code == EXTENDED_MODE_OFF
+    val isPermanent: Boolean get() = code == SIGN_IN_POLICY_VIOLATION || code == KEY_REJECTED || code == EXTENDED_MODE_OFF ||
+        code == NO_ACCOUNT_SESSION
 
     companion object {
         const val SIGN_IN_POLICY_VIOLATION = "sign_in_policy_violation"
         const val KEY_REJECTED = "key_rejected"
         const val EXTENDED_MODE_OFF = "extended_mode_off"
+        /** No account session from a browser sign-in is kept (or its refresh was refused): calls need one. */
+        const val NO_ACCOUNT_SESSION = "no_account_session"
     }
 }
 
@@ -53,14 +56,14 @@ class SessionTokenProvider(
     private val now: () -> Long = AppClock::now,
     /** Whether the account session may be started or handed out at all: Extended mode. Always, for tests of the exchange itself. */
     private val sessionAllowed: suspend () -> Boolean = { true },
-) {
+) : AccountTokens {
     private class Session(val apiKey: String, val accessToken: String, val expiresAtMs: Long)
 
     private val mutex = Mutex()
     @Volatile private var session: Session? = null
 
     /** A session token good for at least [EXPIRY_MARGIN_MS] more, exchanging the stored key for a new one when needed. */
-    suspend fun accessToken(): String {
+    override suspend fun accessToken(): String {
         if (!sessionAllowed()) {
             // Nothing minted earlier may be handed out either: a session left over from before the mode was turned off
             // would let a call through that the setting says may not be made.
@@ -76,7 +79,7 @@ class SessionTokenProvider(
     }
 
     /** Forgets the current session, so the next call starts a new one; for after a `401` on an RPC. */
-    fun invalidate() {
+    override fun invalidate() {
         session = null
     }
 

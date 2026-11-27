@@ -76,6 +76,7 @@ import com.cursorforandroid.data.api.WorkspaceFilesApi
 import com.cursorforandroid.data.auth.CursorLogin
 import com.cursorforandroid.data.auth.CursorLoginEndpoints
 import com.cursorforandroid.data.auth.SessionTokenProvider
+import com.cursorforandroid.data.auth.UserSessionProvider
 import com.cursorforandroid.data.demo.DemoBackendFactory
 import com.cursorforandroid.data.demo.DemoData
 import com.cursorforandroid.data.demo.DemoPace
@@ -456,11 +457,30 @@ class AppGraph(
             api = { lazyRealtimeVoice.value },
             dialer = { OkHttpRealtimeDialer(lazyAccountClient.value) },
             onLive = { live -> if (live) VoiceCallService.start(app) },
+            connect = { open ->
+                val login = CursorLogin(lazyAccountClient.value)
+                val handshake = login.startHandshake()
+                open(handshake.loginUrl)
+                userSession.save(login.awaitTokens(handshake))
+            },
+        )
+    }
+
+    /**
+     * The browser sign-in's own account session, which Cursor requires for calls (an API key's is refused). Kept
+     * by every browser sign-in, or connected from the call tray (see [UserSessionProvider]).
+     */
+    private val userSession by lazy {
+        UserSessionProvider(
+            lazyAccountClient.value,
+            read = { keyStore.accountSessionJson() },
+            write = { keyStore.setAccountSessionJson(it) },
+            sessionAllowed = { extendedMode.isEnabled() },
         )
     }
 
     /** Cursor's realtime voice call on the account: the mint, the server-run tools, the voice kept (see [RealtimeVoiceApi]). */
-    private val lazyRealtimeVoice = lazy { AccountRealtimeVoiceApi(lazyAccountRpc.value, lazySessionTokens.value) }
+    private val lazyRealtimeVoice = lazy { AccountRealtimeVoiceApi(lazyAccountRpc.value, userSession) }
 
     /**
      * Whether the composers offer the microphone: wherever a dictation can be transcribed. That is through the account
@@ -637,6 +657,7 @@ class AppGraph(
         mintedKeyName = "Cursor for Android (${Build.MODEL.ifBlank { "Android" }})",
         profile = lazy { AccountApi(lazyAccountRpc.value, lazySessionTokens.value) },
         capabilities = capabilities,
+        keepAccountSession = { tokens -> userSession.save(tokens) },
     )
 
     /**

@@ -1,6 +1,6 @@
 package com.cursorforandroid.data.api
 
-import com.cursorforandroid.data.auth.SessionTokenProvider
+import com.cursorforandroid.data.auth.AccountTokens
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -90,7 +90,8 @@ data class RealtimeVoicePlan(
 
 class AccountRealtimeVoiceApi(
     private val rpc: ConnectJsonClient,
-    private val tokens: SessionTokenProvider,
+    /** The browser sign-in's own session: Cursor refuses a call minted with the API key's ([com.cursorforandroid.data.auth.UserSessionProvider]). */
+    private val tokens: AccountTokens,
 ) : RealtimeVoiceApi {
 
     override suspend fun mint(agentId: String, language: String?): RealtimeVoiceSession {
