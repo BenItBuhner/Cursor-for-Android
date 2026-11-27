@@ -15,6 +15,7 @@ import com.cursorforandroid.data.api.PullRequestCreationApi
 import com.cursorforandroid.data.api.ScmPullRequestApi
 import com.cursorforandroid.data.api.userMessage
 import com.cursorforandroid.data.auth.SessionUnavailableException
+import com.cursorforandroid.data.runCatchingCancellable
 import com.cursorforandroid.domain.AgentUsage
 import com.cursorforandroid.domain.Capabilities
 import com.cursorforandroid.domain.PullRequestView
@@ -123,9 +124,9 @@ class ReviewRepository(
      */
     private suspend fun readAccount(url: String, api: ScmPullRequestApi): PullRequestView = coroutineScope {
         val details = api.pullRequest(url)
-        val files = async { runCatching { api.files(url) } }
-        val status = async { runCatching { api.status(url) } }
-        val threads = async { runCatching { api.discussions(url) } }
+        val files = async { runCatchingCancellable { api.files(url) } }
+        val status = async { runCatchingCancellable { api.status(url) } }
+        val threads = async { runCatchingCancellable { api.discussions(url) } }
         val missing = mutableSetOf<String>()
         val statusDetails = status.await().getOrElse { missing += "checks"; null }
         PullRequestView(
@@ -175,10 +176,10 @@ class ReviewRepository(
     private suspend fun readGitHub(ref: GitHubPullRequestRef): PullRequestView = coroutineScope {
         val api = gitHub()
         val details = api.pullRequestDetails(ref)
-        val files = async { runCatching { api.pullRequestFiles(ref) } }
-        val checks = async { runCatching { details.headSha?.let { api.checkRuns(ref.repo, it) }.orEmpty() } }
-        val threads = async { runCatching { api.reviewThreads(ref) } }
-        val reviews = async { runCatching { api.reviews(ref) } }
+        val files = async { runCatchingCancellable { api.pullRequestFiles(ref) } }
+        val checks = async { runCatchingCancellable { details.headSha?.let { api.checkRuns(ref.repo, it) }.orEmpty() } }
+        val threads = async { runCatchingCancellable { api.reviewThreads(ref) } }
+        val reviews = async { runCatchingCancellable { api.reviews(ref) } }
         val missing = mutableSetOf<String>()
         PullRequestView(
             details = details,

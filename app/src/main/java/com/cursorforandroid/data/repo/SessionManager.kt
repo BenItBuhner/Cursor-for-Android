@@ -8,6 +8,7 @@ import com.cursorforandroid.data.api.userMessage
 import com.cursorforandroid.data.auth.CursorLogin
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.data.local.SecureKeyStore
+import com.cursorforandroid.data.runCatchingCancellable
 import com.cursorforandroid.domain.Capabilities
 import com.cursorforandroid.domain.CredentialInfo
 import com.cursorforandroid.domain.CursorUser
@@ -199,7 +200,7 @@ class SessionManager(
         // `/v1/me` knows nothing of the picture; the one shown last time stays until the account service answers —
         // unless the account service is not to be asked, in which case a picture it gave earlier goes with it.
         val keepPicture = capabilities().accountProfile
-        runCatching { realBackend.api.me().toUser().copy(profilePictureUrl = cached?.profilePictureUrl?.takeIf { keepPicture }) }
+        runCatchingCancellable { realBackend.api.me().toUser().copy(profilePictureUrl = cached?.profilePictureUrl?.takeIf { keepPicture }) }
             .onSuccess { user ->
                 prefs.setCachedUser(user)
                 if (_backend.value === realBackend) _state.value = SessionState.SignedIn(user, isDemo = false, credential = credential)
@@ -252,7 +253,7 @@ class SessionManager(
         // Behind Extended mode: `GetMe` is not a documented call, and the initials do without it.
         if (!capabilities().accountProfile) return
         val api = profile.value ?: return
-        val fetched = runCatching { api.profile() }.getOrNull() ?: return
+        val fetched = runCatchingCancellable { api.profile() }.getOrNull() ?: return
         val enriched = user.copy(
             profilePictureUrl = fetched.profilePictureUrl,
             firstName = user.firstName ?: fetched.firstName,
