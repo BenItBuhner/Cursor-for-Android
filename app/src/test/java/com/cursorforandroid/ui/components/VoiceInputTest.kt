@@ -34,7 +34,17 @@ class VoiceInputTest {
         canStop: Boolean = false,
         isSending: Boolean = false,
         cancelOffered: Boolean = false,
-    ) = composerButtons(isSending = isSending, cancelOffered = cancelOffered, canStop = canStop, canSend = canSend, hasContent = hasContent, voice = voice)
+        voiceChat: Boolean = false,
+    ) = composerButtons(isSending = isSending, cancelOffered = cancelOffered, canStop = canStop, canSend = canSend, hasContent = hasContent, voice = voice, voiceChat = voiceChat)
+
+    @Test
+    fun `with voice chat on offer an empty idle composer holds Start voice chat with dictation beside it, as Cursor does`() {
+        assertThat(buttons(voice = true, voiceChat = true)).isEqualTo(ComposerButtons(SendSlot.VoiceChat, micBeside = true))
+        // Typing takes the slot back for Send; a running agent puts Stop there, as Cursor's docs say.
+        assertThat(buttons(voice = true, voiceChat = true, hasContent = true)).isEqualTo(ComposerButtons(SendSlot.Send, micBeside = true))
+        assertThat(buttons(voice = true, voiceChat = true, canStop = true)).isEqualTo(ComposerButtons(SendSlot.Stop, micBeside = true))
+        assertThat(buttons(voice = true, voiceChat = true, isSending = true)).isEqualTo(ComposerButtons(SendSlot.Busy, micBeside = false))
+    }
 
     @Test
     fun `voice off leaves the send slot as it was`() {

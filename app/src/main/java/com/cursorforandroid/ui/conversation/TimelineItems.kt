@@ -106,6 +106,8 @@ import com.cursorforandroid.ui.files.rememberFileOpener
 import com.cursorforandroid.ui.theme.CursorTheme
 import com.cursorforandroid.util.TimeFormat
 import com.cursorforandroid.ui.components.onContextClick
+import com.cursorforandroid.ui.voice.LocalVoiceSent
+import com.cursorforandroid.ui.voice.VoiceCallLabel
 
 @Composable
 fun TimelineItemView(item: TimelineItem, modifier: Modifier = Modifier) {
@@ -147,7 +149,9 @@ private fun HumanMessage(item: UserMessage, modifier: Modifier) {
     // A copy still landing on the bubble arrives at its fade as it is on that frame, the filing mid-flight included.
     val alphaNow = rememberUpdatedState(alpha)
     val look = remember { SendTargetLook(fixedFade = PendingMessageAlpha, fading = { alphaNow.value }) }
-    Box(modifier.fillMaxWidth().padding(start = 32.dp), contentAlignment = Alignment.CenterEnd) {
+    val saidOnCall = hasText && item.text.trim() in LocalVoiceSent.current
+    Column(modifier.fillMaxWidth().padding(start = 32.dp), horizontalAlignment = Alignment.End) {
+        if (saidOnCall) VoiceCallLabel(Modifier.padding(end = 4.dp, bottom = 4.dp))
         MessageActions(
             text = item.text,
             enabled = hasText,

@@ -1,6 +1,7 @@
 [versions]
+# Backdrop blur for the translucent composer and its dock (1.1.x is the line built on Compose 1.7).
 agp = "8.10.1"
-kotlin = "2.2.21"
+kotlin = "2.4.21"
 coreKtx = "1.17.0"
 activityCompose = "1.9.3"
 lifecycle = "2.8.7"
@@ -40,6 +41,8 @@ robolectric = "4.16.1"
 robolectricAndroidAllSdk35 = "15-robolectric-13954326-i7"
 robolectricAndroidAllSdk30 = "11-robolectric-6757853-i7"
 roborazzi = "1.73.0"
+# Built against Kotlin 2.2.20, the line this app compiles with. The Gradle plugin is dev.detekt.
+detekt = "2.0.0-alpha.1"
 androidxTestExt = "1.2.1"
 androidxTestCore = "1.6.1"
 
@@ -109,3 +112,4 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }

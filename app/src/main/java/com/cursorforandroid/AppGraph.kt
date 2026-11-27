@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Build
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.cursorforandroid.ui.voice.VoiceCallService
+import com.cursorforandroid.ui.voice.VoiceCalls
 import com.cursorforandroid.crash.Breadcrumbs
 import com.cursorforandroid.crash.CrashContext
 import com.cursorforandroid.crash.CrashLog
@@ -247,6 +249,10 @@ class AppGraph(
     repositoryBranchesApi: RepositoryBranchesApi? = null,
     /** Injectable for tests only: the account's transcription, so the composer's voice input can be driven against a scripted account. */
     transcriptionApi: TranscriptionApi? = null,
+    /** Injectable for tests only: the app's voice chat, with a scripted microphone and voice in place of the device's. */
+    voiceCallsOverride: VoiceCalls? = null,
+    /** Injectable for tests only: whether the composers offer the microphone, whatever the mode (the demo recordings' call). */
+    voiceInputOverride: Boolean? = null,
     /**
      * Where the agent list is organized for its screens (see [com.cursorforandroid.ui.agents.AgentsViewModel.uiState]).
      * Injectable for tests only: the Compose test rule runs a screen's collectors on whichever thread publishes to
@@ -439,11 +445,20 @@ class AppGraph(
     val transcription: TranscriptionApi get() = lazyTranscription.value
 
     /**
+     * The app's one voice chat (see [VoiceCalls]): it outlives the chat's screen, and while it is on, a microphone
+     * foreground service keeps it going with the app out of sight.
+     */
+    val voiceCalls: VoiceCalls by lazy {
+        voiceCallsOverride ?: VoiceCalls.create(app, transcription = { transcription }, onLive = { live -> if (live) VoiceCallService.start(app) })
+    }
+
+    /**
      * Whether the composers offer the microphone: wherever a dictation can be transcribed. That is through the account
      * (`api2`), whose session is refused while Extended mode is off, so the mic is there in Extended mode and gone in
      * Default mode rather than failing at every tap; never in the demo, which has no account to ask.
      */
-    val voiceInput: Flow<Boolean> = combine(extendedMode.enabled, prefs.demoMode) { extended, demo -> extended && !demo }
+    val voiceInput: Flow<Boolean> = voiceInputOverride?.let { kotlinx.coroutines.flow.flowOf(it) }
+        ?: combine(extendedMode.enabled, prefs.demoMode) { extended, demo -> extended && !demo }
         .distinctUntilChanged()
     /**
      * The account's own transcript of a chat (`FetchBackgroundComposer`), on the account client with the transcript's

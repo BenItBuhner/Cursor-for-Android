@@ -83,6 +83,7 @@ import com.cursorforandroid.ui.shortcuts.ShortcutHandler
 import com.cursorforandroid.ui.shortcuts.shortcutsBeforeIme
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
+import com.cursorforandroid.ui.voice.LocalVoiceCallLine
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -505,6 +506,9 @@ private fun AppShell(
     val whatsNewUnread by graph.whatsNewUnread.collectAsStateWithLifecycle(initialValue = null)
     val whatsNewHint = whatsNewUnread?.let { WhatsNewCopy.title(it.versionName) }
 
+    // The chat a call is with wears Cursor's "Voice chat in progress" pill in the sidebar.
+    val voiceCallLine by graph.voiceCalls.line.collectAsStateWithLifecycle()
+
     @Composable
     fun sidebar(
         inDrawer: Boolean,
@@ -512,7 +516,7 @@ private fun AppShell(
         state: AgentListUiState = listState,
         expansion: MutableState<List<String>>? = null,
         animateRows: Boolean = true,
-    ) {
+    ) = CompositionLocalProvider(LocalVoiceCallLine provides voiceCallLine) {
         Sidebar(
             state = state,
             user = user,
