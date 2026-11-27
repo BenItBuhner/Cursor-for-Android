@@ -4,11 +4,22 @@ import kotlinx.serialization.Serializable
 import java.net.URI
 import java.net.URISyntaxException
 
-/** Transports the Cloud Agents API accepts for inline MCP servers; SSE and `mcp-remote` are not supported in the cloud. */
+/** Transports the Cloud Agents API accepts for inline MCP servers: `http`, `sse`, or `stdio`. */
 enum class McpTransport(val wire: String, val label: String) {
     Http("http", "HTTP"),
+    Sse("sse", "SSE"),
     Stdio("stdio", "stdio"),
 }
+
+/**
+ * OAuth credentials for a remote MCP server (`mcpServers[].auth` on Create An Agent / Create A Run).
+ */
+@Serializable
+data class McpOAuth(
+    val clientId: String,
+    val clientSecret: String = "",
+    val scopes: List<String> = emptyList(),
+)
 
 /**
  * An MCP server the user defined in the app. Enabled servers go out inline as `mcpServers[]` on Create An Agent and
@@ -26,13 +37,15 @@ data class McpServer(
     val command: String = "",
     val args: List<String> = emptyList(),
     val env: Map<String, String> = emptyMap(),
+    /** OAuth for a remote server; omitted on the wire when null. */
+    val auth: McpOAuth? = null,
     /** Sent with new prompts. Off keeps the definition without attaching it. */
     val enabled: Boolean = true,
 ) {
     /** Second line of a row: the host for HTTP servers, the command line for stdio ones. */
     val summary: String
         get() = when (transport) {
-            McpTransport.Http -> url.removePrefix("https://").removePrefix("http://").removeSuffix("/")
+            McpTransport.Http, McpTransport.Sse -> url.removePrefix("https://").removePrefix("http://").removeSuffix("/")
             McpTransport.Stdio -> (listOf(command) + args).joinToString(" ").trim()
         }
 }
@@ -62,7 +75,7 @@ object McpServerForm {
         if (name.any { it.isWhitespace() }) return "Server names can't contain spaces."
         if (others.any { it.id != server.id && it.name.equals(name, ignoreCase = true) }) return "You already have a server called \"$name\"."
         return when (server.transport) {
-            McpTransport.Http -> validateUrl(server.url.trim())
+            McpTransport.Http, McpTransport.Sse -> validateUrl(server.url.trim())
             McpTransport.Stdio -> if (server.command.trim().isEmpty()) "Enter the command that starts the server." else null
         }
     }
