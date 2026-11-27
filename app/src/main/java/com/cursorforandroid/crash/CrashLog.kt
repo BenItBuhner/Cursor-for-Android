@@ -178,7 +178,8 @@ class CrashLog(
         val history = activityManager.getHistoricalProcessExitReasons(packageName, 0, MAX_EXITS_READ)
         // "Last time" is the app's own last process: a crash weeks ago, then a swipe, a reboot or the update that
         // replaced the app, is not how it ended last time.
-        val last = history.filter { it.processName == packageName }.maxByOrNull { it.timestamp } ?: history.maxByOrNull { it.timestamp }
+        val last = history.filter { it.processName == packageName }.maxByOrNull { it.timestamp }
+            ?: history.maxByOrNull { it.timestamp }
         lastEnd = last?.let { it.timestamp to (it.reason in CRASH_REASONS) }
         val exits = history
             .filter { it.timestamp > seen && (it.reason in CRASH_REASONS || it.reason in KILL_REASONS) }
@@ -240,8 +241,8 @@ class CrashLog(
         val at = millisOf(newest) ?: return
         if (at <= dismissed) { _pending.value = null; return }
         val end = lastEnd
-        if (end != null && (!end.second || kotlin.math.abs(at - end.first) > MATCH_WINDOW_MS)) { _pending.value = null; return }
-        _pending.value = read(newest)
+        val endedLastProcess = end == null || (end.second && kotlin.math.abs(at - end.first) <= MATCH_WINDOW_MS)
+        _pending.value = if (endedLastProcess) read(newest) else null
     }
 
     /** The user closed the card: the reports stay for the export, the card does not come back for them. */
@@ -288,11 +289,11 @@ class CrashLog(
      * A report of Android ending the process on purpose, not of a crash: written as such since this build, or an
      * older build's exit report whose reason says so (so a low-memory kill kept before the update is not offered).
      */
-    private fun isKill(file: File): Boolean {
-        if (file.name.endsWith(KILL_SUFFIX)) return true
-        if (!file.name.endsWith(EXIT_SUFFIX)) return false
-        val first = runCatching { file.useLines { it.firstOrNull() } }.getOrNull() ?: return false
-        return KILL_NAMES.any { first.endsWith(": $it") }
+    private fun isKill(file: File): Boolean = when {
+        file.name.endsWith(KILL_SUFFIX) -> true
+        !file.name.endsWith(EXIT_SUFFIX) -> false
+        else -> runCatching { file.useLines { it.firstOrNull() } }.getOrNull()
+            .let { first -> first != null && KILL_NAMES.any { first.endsWith(": $it") } }
     }
 
     /** Crashes and system kills are capped apart, so a run of low-memory kills never pushes a real crash out. */

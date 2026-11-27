@@ -224,17 +224,19 @@ class CrashLogTest {
         log.recordExitReasons(activityManager, context.packageName)
         log.load()
         assertThat(log.pending.value).isNull()
-        assertThat(log.reports().map { it.headline }).containsExactly("EXCESSIVE_RESOURCE_USAGE", "SIGNALED", "LOW_MEMORY").inOrder()
+        assertThat(log.reports().map { it.headline })
+            .containsExactly("EXCESSIVE_RESOURCE_USAGE", "SIGNALED", "LOW_MEMORY").inOrder()
         assertThat(log.export()).contains("pss=878 MB")
     }
 
     @Test
     fun `an older build's low-memory exit report is not offered after the update`() {
         val dir = folder.newFolder("crash")
-        File(dir, "report-${now - 1_000}-exit.txt").writeText("Cursor for Android ended at 2027-01-15T08:00:00Z: LOW_MEMORY\nRead by 0.3.98\n")
+        val ended = "Cursor for Android ended at 2027-01-15T08:00:00Z"
+        File(dir, "report-${now - 1_000}-exit.txt").writeText("$ended: LOW_MEMORY\nRead by 0.3.98\n")
         val log = log(dir).also { it.load() }
         assertThat(log.pending.value).isNull()
-        File(dir, "report-${now - 500}-exit.txt").writeText("Cursor for Android ended at 2027-01-15T08:00:00Z: ANR\nRead by 0.3.98\n")
+        File(dir, "report-${now - 500}-exit.txt").writeText("$ended: ANR\nRead by 0.3.98\n")
         assertThat(log(dir).also { it.load() }.pending.value!!.headline).isEqualTo("ANR")
     }
 
@@ -243,7 +245,9 @@ class CrashLogTest {
         val dir = folder.newFolder("crash")
         log(dir).record("main", RuntimeException("real"))
         val shadow: ShadowActivityManager = shadowOf(activityManager)
-        repeat(CrashLog.MAX_REPORTS + 2) { i -> shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_LOW_MEMORY, now + 60_000L * (i + 1), null)) }
+        repeat(CrashLog.MAX_REPORTS + 2) { i ->
+            shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_LOW_MEMORY, now + 60_000L * (i + 1), null))
+        }
         now += 3_600_000
         val log = log(dir)
         log.recordExitReasons(activityManager, context.packageName)
@@ -271,7 +275,8 @@ class CrashLogTest {
         now = crashAt
         log(dir).record("main", IllegalStateException("real one"))
         now = 1_800_000_000_000L
-        shadowOf(activityManager).addApplicationExitInfo(exit(ApplicationExitInfo.REASON_CRASH, crashAt + 300, "java.lang.IllegalStateException"))
+        shadowOf(activityManager)
+            .addApplicationExitInfo(exit(ApplicationExitInfo.REASON_CRASH, crashAt + 300, "IllegalStateException"))
         val log = log(dir)
         log.recordExitReasons(activityManager, context.packageName)
         log.load()
@@ -286,7 +291,9 @@ class CrashLogTest {
         log(dir).record("main", IllegalStateException("weeks ago"))
         now = 1_800_000_000_000L
         val shadow: ShadowActivityManager = shadowOf(activityManager)
-        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_CRASH, crashAt + 300, "java.lang.IllegalStateException"))
+        shadow.addApplicationExitInfo(
+            exit(ApplicationExitInfo.REASON_CRASH, crashAt + 300, "java.lang.IllegalStateException"),
+        )
         // Then used normally for a week, and replaced by the update (a reason this log never keeps).
         shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_USER_REQUESTED, now - 86_400_000L, null))
         shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_PACKAGE_UPDATED, now - 60_000, "package updated"))
