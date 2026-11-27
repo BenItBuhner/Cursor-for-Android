@@ -84,6 +84,8 @@ data class DeviceOption(
     val repoUrl: String? = null,
     /** The machine's worker as `GET /v0/private-workers` last listed it; null for pools and machines never listed. */
     val worker: MachineWorker? = null,
+    /** The fleet endpoint says the worker is running a chat right now (`isInUse`); false for anything it did not list. */
+    val busy: Boolean = false,
 ) {
     val key: String get() = keyOf(target)
 
@@ -192,6 +194,18 @@ object KnownDevices {
         val key = DeviceOption.keyOf(target)
         return devices.firstOrNull { it.key == key }?.repoUrl
     }
+
+    /**
+     * The user's computers that can take a chat right now, as Cursor's own apps list the account's computers without
+     * being asked: the machines the fleet endpoint lists and that are free. The device menu shows them next to Cloud,
+     * one tap away, instead of only under Remote. A machine past chats ran on but nothing lists is not one (it may be
+     * off), nor is a busy one. The one used most recently first, then by name, so the order does not change between
+     * two listings that say the same.
+     */
+    fun readyMachines(devices: List<DeviceOption>): List<DeviceOption> =
+        devices
+            .filter { it.section == DeviceSection.Machines && it.online && !it.busy && it.worker != null }
+            .sortedWith(compareByDescending<DeviceOption> { it.lastUsedAtMillis }.thenBy { it.target.label.lowercase() })
 
     /** A pool or machine the agent ran on; unnamed cloud rows are not a pickable device of their own. */
     fun targetOf(agent: Agent): DeviceTarget? {

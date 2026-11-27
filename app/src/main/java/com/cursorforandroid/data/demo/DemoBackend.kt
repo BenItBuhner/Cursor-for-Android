@@ -386,7 +386,13 @@ private fun <T> pageOf(all: List<T>, limit: Int, cursor: String?, id: (T) -> Str
 /** What the live API accepts as the largest page, so a caller asking for more is answered the same way. */
 private const val DEMO_MAX_PAGE_SIZE = 100
 
+/** The demo account's second computer, and how far into a session it comes online. */
+internal const val SECOND_MACHINE = "Bennetts-MacBook-Pro"
+internal const val SECOND_MACHINE_WAKES_MS = 15_000L
+
 internal class DemoCursorApi(private val store: DemoStore) : CursorApi {
+
+    private val startedAt = AppClock.now()
 
     /** Simulated network latency must behave like real IO, never a main-thread delay. */
     private suspend fun <T> io(block: suspend () -> T): T = withContext(Dispatchers.IO) { block() }
@@ -468,7 +474,7 @@ internal class DemoCursorApi(private val store: DemoStore) : CursorApi {
         delay(80)
         if (scope == "team_pool") return@io ListWorkersResponseDto()
         ListWorkersResponseDto(
-            workers = listOf(
+            workers = listOfNotNull(
                 WorkerDto(
                     id = "pw_bennett",
                     name = "bennett",
@@ -480,6 +486,19 @@ internal class DemoCursorApi(private val store: DemoStore) : CursorApi {
                     workspaceRootPath = "/home/bennett/projects/codex-poly-bot",
                     scope = "personal",
                 ),
+                // A second computer, free, that comes online a little into the session, as one does when Cursor is
+                // opened on it: what New Chat offers by itself the next time it lists the fleet.
+                WorkerDto(
+                    id = "pw_macbook",
+                    name = SECOND_MACHINE,
+                    displayName = SECOND_MACHINE,
+                    isInUse = false,
+                    repoOwner = "bennett",
+                    repoName = "codex-poly-bot",
+                    repoUrl = "https://github.com/bennett/codex-poly-bot",
+                    workspaceRootPath = "/Users/bennett/code/codex-poly-bot",
+                    scope = "personal",
+                ).takeIf { AppClock.now() - startedAt >= SECOND_MACHINE_WAKES_MS },
             ),
         )
     }
