@@ -1,6 +1,6 @@
 package com.cursorforandroid.data.api
 
-import com.cursorforandroid.data.auth.SessionTokenProvider
+import com.cursorforandroid.data.auth.AccountTokens
 import kotlinx.serialization.KSerializer
 
 /**
@@ -11,7 +11,7 @@ import kotlinx.serialization.KSerializer
 suspend fun <I, O> ConnectJsonClient.unaryWithSession(
     service: String,
     method: String,
-    tokens: SessionTokenProvider,
+    tokens: AccountTokens,
     body: I,
     requestSerializer: KSerializer<I>,
     responseSerializer: KSerializer<O>,
@@ -34,7 +34,7 @@ suspend fun <I, O> ConnectJsonClient.unaryWithSession(
 suspend fun <I> ConnectJsonClient.serverStreamWithSession(
     service: String,
     method: String,
-    tokens: SessionTokenProvider,
+    tokens: AccountTokens,
     body: I,
     requestSerializer: KSerializer<I>,
     retryRefusals: Boolean = false,

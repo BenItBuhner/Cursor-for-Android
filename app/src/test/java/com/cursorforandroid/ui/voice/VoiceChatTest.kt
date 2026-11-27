@@ -1,5 +1,6 @@
 package com.cursorforandroid.ui.voice
 
+import com.cursorforandroid.data.auth.SessionUnavailableException
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -287,6 +288,45 @@ class VoiceChatTest {
         assertThat(session["voice"]!!.jsonPrimitive.content).isEqualTo("rex")
         assertThat(session["audio"]!!.jsonObject["output"]!!.jsonObject["speed"]!!.jsonPrimitive.content).isEqualTo("1.5")
         assertThat(chat.voices.map { it.id }).containsExactly("eve", "rex").inOrder()
+        chat.end()
+    }
+
+    @Test
+    fun `a call without the account session offers to connect it, and calls again once it is connected`() = scope.runTest {
+        account.mintFailure = SessionUnavailableException("Calls use your Cursor account.", SessionUnavailableException.NO_ACCOUNT_SESSION)
+        val chat = chat()
+        chat.start()
+        runCurrent()
+        val failed = chat.state.value.phase as VoiceChatPhase.Failed
+        assertThat(failed.connectsAccount).isTrue()
+        assertThat(failed.message).isEqualTo("Calls use your Cursor account.")
+        // A tap does not just mint again with nothing changed.
+        chat.tap()
+        runCurrent()
+        assertThat(account.mints).hasSize(1)
+
+        var connects = 0
+        account.mintFailure = null
+        chat.connectAccount { connects++ }
+        runCurrent()
+        assertThat(connects).isEqualTo(1)
+        assertThat(account.mints).hasSize(2)
+        assertThat(dialer.dialled).hasSize(1)
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Connecting)
+        chat.end()
+    }
+
+    @Test
+    fun `a connection that fails is shown, and the call can be tried again`() = scope.runTest {
+        account.mintFailure = SessionUnavailableException("Calls use your Cursor account.", SessionUnavailableException.NO_ACCOUNT_SESSION)
+        val chat = chat()
+        chat.start()
+        runCurrent()
+        chat.connectAccount { throw IOException("No browser") }
+        runCurrent()
+        val failed = chat.state.value.phase as VoiceChatPhase.Failed
+        assertThat(failed.message).isEqualTo("No browser")
+        assertThat(failed.connectsAccount).isFalse()
         chat.end()
     }
 }

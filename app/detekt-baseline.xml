@@ -12843,6 +12843,7 @@
     <ID>MaxLineLength:RailBesidePinnedPanelTest.kt:RailBesidePinnedPanelTest$fun</ID>
     <ID>MaxLineLength:RailBesidePinnedPanelTest.kt:RailBesidePinnedPanelTest$private fun widthOf(tag: String)</ID>
     <ID>MaxLineLength:RealtimeLine.kt:OkHttpRealtimeDialer.&lt;no name provided&gt;$val said = response?.let { r -&gt; runCatching { r.body?.string() }.getOrNull()?.takeIf { it.isNotBlank() } ?: "HTTP ${r.code}" }</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:AccountRealtimeVoiceApi$/** The browser sign-in's own session: Cursor refuses a call minted with the API key's ([com.cursorforandroid.data.auth.UserSessionProvider]). */</ID>
     <ID>MaxLineLength:RealtimeVoiceApi.kt:AccountRealtimeVoiceApi$override suspend</ID>
     <ID>MaxLineLength:RealtimeVoiceApi.kt:ExecuteToolRequestDto$internal</ID>
     <ID>MaxLineLength:RealtimeVoiceApi.kt:RealtimeVoiceWire$fun</ID>
@@ -17346,6 +17347,15 @@
     <ID>MaxLineLength:Usage.kt:TokenUsage$val</ID>
     <ID>MaxLineLength:Usage.kt:TokenUsage$val isEmpty: Boolean get() = totalTokens == 0L &amp;&amp; inputTokens == 0L &amp;&amp; outputTokens == 0L &amp;&amp; cacheReadTokens == 0L &amp;&amp; cacheWriteTokens == 0L</ID>
     <ID>MaxLineLength:Usage.kt:TokenUsage.Companion$private fun trimmed(value: Double): String</ID>
+    <ID>MaxLineLength:UserSessionProvider.kt:UserSessionProvider$runCatching { CursorJson.decodeFromString(Stored.serializer(), json) }.getOrNull()?.takeIf { it.accessToken.isNotBlank() }</ID>
+    <ID>MaxLineLength:UserSessionProvider.kt:UserSessionProvider$throw SessionUnavailableException("Extended mode is off, so Cursor's account service isn't used.", SessionUnavailableException.EXTENDED_MODE_OFF)</ID>
+    <ID>MaxLineLength:UserSessionProvider.kt:UserSessionProvider$val body = CursorJson.encodeToString(RefreshRequestDto.serializer(), RefreshRequestDto(grantType = "refresh_token", clientId = clientId, refreshToken = current.refreshToken))</ID>
+    <ID>MaxLineLength:UserSessionProvider.kt:UserSessionProvider.Companion$/** The refresh was refused for good (bad request, unauthenticated, forbidden): the account must connect again. */</ID>
+    <ID>MaxLineLength:UserSessionProviderTest.kt:UserSessionProviderTest$/** The browser sign-in's account session for calls: kept as released, renewed the desktop's way, dropped when refused. */</ID>
+    <ID>MaxLineLength:UserSessionProviderTest.kt:UserSessionProviderTest$fun</ID>
+    <ID>MaxLineLength:UserSessionProviderTest.kt:UserSessionProviderTest$private fun base64Url(text: String): String</ID>
+    <ID>MaxLineLength:UserSessionProviderTest.kt:UserSessionProviderTest$private fun jwt(expSeconds: Long): String</ID>
+    <ID>MaxLineLength:UserSessionProviderTest.kt:UserSessionProviderTest$server.enqueue(MockResponse().setBody("""{"access_token":"$renewed","refresh_token":"rt-2","token_type":"Bearer"}"""))</ID>
     <ID>MaxLineLength:VideoFullResolutionTest.kt:VideoFullResolutionTest$/** Stands for the recording's bytes: the fake player never decodes them, the test only checks they arrive unchanged. */</ID>
     <ID>MaxLineLength:VideoFullResolutionTest.kt:VideoFullResolutionTest$ComposerAttachments(images = emptyList(), onRemoveImage = {}, files = listOf(recording), onRemoveFile = {}, surface = Color.Black, agentId = "bc-composer")</ID>
     <ID>MaxLineLength:VideoFullResolutionTest.kt:VideoFullResolutionTest$ViewerScene</ID>
@@ -17516,7 +17526,6 @@
     <ID>MaxLineLength:VoiceCallViews.kt:Choice(VoiceChatCopy.DefaultVoice, settings.voice == null) { onChange(settings.copy(voice = null)); onDismiss() }</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:Choice(speed.label, settings.speed == speed.value) { onChange(settings.copy(speed = speed.value)); onDismiss() }</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:Choice(voice.label, settings.voice == voice.id) { onChange(settings.copy(voice = voice.id)); onDismiss() }</ID>
-    <ID>MaxLineLength:VoiceCallViews.kt:CursorButton(if (phase.opensSettings) "Settings" else "Retry", onRetry, height = CursorDimens.composerFooter)</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:CursorMenu</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:FlatIconButton(CursorIcons.CallClose, VoiceChatCopy.Dismiss, onClick = onHangUp, modifier = Modifier.testTag(VoiceChatTags.End))</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:Icon(CursorIcons.ChevronRight, null, tint = CursorTheme.colors.iconQuaternary, modifier = Modifier.size(CursorDimens.menuIcon))</ID>
@@ -17540,13 +17549,12 @@
     <ID>MaxLineLength:VoiceCallViews.kt:if (selected) Icon(CursorIcons.Check, "Selected", tint = CursorTheme.colors.iconSecondary, modifier = Modifier.size(CursorDimens.menuIcon))</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:modifier = modifier.then(if (pressed != null) Modifier.semantics { stateDescription = if (pressed) "On" else "Off" } else Modifier)</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:onChange(settings.copy(language = language.tag, voice = if (language.tag == settings.language) settings.voice else null))</ID>
-    <ID>MaxLineLength:VoiceCallViews.kt:onRetry = { if ((state.phase as? VoiceChatPhase.Failed)?.opensSettings == true) openAppSettings(context) else calls.tap() }</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:val canAskAgain = activity != null &amp;&amp; ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:val turn by motion.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart), label = "voice-line-turn")</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:val voiceLabel = settings.voice?.let { id -&gt; voices().firstOrNull { it.id == id }?.label } ?: VoiceChatCopy.DefaultVoice</ID>
     <ID>MaxLineLength:VoiceCalls.kt:VoiceCalls$if (voice != null &amp;&amp; voice != before.voice &amp;&amp; agentId != null) callScope?.launch { runCatching { saveVoice(agentId, voice) } }</ID>
+    <ID>MaxLineLength:VoiceCalls.kt:VoiceCalls$private</ID>
     <ID>MaxLineLength:VoiceCalls.kt:VoiceCalls.&lt;no name provided&gt;$if (sent != VoiceChat.TaskSent.Refused) _sentByVoice.update { it + (agentId to (it[agentId].orEmpty() + request.trim())) }</ID>
-    <ID>MaxLineLength:VoiceCalls.kt:VoiceCalls.Companion$fun</ID>
     <ID>MaxLineLength:VoiceCallsTest.kt:VoiceCallsTest$dialers.single().push("""{"type":"response.function_call_arguments.done","call_id":"c2","name":"send_task","arguments":"{\"request\":\"Ship it\"}"}""")</ID>
     <ID>MaxLineLength:VoiceCallsTest.kt:VoiceCallsTest$fun</ID>
     <ID>MaxLineLength:VoiceCallsTest.kt:VoiceCallsTest$push("""{"type":"response.function_call_arguments.done","call_id":"c1","name":"send_task","arguments":"{\"request\":\"$request\"}"}""")</ID>
@@ -17555,6 +17563,7 @@
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$_state.update { it.copy(turns = it.turns + VoiceTurn(event.fromUser, text), lastSaid = if (event.fromUser) text else it.lastSaid) }</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$answer(call.callId, receipt.outputJson.ifBlank { "{\"receipt\":\"sent\"}" }, respond = true, instructions = receipt.instructions.takeIf { it.isNotBlank() })</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$else -&gt; answer(call.callId, error(plan.lines.unknownToolErrorTemplate.ifBlank { "There is no tool called {name}." }.replace("{name}", call.name)), respond = true)</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$enter(VoiceChatPhase.Failed(e.message ?: "Connect your Cursor account for calls.", connectsAccount = true))</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$if (minted?.useServerVoiceTools != true) return answer(call.callId, error(plan.lines.toolFailedError.ifBlank { "That lookup is not available on this call." }), respond = true)</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$if (permanently) "Microphone access is off. Tap to open Settings." else "Voice chat needs microphone access."</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$is VoiceChatPhase.Speaking -&gt; speaker?.interrupt()?.let { heard -&gt; send(RealtimeWire.truncate(heard.itemId, heard.contentIndex, heard.audioEndMs)) }</ID>
@@ -17569,7 +17578,7 @@
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$val nextSpeaker = try { newSpeaker() } catch (e: Exception) { return fail("The call's audio could not be opened.") }</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$val text = said.ifBlank { plan?.lines?.noReplyLine.orEmpty().ifBlank { "The work finished without a written reply. Say that." } }</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat.&lt;no name provided&gt;$if (call == generation &amp;&amp; !callerSpeaking) speaker?.play(decode(event.base64), event.itemId, event.contentIndex)</ID>
-    <ID>MaxLineLength:VoiceChat.kt:VoiceChatPhase.Failed$data</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$account.mintFailure = SessionUnavailableException("Calls use your Cursor account.", SessionUnavailableException.NO_ACCOUNT_SESSION)</ID>
     <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(dialer.frames("conversation.item.create").last()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content).contains("No tool open_the_pod_bay_doors.")</ID>
     <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(dialer.frames("conversation.item.create").last()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content).isEqualTo("""{"result":"2 files changed"}""")</ID>
     <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(dialer.frames("response.create").single()["response"]!!.jsonObject["instructions"]!!.jsonPrimitive.content).endsWith("\n\nSay you sent it.")</ID>

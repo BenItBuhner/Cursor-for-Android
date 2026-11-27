@@ -6,6 +6,7 @@ import com.cursorforandroid.data.api.RunStreamer
 import com.cursorforandroid.data.api.toCursorError
 import com.cursorforandroid.data.api.userMessage
 import com.cursorforandroid.data.auth.CursorLogin
+import com.cursorforandroid.data.auth.SessionTokens
 import com.cursorforandroid.data.local.PreferencesStore
 import com.cursorforandroid.data.local.SecureKeyStore
 import com.cursorforandroid.domain.Capabilities
@@ -86,6 +87,8 @@ class SessionManager(
      * always passes the setting, under which the default is to leave the account service alone.
      */
     private val capabilities: suspend () -> Capabilities = { Capabilities.EXTENDED },
+    /** The account session a browser sign-in released, kept for what the API key's session may not do (calls). */
+    private val keepAccountSession: (SessionTokens) -> Unit = {},
 ) {
     private val _state = MutableStateFlow<SessionState>(SessionState.Loading)
     val state: StateFlow<SessionState> = _state.asStateFlow()
@@ -309,6 +312,7 @@ class SessionManager(
             val me = coroutineContext.job
             try {
                 val tokens = login.awaitTokens(handshake)
+                runCatching { keepAccountSession(tokens) }
                 if (loginJob === me) _loginProgress.value = LoginProgress.Finishing
                 val expiresAt = AppClock.now() + mintedKeyTtlMs
                 val key = login.mintApiKey(tokens.accessToken, mintedKeyName, expiresAt)

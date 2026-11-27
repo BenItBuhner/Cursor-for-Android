@@ -37,6 +37,8 @@ class VoiceCalls(
     private val store: VoiceSettingsStore = VoiceSettingsStore.InMemory(),
     /** Keeps a voice picked in the menu on the account, as the desktop's menu does (`SetRealtimeVoice`). */
     private val saveVoice: suspend (agentId: String, voiceId: String) -> Unit = { _, _ -> },
+    /** Opens the browser sign-in with the given opener and returns once the account session for calls is kept. */
+    private val connect: suspend (open: (String) -> Unit) -> Unit = { error("Connecting the account is not available.") },
 ) {
     /** The chat a call is bound to, what it is called, and when the call started ([clock] time, for the timer). */
     data class Line(val agentId: String, val title: String, val startedAtMs: Long)
@@ -128,6 +130,9 @@ class VoiceCalls(
 
     fun tap() { chat?.tap() }
 
+    /** Connects the Cursor account the call needs, opening its sign-in page with [open], then calls again. */
+    fun connectAccount(open: (String) -> Unit) { chat?.connectAccount { connect(open) } }
+
     fun toggleMute() { chat?.toggleMute() }
 
     /** The call's voice, speed and language from now on, this call's and the next. */
@@ -172,7 +177,13 @@ class VoiceCalls(
 
     companion object {
         /** The app's calls: Cursor's realtime voice line, the device's microphone and loudspeaker. */
-        fun create(context: Context, api: () -> RealtimeVoiceApi, dialer: () -> RealtimeDialer, onLive: (Boolean) -> Unit): VoiceCalls {
+        fun create(
+            context: Context,
+            api: () -> RealtimeVoiceApi,
+            dialer: () -> RealtimeDialer,
+            onLive: (Boolean) -> Unit,
+            connect: suspend (open: (String) -> Unit) -> Unit,
+        ): VoiceCalls {
             val app = context.applicationContext
             return VoiceCalls(
                 newChat = { scope, agentId, host ->
@@ -191,6 +202,7 @@ class VoiceCalls(
                 onLive = onLive,
                 store = VoiceSettingsStore.Prefs(app),
                 saveVoice = { agentId, voiceId -> api().setVoice(agentId, voiceId) },
+                connect = connect,
             )
         }
     }

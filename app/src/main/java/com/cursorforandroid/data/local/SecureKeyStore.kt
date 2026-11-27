@@ -237,6 +237,9 @@ class SecureKeyStore(
     private fun clearApiKey(): Boolean {
         cached = null
         memory.remove(KEY_API_KEY)
+        // The account session goes with the key; if this removal fails, the store discard or tombstone below covers it.
+        memory.remove(KEY_ACCOUNT_SESSION)
+        prefs()?.let { runCatching { it.edit().remove(KEY_ACCOUNT_SESSION).commit() } }
         if (removePersistedApiKey()) {
             forgetSignOut()
             return true
@@ -281,6 +284,15 @@ class SecureKeyStore(
         if (had == false) return
         runCatching { healthPrefs()?.edit(commit = true) { remove(KEY_SIGNED_OUT) } }
     }
+
+    /**
+     * The account session a browser sign-in released (access and refresh token, as JSON owned by
+     * [com.cursorforandroid.data.auth.UserSessionProvider]). Withheld like the key while a sign-out is pending, and
+     * removed with the key on sign-out.
+     */
+    fun accountSessionJson(): String? = if (signOutPending()) null else read(KEY_ACCOUNT_SESSION)
+
+    fun setAccountSessionJson(json: String?): Boolean = write(KEY_ACCOUNT_SESSION, json)
 
     /** The MCP server list as JSON; the shape is owned by [McpServerStore]. */
     fun mcpServersJson(): String? = read(KEY_MCP_SERVERS)
@@ -378,6 +390,7 @@ class SecureKeyStore(
         const val TAG = "SecureKeyStore"
         const val KEY_API_KEY = "api_key"
         const val KEY_MCP_SERVERS = "mcp_servers"
+        const val KEY_ACCOUNT_SESSION = "account_session"
         const val LEGACY_KEY_GITHUB_TOKEN = "github_token"
         const val LEGACY_FALLBACK_FILE = "cursor_prefs_fallback"
         const val ANDROID_KEY_STORE = "AndroidKeyStore"
