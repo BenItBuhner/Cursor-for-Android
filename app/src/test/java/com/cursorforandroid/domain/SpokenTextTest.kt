@@ -76,10 +76,4 @@ class SpokenTextTest {
         assertThat(SpokenText.of("")).isEmpty()
         assertThat(SpokenText.of("\n\n---\n\n| a | b |\n")).isEmpty()
     }
-
-    @Test
-    fun `a request to end the call is told from something to send`() {
-        listOf("Goodbye.", "hang up", "OK, end call", "End the call please", "That’s all.", "Bye!").forEach { assertThat(SpokenText.isHangUp(it)).isTrue() }
-        listOf("Say goodbye to the old API", "stop the server", "hang up the request after ten seconds", "").forEach { assertThat(SpokenText.isHangUp(it)).isFalse() }
-    }
 }

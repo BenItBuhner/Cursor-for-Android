@@ -39,18 +39,6 @@ import com.cursorforandroid.util.AppClock
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.RoborazziTaskType
 import com.github.takahirom.roborazzi.captureScreenRoboImage
-import android.Manifest
-import android.app.Application
-import com.cursorforandroid.data.api.Transcription
-import com.cursorforandroid.data.api.TranscriptionApi
-import com.cursorforandroid.data.media.AudioCapture
-import com.cursorforandroid.data.media.RecordedClip
-import com.cursorforandroid.data.media.Speaker
-import com.cursorforandroid.ui.voice.VoiceCalls
-import com.cursorforandroid.ui.voice.VoiceChat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -163,7 +151,7 @@ class RefreshDemoFramesTest {
         seed(running, withGoal)
         val context = ApplicationProvider.getApplicationContext<Context>()
         val fake = CursorBackend(api, streamer, isDemo = true)
-        graph = AppGraph(context, SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, demo = fake, transcriptionApi = scriptedTranscription, voiceCallsOverride = scriptedCalls(), voiceInputOverride = true)
+        graph = AppGraph(context, SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, demo = fake, voiceInputOverride = true)
         runBlocking { graph.session.enterDemo() }
         runBlocking { graph.agents.refresh() }
         compose.setContent {
@@ -266,98 +254,13 @@ class RefreshDemoFramesTest {
         node.performClick()
     }
 
-    // --- the scripted call ------------------------------------------------------------------------------------------
-
-    /** What the call "hears", tick by tick: a beat of quiet, an utterance, then quiet for the pause that sends it. */
-    private val micScript = ArrayDeque(List(8) { 0.05f } + List(22) { i -> 0.45f + 0.4f * ((i * 37) % 10) / 10f } + List(400) { 0.04f })
-
-    private object Mic : AudioCapture {
-        var script: ArrayDeque<Float> = ArrayDeque()
-        override fun start() = Unit
-        override fun level() = script.removeFirstOrNull() ?: 0.04f
-        override fun stop(): RecordedClip = RecordedClip(ByteArray(64), "audio/webm", 2_400)
-        override fun cancel() = Unit
-    }
-
-    private val scriptedTranscription = TranscriptionApi { _, _, _ -> Transcription(SPOKEN, 320) }
-
-    /** The device's voice, reading for as long as the words would take, on the call's own clock. */
-    private class Voice(private val scope: CoroutineScope) : Speaker {
-        override fun speak(text: String, onDone: (Boolean) -> Unit) {
-            scope.launch {
-                delay(3_200)
-                onDone(true)
-            }
-        }
-        override fun stop() = Unit
-        override fun release() = Unit
-    }
-
-    private fun scriptedCalls(): VoiceCalls {
-        Mic.script = micScript
-        return VoiceCalls(newChat = { scope, send ->
-            VoiceChat(scope, scriptedTranscription, { Mic }, Voice(scope), send, clock = { compose.mainClock.currentTime }, errorMessage = { "Couldn't reach Cursor." })
-        })
-    }
-
-    private fun tapOn(description: String, frames: Int = 10) {
-        val node = compose.onNode(hasContentDescription(description), useUnmergedTree = true)
-        tap = node.fetchSemanticsNode().boundsInRoot.center
-        tapFrames = frames
-        node.performClick()
-    }
-
-    // --- the voice call ---------------------------------------------------------------------------------------------
-
-    /**
-     * Cursor's waveform button in the empty composer, tapped: the call tray docks over the composer, hears an
-     * utterance, sends it, waits on the agent's turn, reads the reply, listens again, is muted, unmuted and hung up.
-     */
-    private fun call(name: String, mode: ThemeMode) {
-        shadowOf(ApplicationProvider.getApplicationContext<Application>()).grantPermissions(Manifest.permission.RECORD_AUDIO)
-        open(mode, running = false)
-        begin(name)
-        frames(24)
-        tapOn("Start voice chat")
-        // Listening, the utterance, the pause that ends it, its transcription and the send.
-        frames(170)
-        // The agent's turn, streamed as any follow-up's would be.
-        runBlocking {
-            val runId = "run-followup-1"
-            streamer.emit(runId, RunStreamEvent.Status(runId, RunStatus.RUNNING))
-            streamer.emit(runId, RunStreamEvent.Thinking("Running the suite again."))
-        }
-        frames(60)
-        runBlocking {
-            val runId = "run-followup-1"
-            streamer.emit(runId, read(TURNS + 1, 1))
-            streamer.emit(runId, RunStreamEvent.Assistant(REPLY))
-            streamer.emit(runId, RunStreamEvent.Result(runId, RunStatus.FINISHED, REPLY, 40_000L, null))
-            streamer.emit(runId, RunStreamEvent.Done)
-        }
-        // Read aloud, then listening again.
-        frames(240)
-        tapOn("Mute")
-        frames(50)
-        tapOn("Unmute")
-        frames(40)
-        tapOn("Hang up")
-        frames(50)
-    }
-
-    @Test fun callPhoneDark() = call("call-phone-dark", ThemeMode.Dark)
-    @Test @Config(qualifiers = PHONE_LIGHT) fun callPhoneLight() = call("call-phone-light", ThemeMode.Light)
-
     private companion object {
         const val TURNS = 8
         const val FRAME_MS = 16
         const val GOAL = "Every closed market's fees checked against the table, nightly"
         const val EARLIER = "Done. The module builds and its suite passes; the fee lookups now go through one table, " +
             "and the two call sites you named only moved a constant between them."
-        const val SPOKEN = "Run the fee tests again and tell me which ones fail"
-        const val REPLY = "All 412 fee tests pass. Two were flaky on the first run, so I ran them again on their own and they held."
     }
 }
 
 private const val PHONE_DARK = "w411dp-h914dp-night-420dpi"
-private const val PHONE_LIGHT = "w411dp-h914dp-notnight-420dpi"

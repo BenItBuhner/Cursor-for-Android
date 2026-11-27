@@ -114,7 +114,7 @@ class VoiceCallScreenshotTest {
     fun hearing() = tray("1161_voice_chat_hearing", VoiceChatState(VoiceChatPhase.Listening(heard = true), level = 0.8f))
 
     @Test
-    fun thinking() = tray("1162_voice_chat_thinking", VoiceChatState(VoiceChatPhase.Transcribing))
+    fun thinking() = tray("1162_voice_chat_thinking", VoiceChatState(VoiceChatPhase.Thinking))
 
     @Test
     fun working() = tray("1163_voice_chat_working", VoiceChatState(VoiceChatPhase.Working("Run the tests again and tell me which ones fail")))

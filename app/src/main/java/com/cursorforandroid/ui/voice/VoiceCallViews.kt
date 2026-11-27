@@ -67,7 +67,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.cursorforandroid.data.media.SpeakerVoice
 import com.cursorforandroid.ui.components.CursorButton
 import com.cursorforandroid.ui.components.CursorIcons
 import com.cursorforandroid.ui.components.CursorMenu
@@ -128,7 +127,8 @@ object VoiceChatCopy {
      * the line itself says it (listening, speaking, muted).
      */
     fun waiting(phase: VoiceChatPhase): String? = when (phase) {
-        VoiceChatPhase.Transcribing -> "Thinking…"
+        VoiceChatPhase.Connecting -> "Connecting…"
+        VoiceChatPhase.Thinking -> "Thinking…"
         is VoiceChatPhase.Working -> "Agent is working…"
         else -> null
     }
@@ -139,7 +139,8 @@ object VoiceChatCopy {
         is VoiceChatPhase.Failed -> phase.message
         is VoiceChatPhase.Listening -> if (state.muted) "Muted" else "Listening"
         VoiceChatPhase.Muted -> "Muted"
-        VoiceChatPhase.Transcribing -> "Thinking"
+        VoiceChatPhase.Connecting -> "Connecting"
+        VoiceChatPhase.Thinking -> "Thinking"
         is VoiceChatPhase.Working -> "Agent is working"
         is VoiceChatPhase.Speaking -> "Speaking"
     }
@@ -234,10 +235,10 @@ fun VoiceCallHaptics(calls: VoiceCalls) {
         calls.onPhase = { phase ->
             when (phase) {
                 is VoiceChatPhase.Listening -> if (!phase.heard) haptics.perform(Haptic.ToggleOn)
-                VoiceChatPhase.Transcribing -> haptics.perform(Haptic.Confirm)
+                VoiceChatPhase.Thinking -> haptics.perform(Haptic.Confirm)
                 is VoiceChatPhase.Failed -> haptics.perform(Haptic.Reject)
                 VoiceChatPhase.Off, VoiceChatPhase.Muted -> haptics.perform(Haptic.ToggleOff)
-                is VoiceChatPhase.Working, is VoiceChatPhase.Speaking -> Unit
+                VoiceChatPhase.Connecting, is VoiceChatPhase.Working, is VoiceChatPhase.Speaking -> Unit
             }
         }
     }
@@ -294,7 +295,7 @@ fun VoiceCallTray(
     modifier: Modifier = Modifier,
     onRetry: () -> Unit = {},
     settings: VoiceCallSettings = VoiceCallSettings(),
-    voices: () -> List<SpeakerVoice> = { emptyList() },
+    voices: () -> List<VoiceOption> = { emptyList() },
     onSettings: (VoiceCallSettings) -> Unit = {},
     settingsOpen: Boolean = false,
 ) {
@@ -328,7 +329,8 @@ fun VoiceCallTray(
         }
         Row(Modifier.fillMaxWidth().padding(start = start, end = CursorDimens.composerPadding, top = 8.dp)) {
             Text(VoiceChatCopy.Title, style = type.small, color = colors.textTertiary, maxLines = 1)
-            Text(" · $elapsed", style = type.small, color = colors.textQuaternary, maxLines = 1)
+            // Cursor hides the clock until the line is up.
+            if (phase != VoiceChatPhase.Connecting) Text(" · $elapsed", style = type.small, color = colors.textQuaternary, maxLines = 1)
         }
         Row(
             Modifier.fillMaxWidth().padding(start = start, end = 8.dp, top = 2.dp, bottom = 8.dp),
@@ -466,7 +468,7 @@ fun VoiceCallSettingsMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
     settings: VoiceCallSettings,
-    voices: () -> List<SpeakerVoice>,
+    voices: () -> List<VoiceOption>,
     onChange: (VoiceCallSettings) -> Unit,
     initialPage: SettingsPage = SettingsPage.Main,
 ) {

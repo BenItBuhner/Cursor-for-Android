@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.cursorforandroid.ui.voice.VoiceCalls
+import com.cursorforandroid.ui.voice.VoiceChat
+import com.cursorforandroid.ui.voice.WrittenLine
+import com.cursorforandroid.ui.voice.writtenLinesOf
 import com.cursorforandroid.AppGraph
 import com.cursorforandroid.data.api.userMessage
 import com.cursorforandroid.data.repo.AgentRepository
@@ -267,24 +270,32 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
     }
 
     /**
-     * This chat's side of a voice chat (see [VoiceCalls]): an utterance goes out as the chat's next follow-up, around
-     * whatever stands in the composer, which is put back as it was. Hosted for as long as this view model lives, so a
-     * call goes on with the screen off and the app in the background; when it goes, the call holds.
+     * This chat's side of a voice chat (see [VoiceCalls]): a job the call's voice agent hands over goes out as the
+     * chat's next follow-up on the account, marked as sent by the call (Cursor's `sent_by_voice_call`), behind the turn
+     * under way when there is one; the composer is not touched. Hosted for as long as this view model lives, so a call
+     * goes on with the screen off and the app in the background.
      */
-    private val voiceHost = VoiceCalls.Host { words -> sendSpoken(words) }
+    private val voiceHost = object : VoiceCalls.Host {
+        override fun sendTask(request: String): VoiceChat.TaskSent = sendVoiceTask(request)
+        override fun writtenLines(): List<WrittenLine> = writtenLinesOf(presented.value.items)
+    }
 
-    private fun sendSpoken(words: String): Boolean {
-        val typed = draft.value
-        val images = attachments.value
-        val attached = files.value
-        attachments.value = emptyList()
-        files.value = emptyList()
-        draft.value = words
-        val went = submit() != null
-        draft.value = typed
-        attachments.value = images
-        files.value = attached
-        return went
+    private fun sendVoiceTask(request: String): VoiceChat.TaskSent {
+        val text = request.trim()
+        if (text.isEmpty() || graph.session.isDemo || !capabilities.value.accountQueue) return VoiceChat.TaskSent.Refused
+        val busy = graph.followUps.decide(agentId).busy || controls.value.queue.isNotEmpty()
+        val message = OutgoingMessages.Draft(
+            text = text,
+            typed = text,
+            images = emptyList(),
+            files = emptyList(),
+            mode = null,
+            planMode = null,
+            override = null,
+            sentByVoiceCall = true,
+        )
+        outgoing.send(message, graph.outgoing.accountRoute(agentId, message, queued = busy))
+        return if (busy) VoiceChat.TaskSent.Queued else VoiceChat.TaskSent.UnderWay
     }
 
     /** Starts a voice chat with this chat's agent, called [title] on the strip and the notification. */
@@ -299,9 +310,8 @@ class ConversationViewModel(private val graph: AppGraph, val agentId: String) : 
                 if (!ours) return@collectLatest
                 graph.voiceCalls.attach(agentId, voiceHost)
                 presented.map { p ->
-                    val reply = p.items.lastOrNull { it is AssistantMessage } as? AssistantMessage
-                    Triple(p.state.runStatus?.isActive == true || p.state.isStreaming, reply?.id, reply?.markdown)
-                }.distinctUntilChanged().collect { (running, id, markdown) -> graph.voiceCalls.agent(agentId, running, id, markdown) }
+                    (p.state.runStatus?.isActive == true || p.state.isStreaming) to writtenLinesOf(p.items)
+                }.distinctUntilChanged().collect { (running, lines) -> graph.voiceCalls.agent(agentId, running, lines) }
             }
         }
     }

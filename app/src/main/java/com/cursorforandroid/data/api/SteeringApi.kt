@@ -48,6 +48,12 @@ data class AccountFollowup(
     val modelParams: List<ModelParam> = emptyList(),
     /** Client-minted, so a retry after a lost reply files nothing twice — and so the card's row and the transcript's copy of the message are one (see `QueuePlacement`). */
     val followupId: String = newId(),
+    /**
+     * Sent by a voice call's `send_task` rather than typed: Cursor's `sent_by_voice_call`, on both the message
+     * (`aiserver.v1.ConversationMessage` 101) and the prompt (`agent.v1.UserMessage` 28), which the desktop sets on
+     * every job its call hands the agent and reads back for the "Voice call" label.
+     */
+    val sentByVoiceCall: Boolean = false,
 ) {
     /** The message's own id as it goes out (`userMessage.messageId`), which the account's record keeps: made from [followupId], so what was sent can be known by it later (see [messageIdOf]). */
     val messageId: String get() = messageIdOf(followupId)
@@ -199,7 +205,7 @@ class SteeringApi(
             bcId = agentId,
             followup = text,
             synchronous = synchronous,
-            followupMessage = ConversationMessageDto(text = text, agentMode = mode),
+            followupMessage = ConversationMessageDto(text = text, agentMode = mode, sentByVoiceCall = followup.sentByVoiceCall.takeIf { it }),
             requestedModel = followup.modelId?.takeIf { it.isNotBlank() }?.let { id ->
                 RequestedModelDto(id, followup.modelParams.filter { it.id.isNotBlank() }.map { ModelParameterDto(it.id, it.value) }.takeIf { it.isNotEmpty() })
             },
@@ -212,6 +218,7 @@ class SteeringApi(
                         messageId = followup.messageId,
                         mode = mode,
                         selectedContext = context,
+                        sentByVoiceCall = followup.sentByVoiceCall.takeIf { it },
                     ),
                     sendToInteractionListener = true,
                 ),
@@ -375,7 +382,7 @@ class SteeringApi(
 
     /** The corner of `aiserver.v1.ConversationMessage` a follow-up from here fills in. */
     @Serializable
-    private data class ConversationMessageDto(val text: String, val agentMode: String? = null)
+    private data class ConversationMessageDto(val text: String, val agentMode: String? = null, val sentByVoiceCall: Boolean? = null)
 
     /** `agent.v1.RequestedModel {model_id, parameters[]}`; `parameters` only when there are any, as the start sends them. */
     @Serializable
@@ -393,7 +400,13 @@ class SteeringApi(
 
     /** The corner of `agent.v1.UserMessage` sent here: the text, its id, the mode and the attached images. */
     @Serializable
-    private data class UserMessageDto(val text: String, val messageId: String, val mode: String? = null, val selectedContext: SelectedContextDto? = null)
+    private data class UserMessageDto(
+        val text: String,
+        val messageId: String,
+        val mode: String? = null,
+        val selectedContext: SelectedContextDto? = null,
+        val sentByVoiceCall: Boolean? = null,
+    )
 
     /** `agent.v1.SelectedContext`, the two lists a prompt from here fills: `selected_images` (1) and `selected_documents` (25). */
     @Serializable

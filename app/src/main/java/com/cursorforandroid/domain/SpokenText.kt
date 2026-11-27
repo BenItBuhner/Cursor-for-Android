@@ -1,8 +1,8 @@
 package com.cursorforandroid.domain
 
 /**
- * An agent's reply as it is read aloud in a voice chat: the words of its Markdown without the marks, and without what
- * nobody wants read to them — code blocks, tables, link targets, raw URLs. A long reply is cut at the end of a
+ * An agent's reply as a voice call tells it (the outcome of a job, `work_landed`, and the chat `recall_text_messages`
+ * reads): the words of its Markdown without the marks, and without what nobody wants read to them — code blocks, tables, link targets, raw URLs. A long reply is cut at the end of a
  * sentence and says that the rest is in the chat, as a person reading a long message to someone would.
  */
 object SpokenText {
@@ -78,14 +78,5 @@ object SpokenText {
             else -> head.substringBeforeLast(' ', head).trimEnd(',', ';', ':') + "."
         }
         return "$cut $REST_IN_CHAT"
-    }
-
-    /** What ends a voice chat when it is all the user says. */
-    private val hangUps = setOf("hang up", "end call", "end the call", "goodbye", "good bye", "bye", "stop listening", "end voice chat", "that's all", "thats all")
-
-    /** True when [words] — one transcribed utterance — is nothing but a request to end the call. */
-    fun isHangUp(words: String): Boolean {
-        val said = words.lowercase().replace('’', '\'').filter { it.isLetter() || it == ' ' || it == '\'' }.trim().replace(Regex("""\s+"""), " ")
-        return said in hangUps || said.removeSuffix(" please") in hangUps || said.removePrefix("ok ").removePrefix("okay ") in hangUps
     }
 }
