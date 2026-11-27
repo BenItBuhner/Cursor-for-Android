@@ -57,9 +57,11 @@ import com.cursorforandroid.ui.components.FlatIconButton
 import com.cursorforandroid.ui.components.HairlineDivider
 import com.cursorforandroid.ui.components.SpinnerRing
 import com.cursorforandroid.ui.components.StylusTextInput
+import com.cursorforandroid.ui.components.arriving
 import com.cursorforandroid.ui.components.cursorSurface
 import com.cursorforandroid.ui.components.fadingVerticalScroll
 import com.cursorforandroid.ui.components.pressable
+import com.cursorforandroid.ui.components.rememberArrival
 import com.cursorforandroid.ui.components.stylusWriting
 import com.cursorforandroid.ui.theme.CursorDimens
 import com.cursorforandroid.ui.theme.CursorTheme
@@ -95,24 +97,28 @@ fun SignInScreen(graph: AppGraph) {
         openBrowser(graph.session.startCursorLogin())
     }
 
+    // The first screen a new install shows arrives in reading order: the mark, what this is, the one thing to do, then
+    // the ways round it (see [Arrival]).
+    val arrival = rememberArrival(pieces = 6)
     Box(Modifier.fillMaxSize().background(colors.canvas).systemBarsPadding().imePadding(), contentAlignment = Alignment.Center) {
         Column(
             Modifier.widthIn(max = CursorDimens.formMaxWidth).fillMaxWidth().fadingVerticalScroll(surface = colors.canvas).padding(horizontal = 24.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.Start,
         ) {
-            Icon(CursorIcons.Cube, null, tint = colors.iconPrimary, modifier = Modifier.size(40.dp))
+            Icon(CursorIcons.Cube, null, tint = colors.iconPrimary, modifier = Modifier.size(40.dp).arriving(arrival, 0))
             Spacer(Modifier.height(22.dp))
-            Text("Sign in", style = type.pageTitle, color = colors.textPrimary)
+            Text("Sign in", style = type.pageTitle, color = colors.textPrimary, modifier = Modifier.arriving(arrival, 1))
             Spacer(Modifier.height(6.dp))
-            Text("Use your Cursor account to see and run your cloud agents.", style = type.base, color = colors.textSecondary)
+            Text("Use your Cursor account to see and run your cloud agents.", style = type.base, color = colors.textSecondary, modifier = Modifier.arriving(arrival, 2))
             Spacer(Modifier.height(6.dp))
-            Text(SignInCopy.UNOFFICIAL, style = type.small, color = colors.textTertiary)
+            Text(SignInCopy.UNOFFICIAL, style = type.small, color = colors.textTertiary, modifier = Modifier.arriving(arrival, 2))
             signedOutReason?.let {
                 Spacer(Modifier.height(14.dp))
                 ErrorLine(it)
             }
             Spacer(Modifier.height(22.dp))
 
+            Column(Modifier.arriving(arrival, 3)) {
             when (val progress = login) {
                 is LoginProgress.WaitingForBrowser -> LoginInProgress(
                     title = "Waiting for cursor.com…",
@@ -143,25 +149,28 @@ fun SignInScreen(graph: AppGraph) {
                     }
                 }
             }
+            }
 
             Spacer(Modifier.height(24.dp))
-            HairlineDivider()
-            Spacer(Modifier.height(4.dp))
-            ApiKeySection(graph)
-
-            Spacer(Modifier.height(4.dp))
-            HairlineDivider()
+            Column(Modifier.arriving(arrival, 4)) {
+                HairlineDivider()
+                Spacer(Modifier.height(4.dp))
+                ApiKeySection(graph)
+                Spacer(Modifier.height(4.dp))
+                HairlineDivider()
+            }
             Spacer(Modifier.height(20.dp))
-            Text("No account handy?", style = type.small, color = colors.textTertiary)
+            Text("No account handy?", style = type.small, color = colors.textTertiary, modifier = Modifier.arriving(arrival, 5))
             Spacer(Modifier.height(8.dp))
             val scope = rememberCoroutineScope()
-            CursorButton("Try the demo", onClick = { scope.launch { graph.session.enterDemo() } }, icon = CursorIcons.Sparkle)
+            CursorButton("Try the demo", onClick = { scope.launch { graph.session.enterDemo() } }, icon = CursorIcons.Sparkle, modifier = Modifier.arriving(arrival, 5))
             Spacer(Modifier.height(20.dp))
             Text(
                 "Signing in with Cursor creates an API key for this app, named after this phone, that you can revoke any time at " +
                     "cursor.com/dashboard/api. Keys are stored encrypted on this device and only sent to Cursor.",
                 style = type.small,
                 color = colors.textQuaternary,
+                modifier = Modifier.arriving(arrival, 5),
             )
         }
     }
