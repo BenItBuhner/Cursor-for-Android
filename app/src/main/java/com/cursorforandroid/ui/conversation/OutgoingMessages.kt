@@ -95,6 +95,8 @@ class OutgoingMessages(
         val planMode: Boolean?,
         /** The model the chat switches to from this run on; null keeps the current one. */
         val override: ModelChoice?,
+        /** A voice call's `send_task`: goes out marked `sent_by_voice_call`, on the account's follow-up alone. */
+        val sentByVoiceCall: Boolean = false,
     )
 
     /** How the message reaches the server. */
@@ -393,6 +395,7 @@ class OutgoingSends(
                     modelId = draft.override?.model?.id,
                     modelParams = draft.override?.params.orEmpty(),
                     followupId = followupId,
+                    sentByVoiceCall = draft.sentByVoiceCall,
                 )
                 steering.sendFollowup(agentId, followup, refresh = false).getOrThrow()
             },

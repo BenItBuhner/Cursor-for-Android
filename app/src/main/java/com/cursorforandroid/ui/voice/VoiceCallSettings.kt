@@ -3,10 +3,13 @@ package com.cursorforandroid.ui.voice
 import android.content.Context
 import androidx.core.content.edit
 
+/** One of the voices the account offers a call (`RealtimeVoiceSessionPlan.voice_options`), by its id. */
+data class VoiceOption(val id: String, val label: String)
+
 /**
- * A call's voice, speed and language: the three rows of the settings menu on Cursor's call tray. [voice] is one of the
- * device engine's voices by its id (null: the language's default), [speed] one of [Speeds], and [language] one of
- * [Languages] by its tag ([AutoLanguage]: transcription tells, and the voice speaks the device's language).
+ * A call's voice, speed and language: the three rows of the settings menu on Cursor's call tray. [voice] is one of
+ * the account's call voices by its id (null: the one the account minted the call with), [speed] one of [Speeds], and
+ * [language] one of [Languages] by its tag ([AutoLanguage]: the call's transcription tells).
  */
 data class VoiceCallSettings(
     val voice: String? = null,

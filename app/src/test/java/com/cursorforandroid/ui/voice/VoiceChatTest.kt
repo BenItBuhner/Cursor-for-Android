@@ -1,359 +1,292 @@
 package com.cursorforandroid.ui.voice
 
-import com.cursorforandroid.data.api.Transcription
-import com.cursorforandroid.data.api.TranscriptionApi
-import com.cursorforandroid.data.media.AudioCapture
-import com.cursorforandroid.data.media.RecordedClip
-import com.cursorforandroid.data.media.Speaker
 import com.google.common.truth.Truth.assertThat
-import java.io.IOException
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
+import java.io.IOException
+import java.util.Base64
+import java.util.Date
 
 /**
- * The voice chat's loop on a virtual clock: a scripted microphone (a meter reading per tick), a scripted
- * transcription, a voice that says nothing until the test lets it finish, and a chat that records what was sent.
+ * Cursor's realtime voice call, driven against a scripted account and line: the mint, the line's opening, the
+ * microphone up and the voice down, the tools the voice agent calls, and a job's result told back on the line.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class VoiceChatTest {
 
-    /** A microphone whose meter reads [levels] tick by tick, then silence. */
-    private class ScriptedMic(private val levels: ArrayDeque<Float>, private val clock: () -> Long) : AudioCapture {
-        var started = false
-        var stopped = false
-        var cancelled = false
-        private var startedAt = 0L
-        override fun start() {
-            started = true
-            startedAt = clock()
+    private val dispatcher = StandardTestDispatcher()
+    private val scope = TestScope(dispatcher)
+    private val account = ScriptedVoiceAccount()
+    private val dialer = ScriptedDialer()
+    private val mic = ScriptedMicrophone()
+    private val speaker = ScriptedSpeaker()
+    private val tasks = mutableListOf<String>()
+    private var lines = listOf(WrittenLine("u1", true, "Fix the login bug"), WrittenLine("a1", false, "I fixed **the login bug**."))
+    private var taskAnswer = VoiceChat.TaskSent.UnderWay
+
+    private val host = object : VoiceChat.Host {
+        override fun sendTask(request: String): VoiceChat.TaskSent {
+            tasks += request
+            return taskAnswer
         }
-        override fun level(): Float = levels.removeFirstOrNull() ?: 0f
-        override fun stop(): RecordedClip? {
-            stopped = true
-            return RecordedClip(ByteArray(16), "audio/webm", clock() - startedAt)
-        }
-        override fun cancel() {
-            cancelled = true
-        }
+
+        override fun writtenLines(): List<WrittenLine> = lines
     }
 
-    private class RecordingSpeaker : Speaker {
-        val spoken = mutableListOf<String>()
-        var stops = 0
-        var released = false
-        private var done: ((Boolean) -> Unit)? = null
-        override fun speak(text: String, onDone: (Boolean) -> Unit) {
-            spoken += text
-            done = onDone
-        }
-        fun finish(spoken: Boolean = true) {
-            val callback = done
-            done = null
-            callback?.invoke(spoken)
-        }
-        override fun stop() {
-            stops++
-        }
-        override fun release() {
-            released = true
-        }
-    }
+    private fun chat() = VoiceChat(
+        scope = scope.backgroundScope,
+        agentId = "bc-1",
+        api = account,
+        dialer = dialer,
+        newMicrophone = { mic },
+        newSpeaker = { speaker },
+        host = host,
+        clock = { scope.testScheduler.currentTime },
+        errorMessage = { it.message ?: "failed" },
+        now = { Date(0) },
+    )
 
-    private class Harness(scope: TestScope) {
-        val mics = mutableListOf<ScriptedMic>()
-        /** The meter script of each microphone the call opens, in order; a microphone past the script hears silence. */
-        val scripts = ArrayDeque<List<Float>>()
-        var micFails = false
-        val heard = ArrayDeque<String>()
-        var transcriptionFails: Exception? = null
-        val sent = mutableListOf<String>()
-        var sendGoes = true
-        val speaker = RecordingSpeaker()
-        val phases = mutableListOf<VoiceChatPhase>()
-        private val dispatcher = StandardTestDispatcher(scope.testScheduler)
-        val chat = VoiceChat(
-            scope = CoroutineScope(scope.backgroundScope.coroutineContext + dispatcher),
-            transcription = TranscriptionApi { _, _, _ ->
-                transcriptionFails?.let { throw it }
-                Transcription(heard.removeFirstOrNull().orEmpty(), null)
-            },
-            newCapture = {
-                if (micFails) object : AudioCapture {
-                    override fun start() = throw IllegalStateException("busy")
-                    override fun level() = 0f
-                    override fun stop(): RecordedClip? = null
-                    override fun cancel() = Unit
-                } else ScriptedMic(ArrayDeque(scripts.removeFirstOrNull().orEmpty()), { scope.testScheduler.currentTime }).also { mics += it }
-            },
-            speaker = speaker,
-            send = { words -> sent += words; sendGoes },
-            clock = { scope.testScheduler.currentTime },
-            errorMessage = { "Couldn't reach Cursor." },
-            io = dispatcher,
-        ).also { it.onPhase = { phase -> phases += phase } }
+    @Before
+    fun setUp() = Dispatchers.setMain(dispatcher)
 
-        val phase: VoiceChatPhase get() = chat.state.value.phase
-    }
+    @After
+    fun tearDown() = Dispatchers.resetMain()
 
-    private companion object {
-        /** Half a second of speech, then quiet: one short utterance. */
-        val Utterance: List<Float> = List(7) { 0.6f }
-        const val Tick = VoiceChat.TickMillis
-
-        /** From the microphone opening to the utterance being sent: the speech, the pause that ends it, and a tick over. */
-        val UtteranceMillis = Utterance.size * Tick + VoiceChat.EndSilenceMillis + Tick
-    }
-
-    @Test
-    fun `an utterance is heard, sent, answered aloud and the call listens again`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.heard += "Run the tests again"
-        h.chat.agent(running = false, replyId = "a1", markdown = "Earlier reply.")
-        h.chat.start()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-
-        advanceTimeBy(4 * Tick)
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = true))
-        assertThat(h.chat.state.value.level).isEqualTo(0.6f)
-
-        advanceTimeBy(UtteranceMillis)
+    private fun TestScope.connected(): VoiceChat {
+        val chat = chat()
+        chat.start()
         runCurrent()
-        assertThat(h.sent).containsExactly("Run the tests again")
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Working("Run the tests again"))
-        assertThat(h.chat.state.value.lastSaid).isEqualTo("Run the tests again")
-        assertThat(h.mics.single().stopped).isTrue()
-
-        // The reply on screen when the utterance went out is not an answer to it, running or not.
-        h.chat.agent(running = false, replyId = "a1", markdown = "Earlier reply.")
-        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Working::class.java)
-        h.chat.agent(running = true, replyId = "a1", markdown = "Earlier reply.")
-        h.chat.agent(running = true, replyId = "a2", markdown = "All 412")
-        assertThat(h.speaker.spoken).isEmpty()
-
-        h.chat.agent(running = false, replyId = "a2", markdown = "All **412** tests pass.")
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Speaking("All 412 tests pass."))
-        assertThat(h.speaker.spoken).containsExactly("All 412 tests pass.")
-        assertThat(h.mics).hasSize(1)
-
-        h.speaker.finish()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-        assertThat(h.mics).hasSize(2)
-    }
-
-    @Test
-    fun `a noise shorter than speech does not start an utterance`() = runTest {
-        val h = Harness(this)
-        h.scripts += listOf(0.9f, 0.9f, 0f, 0.9f, 0f)
-        h.chat.start()
-        advanceTimeBy(VoiceChat.EndSilenceMillis * 3)
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-        assertThat(h.sent).isEmpty()
-    }
-
-    @Test
-    fun `a turn that ends without a reply goes back to listening`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.heard += "Stop the dev server"
-        h.chat.start()
-        advanceTimeBy(Utterance.size * Tick + UtteranceMillis)
+        dialer.open()
         runCurrent()
-        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Working::class.java)
-        h.chat.agent(running = true, replyId = null, markdown = null)
-        h.chat.agent(running = false, replyId = null, markdown = null)
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-        assertThat(h.speaker.spoken).isEmpty()
-    }
-
-    @Test
-    fun `a tap sends what has been heard without waiting for the pause`() = runTest {
-        val h = Harness(this)
-        h.scripts += List(200) { 0.6f }
-        h.heard += "Ship it"
-        h.chat.start()
-        h.chat.tap()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-        advanceTimeBy(10 * Tick)
-        h.chat.tap()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Transcribing)
+        dialer.ready()
         runCurrent()
-        assertThat(h.sent).containsExactly("Ship it")
+        return chat
     }
 
+    private fun toolCall(name: String, arguments: String, callId: String = "call-1") =
+        dialer.push("""{"type":"response.function_call_arguments.done","call_id":"$callId","name":"$name","arguments":${kotlinx.serialization.json.JsonPrimitive(arguments)}}""")
+
     @Test
-    fun `a tap while the reply is read stops the voice and listens`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.heard += "What changed?"
-        h.chat.start()
-        advanceTimeBy(Utterance.size * Tick + UtteranceMillis)
+    fun `the call is minted for the chat and the line opened with the credential, then the session sent`() = scope.runTest {
+        val chat = chat()
+        chat.start()
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Connecting)
         runCurrent()
-        h.chat.agent(running = true, replyId = null, markdown = null)
-        h.chat.agent(running = false, replyId = "a1", markdown = "Three files changed.")
-        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Speaking::class.java)
+        assertThat(account.mints).containsExactly("bc-1" to null)
+        assertThat(dialer.dialled).containsExactly("wss://api.x.ai/v1/realtime?model=grok-voice" to "secret-1")
 
-        h.chat.tap()
-        assertThat(h.speaker.stops).isEqualTo(1)
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-        // The voice's late word that it finished changes nothing: the call has moved on.
-        val micsOpen = h.mics.size
-        h.speaker.finish()
-        assertThat(h.mics).hasSize(micsOpen)
-    }
-
-    @Test
-    fun `saying goodbye ends the call and sends nothing`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.heard += "Goodbye."
-        h.chat.start()
-        advanceTimeBy(Utterance.size * Tick + UtteranceMillis)
+        dialer.open()
         runCurrent()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Off)
-        assertThat(h.sent).isEmpty()
-    }
+        val session = dialer.frames("session.update").single()["session"]!!.jsonObject
+        assertThat(session["voice"]!!.jsonPrimitive.content).isEqualTo("eve")
+        assertThat(session["instructions"]!!.jsonPrimitive.content).startsWith("You are Cursor's voice.")
+        assertThat(session["instructions"]!!.jsonPrimitive.content).contains("User: Fix the login bug")
+        assertThat(session["tools"]!!.jsonArray.single().jsonObject["name"]!!.jsonPrimitive.content).isEqualTo("send_task")
+        assertThat(session["turn_detection"]!!.jsonObject["type"]!!.jsonPrimitive.content).isEqualTo("server_vad")
+        assertThat(session["audio"]!!.jsonObject["input"]!!.jsonObject["format"]!!.jsonObject["rate"]!!.jsonPrimitive.content).isEqualTo("24000")
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Connecting)
 
-    @Test
-    fun `an utterance with no words in it is not sent`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.heard += "  "
-        h.chat.start()
-        advanceTimeBy(Utterance.size * Tick + UtteranceMillis)
+        dialer.ready()
         runCurrent()
-        assertThat(h.sent).isEmpty()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Listening())
+        chat.end()
     }
 
     @Test
-    fun `a failed transcription is said and the call resumes by itself`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.transcriptionFails = IOException("offline")
-        h.chat.start()
-        advanceTimeBy(Utterance.size * Tick + UtteranceMillis)
+    fun `the microphone goes up the line once it is ready, and not while muted`() = scope.runTest {
+        val chat = chat()
+        chat.start()
         runCurrent()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Failed("Couldn't reach Cursor.", resumes = true))
-        h.transcriptionFails = null
-        advanceTimeBy(VoiceChat.ErrorShownMillis + 1)
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-    }
+        mic.onChunk!!(ByteArray(4) { 1 })
+        assertThat(dialer.frames("input_audio_buffer.append")).isEmpty()
 
-    @Test
-    fun `a message the chat would not take waits for a tap`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.heard += "Deploy"
-        h.sendGoes = false
-        h.chat.start()
-        advanceTimeBy(Utterance.size * Tick + UtteranceMillis)
+        dialer.open(); runCurrent(); dialer.ready(); runCurrent()
+        mic.onChunk!!(ByteArray(4) { 1 })
+        val append = dialer.frames("input_audio_buffer.append").single()
+        assertThat(Base64.getDecoder().decode(append["audio"]!!.jsonPrimitive.content)).isEqualTo(ByteArray(4) { 1 })
+
+        chat.toggleMute()
         runCurrent()
-        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Failed::class.java)
-        advanceTimeBy(VoiceChat.ErrorShownMillis * 3)
-        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Failed::class.java)
-        h.chat.tap()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
+        assertThat(chat.state.value.muted).isTrue()
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Muted)
+        val afterMute = dialer.frames("input_audio_buffer.append").size
+        mic.onChunk!!(ByteArray(4) { 1 })
+        assertThat(dialer.frames("input_audio_buffer.append")).hasSize(afterMute)
+        chat.end()
     }
 
     @Test
-    fun `a microphone that will not open is a failure, not a call`() = runTest {
-        val h = Harness(this)
-        h.micFails = true
-        h.chat.start()
-        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Failed::class.java)
-        assertThat((h.phase as VoiceChatPhase.Failed).resumes).isFalse()
-    }
-
-    @Test
-    fun `hold closes the microphone and taking it off opens a new one`() = runTest {
-        val h = Harness(this)
-        h.chat.start()
-        h.chat.toggleMute()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Muted)
-        assertThat(h.mics.single().cancelled).isTrue()
-        advanceTimeBy(VoiceChat.IdleEndMillis * 2)
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Muted)
-        h.chat.toggleMute()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-        assertThat(h.mics).hasSize(2)
-    }
-
-    @Test
-    fun `muted while the agent works, the reply is still read and the call waits muted, with every turn kept`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.heard += "Run the tests again"
-        h.chat.start()
-        advanceTimeBy(4 * Tick + UtteranceMillis)
+    fun `a caller who says nothing is greeted, and one who speaks first is not`() = scope.runTest {
+        val chat = connected()
+        advanceTimeBy(VoiceChat.GreetingGraceMillis + 10)
         runCurrent()
-        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Working::class.java)
-
-        h.chat.toggleMute()
-        assertThat(h.chat.state.value.muted).isTrue()
-        assertThat(h.phase).isInstanceOf(VoiceChatPhase.Working::class.java)
-
-        h.chat.agent(running = true, replyId = "a2", markdown = "All")
-        h.chat.agent(running = false, replyId = "a2", markdown = "All tests pass.")
-        assertThat(h.speaker.spoken).containsExactly("All tests pass.")
-        h.speaker.finish()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Muted)
-        assertThat(h.mics).hasSize(1)
-        assertThat(h.chat.state.value.turns).containsExactly(
-            VoiceTurn(fromUser = true, text = "Run the tests again"),
-            VoiceTurn(fromUser = false, text = "All tests pass."),
-        ).inOrder()
-
-        h.chat.toggleMute()
-        assertThat(h.chat.state.value.muted).isFalse()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
+        val greeting = dialer.frames("response.create").single()
+        assertThat(greeting["response"]!!.jsonObject["instructions"]!!.jsonPrimitive.content).endsWith("\n\nGreet the caller.")
+        chat.end()
     }
 
     @Test
-    fun `a quiet room restarts the clip and, after ten minutes, ends the call`() = runTest {
-        val h = Harness(this)
-        h.chat.start()
-        advanceTimeBy(VoiceChat.ReopenMillis + 2 * Tick)
-        assertThat(h.mics).hasSize(2)
-        assertThat(h.mics.first().cancelled).isTrue()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Listening(heard = false))
-        advanceTimeBy(VoiceChat.IdleEndMillis)
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Off)
-        assertThat(h.mics.last().cancelled).isTrue()
-    }
-
-    @Test
-    fun `ending the call closes whatever it held`() = runTest {
-        val h = Harness(this)
-        h.scripts += Utterance
-        h.heard += "Summarise the diff"
-        h.chat.start()
-        advanceTimeBy(Utterance.size * Tick + UtteranceMillis)
+    fun `the agent's voice is played, and the caller cutting in stops it and tells the line what was heard`() = scope.runTest {
+        val chat = connected()
+        dialer.push("""{"type":"response.created","response":{"id":"r1"}}""")
+        dialer.push("""{"type":"response.output_audio_transcript.delta","item_id":"i1","delta":"All tests pass"}""")
+        dialer.push("""{"type":"response.output_audio.delta","item_id":"i1","content_index":0,"delta":"${Base64.getEncoder().encodeToString(ByteArray(8))}"}""")
         runCurrent()
-        h.chat.agent(running = true, replyId = null, markdown = null)
-        h.chat.agent(running = false, replyId = "a1", markdown = "Two files.")
-        h.chat.end()
-        assertThat(h.phase).isEqualTo(VoiceChatPhase.Off)
-        assertThat(h.speaker.stops).isEqualTo(1)
-        // A reply that lands after the call ended is not read.
-        h.chat.agent(running = false, replyId = "a2", markdown = "More.")
-        assertThat(h.speaker.spoken).hasSize(1)
-        assertThat(h.phases.last()).isEqualTo(VoiceChatPhase.Off)
+        assertThat(speaker.played).containsExactly("i1")
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Speaking("All tests pass"))
+
+        dialer.push("""{"type":"input_audio_buffer.speech_started"}""")
+        runCurrent()
+        assertThat(speaker.interrupts).isEqualTo(1)
+        val cut = dialer.frames("conversation.item.truncate").single()
+        assertThat(cut["item_id"]!!.jsonPrimitive.content).isEqualTo("i1")
+        assertThat(cut["audio_end_ms"]!!.jsonPrimitive.content).isEqualTo("640")
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Listening(heard = true))
+        dialer.push("""{"type":"conversation.item.input_audio_transcription.completed","item_id":"u2","transcript":"Run the tests"}""")
+        runCurrent()
+        assertThat(chat.state.value.turns).contains(VoiceTurn(fromUser = true, text = "Run the tests"))
+        chat.end()
     }
 
     @Test
-    fun `a refused microphone permission says where to grant it`() = runTest {
-        val h = Harness(this)
-        h.chat.permissionDenied(permanently = true)
-        val failed = h.phase as VoiceChatPhase.Failed
-        assertThat(failed.opensSettings).isTrue()
-        h.chat.tap()
-        assertThat(h.phase).isEqualTo(failed)
+    fun `send_task hands the job to the agent, answers with the receipt, and the agent's reply lands on the line`() = scope.runTest {
+        val chat = connected()
+        toolCall("send_task", """{"request":"Run the test suite and report failures"}""")
+        runCurrent()
+        assertThat(tasks).containsExactly("Run the test suite and report failures")
+        val output = dialer.frames("conversation.item.create").single()["item"]!!.jsonObject
+        assertThat(output["type"]!!.jsonPrimitive.content).isEqualTo("function_call_output")
+        assertThat(output["call_id"]!!.jsonPrimitive.content).isEqualTo("call-1")
+        assertThat(output["output"]!!.jsonPrimitive.content).isEqualTo("""{"receipt":"under way"}""")
+        assertThat(dialer.frames("response.create").single()["response"]!!.jsonObject["instructions"]!!.jsonPrimitive.content).endsWith("\n\nSay you sent it.")
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Working("Run the test suite and report failures"))
+
+        // The job's message reaches the chat, the agent works, and its turn ends with a reply.
+        lines = lines + WrittenLine("u2", true, "Run the test suite and report failures")
+        chat.agent(running = true, lines = lines)
+        assertThat(dialer.frames("async_update.add")).isEmpty()
+        lines = lines + WrittenLine("a2", false, "All **412** tests pass.\n\n```\nok\n```")
+        chat.agent(running = false, lines = lines)
+        runCurrent()
+        val landed = dialer.frames("async_update.add").single()["async_update"]!!.jsonObject
+        assertThat(landed["topic"]!!.jsonPrimitive.content).isEqualTo("work_landed")
+        val text = landed["payload"]!!.jsonArray.single().jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content
+        assertThat(text).startsWith("All 412 tests pass.")
+        assertThat(text).doesNotContain("```")
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Listening())
+        chat.end()
+    }
+
+    @Test
+    fun `a job that could not be sent is said to be unreachable, and none lands`() = scope.runTest {
+        taskAnswer = VoiceChat.TaskSent.Refused
+        val chat = connected()
+        toolCall("send_task", """{"request":"Deploy it"}""")
+        runCurrent()
+        val output = dialer.frames("conversation.item.create").single()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content
+        assertThat(output).contains("\"relay\":\"unreachable\"")
+        assertThat(output).contains("Unreachable.")
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Listening())
+        chat.end()
+    }
+
+    @Test
+    fun `the read-only tools go to the account, recall reads the chat, and an unknown tool is refused`() = scope.runTest {
+        val chat = connected()
+        toolCall("peek_changes", """{"file":"Login.kt"}""", callId = "c-peek")
+        runCurrent()
+        assertThat(account.serverTools).containsExactly("""bc-1/c-peek/peek_changes/{"file":"Login.kt"}""")
+        assertThat(dialer.frames("conversation.item.create").last()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content).isEqualTo("""{"result":"2 files changed"}""")
+
+        toolCall("recall_text_messages", "{}", callId = "c-recall")
+        runCurrent()
+        val recall = dialer.frames("conversation.item.create").last()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content
+        assertThat(recall).contains("\"writer\":\"them\"")
+        assertThat(recall).contains("I fixed the login bug.")
+
+        toolCall("open_the_pod_bay_doors", "{}", callId = "c-x")
+        runCurrent()
+        assertThat(dialer.frames("conversation.item.create").last()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content).contains("No tool open_the_pod_bay_doors.")
+        assertThat(dialer.frames("response.create")).hasSize(3)
+        chat.end()
+    }
+
+    @Test
+    fun `end_the_call hangs up once the goodbye has been heard, and stay_silent says nothing`() = scope.runTest {
+        val chat = connected()
+        toolCall("stay_silent", "{}", callId = "c-quiet")
+        runCurrent()
+        assertThat(dialer.frames("response.create")).isEmpty()
+
+        speaker.playing = true
+        toolCall("end_the_call", "{}", callId = "c-bye")
+        runCurrent()
+        advanceTimeBy(1_000)
+        assertThat(chat.state.value.active).isTrue()
+        speaker.playing = false
+        advanceTimeBy(500)
+        runCurrent()
+        assertThat(chat.state.value.phase).isEqualTo(VoiceChatPhase.Off)
+        assertThat(dialer.closed).isEqualTo(1)
+        assertThat(mic.stopped).isEqualTo(1)
+        assertThat(speaker.released).isEqualTo(1)
+    }
+
+    @Test
+    fun `a mint the account refuses, a line to another host, and a line that never opens each fail the call`() = scope.runTest {
+        account.mintFailure = IOException("Realtime voice is not enabled for this account.")
+        val refused = chat()
+        refused.start()
+        runCurrent()
+        assertThat(refused.state.value.phase).isEqualTo(VoiceChatPhase.Failed("Realtime voice is not enabled for this account."))
+        assertThat(dialer.dialled).isEmpty()
+
+        account.mintFailure = null
+        account.session = ScriptedVoiceAccount.session(url = "wss://example.com/realtime")
+        val elsewhere = chat()
+        elsewhere.start()
+        runCurrent()
+        assertThat(elsewhere.state.value.phase).isEqualTo(VoiceChatPhase.Failed("Realtime voice host is not allowed."))
+        assertThat(dialer.dialled).isEmpty()
+
+        account.session = ScriptedVoiceAccount.session()
+        val dropped = chat()
+        dropped.start()
+        runCurrent()
+        dialer.listener.onClosed(400, "Incorrect API key provided.")
+        runCurrent()
+        assertThat(dropped.state.value.phase).isEqualTo(VoiceChatPhase.Failed("Couldn't connect to Grok Voice: Incorrect API key provided."))
+        assertThat(mic.stopped).isEqualTo(1)
+
+        // A tap calls again.
+        dropped.tap()
+        runCurrent()
+        assertThat(account.mints).hasSize(4)
+        dropped.end()
+    }
+
+    @Test
+    fun `a changed voice or speed is sent on the open line`() = scope.runTest {
+        val chat = connected()
+        chat.settings = VoiceCallSettings(voice = "rex", speed = 1.5f)
+        runCurrent()
+        val session = dialer.frames("session.update").last()["session"]!!.jsonObject
+        assertThat(session["voice"]!!.jsonPrimitive.content).isEqualTo("rex")
+        assertThat(session["audio"]!!.jsonObject["output"]!!.jsonObject["speed"]!!.jsonPrimitive.content).isEqualTo("1.5")
+        assertThat(chat.voices.map { it.id }).containsExactly("eve", "rex").inOrder()
+        chat.end()
     }
 }

@@ -100,6 +100,8 @@
     <ID>ComplexCondition:ViewerPages.kt:have != null &amp;&amp; (early?.viewport == viewport || have.width &gt;= viewport.width || have.height &gt;= viewport.height || ref !is MediaRef.Local)</ID>
     <ID>ComplexCondition:ViewerPages.kt:presentation.loaded &amp;&amp; have != null &amp;&amp; (have.width &gt;= target.width || have.height &gt;= target.height)</ID>
     <ID>ComplexCondition:ViewerPreloads.kt:ViewerPreloads$existing != null &amp;&amp; existing.viewport == size &amp;&amp; (!existing.isDone || existing.bitmap != null)</ID>
+    <ID>ComplexCondition:VoiceChat.kt:VoiceChat$isActive &amp;&amp; (responding || speaker?.busy() == true) &amp;&amp; clock() &lt; until</ID>
+    <ID>ComplexCondition:VoiceChat.kt:VoiceChat$openJobs.isEmpty() &amp;&amp; !speaking &amp;&amp; !responding &amp;&amp; clock() - lastCallerAt &gt;= idle</ID>
     <ID>ComplexCondition:WidgetPlacement.kt:WidgetPlacement.Box.Companion$minWidth == 0 || maxWidth == 0 || minHeight == 0 || maxHeight == 0</ID>
     <ID>CyclomaticComplexMethod:AccountSimulationTest.kt:AccountSimulationTest$@Suppress("DEPRECATION") private suspend fun write034State()</ID>
     <ID>CyclomaticComplexMethod:AccountSimulationTest.kt:AccountSimulationTest$private fun assertDesktopTopLevel(label: String, rows: List&lt;Agent&gt;, sections: List&lt;com.cursorforandroid.domain.AgentSection&gt;)</ID>
@@ -326,6 +328,7 @@
     <ID>CyclomaticComplexMethod:QueuedFollowUps.kt:@Composable private fun QueuedFollowUpRow( item: QueuedFollowUp, position: Int, count: Int, thumbnails: Map&lt;String, ImageBitmap&gt;, onEdit: () -&gt; Unit, onSteer: () -&gt; Unit, onRemove: () -&gt; Unit, motion: SendMotion?, anchor: ComposerAnchor?, face: QueueCardFace, steers: Boolean, refused: Boolean, )</ID>
     <ID>CyclomaticComplexMethod:QueuedMessageDisplayTest.kt:QueuedMessageDisplayTest$private suspend fun cardActionsInAProject(engine: TranscriptEngine)</ID>
     <ID>CyclomaticComplexMethod:QueuedMessagePlacementTest.kt:QueuedMessagePlacementTest$@Test fun `edit, delete and steer-now act on the right queued message, and the edited one is delivered with its new words`()</ID>
+    <ID>CyclomaticComplexMethod:RealtimeWire.kt:RealtimeWire$fun parse(frame: String): Event</ID>
     <ID>CyclomaticComplexMethod:RecordPairing.kt:RecordPairing$fun pair(turns: List&lt;Turn&gt;, runs: List&lt;RunDto&gt;): Pairing</ID>
     <ID>CyclomaticComplexMethod:RecordShapes.kt:RecordShapes$private fun describe(element: JsonElement, key: String?, depth: Int, out: StringBuilder)</ID>
     <ID>CyclomaticComplexMethod:RecordTranscript.kt:RecordPager$suspend fun tail(api: ConversationRecordApi, agentId: String, wantTurns: Int, knownTotal: Int? = null, pageSize: Int = PAGE_SIZE, firstPageSize: Int = FIRST_PAGE_SIZE): Raw?</ID>
@@ -433,7 +436,7 @@
     <ID>CyclomaticComplexMethod:ViewerPages.kt:@Composable internal fun PageProblem( problem: MediaProblem, ref: MediaRef, entry: MediaEntry, environment: PageEnvironment, modifier: Modifier = Modifier, onRetry: ((wake: Boolean) -&gt; Unit)? = null, onCopyIntoWorkspace: ((path: String) -&gt; Unit)? = null, )</ID>
     <ID>CyclomaticComplexMethod:ViewerPages.kt:@Composable internal fun VideoPage( state: MediaViewerState, session: MediaViewerState.Session, entry: MediaEntry, page: Int, presentation: PagePresentation, environment: PageEnvironment, viewport: IntSize, isCurrent: Boolean, )</ID>
     <ID>CyclomaticComplexMethod:VmSectionViews.kt:@Composable internal fun WorkspaceBrowser(state: PanelState, actions: PanelActions)</ID>
-    <ID>CyclomaticComplexMethod:VoiceChat.kt:VoiceChat$private fun listen()</ID>
+    <ID>CyclomaticComplexMethod:VoiceChat.kt:VoiceChat$private fun onEvent(event: RealtimeWire.Event)</ID>
     <ID>CyclomaticComplexMethod:WorkspaceRepository.kt:WorkspaceRepository.Companion$fun failure(t: Throwable): VmRead.Failed</ID>
     <ID>CyclomaticComplexMethod:Zoomable.kt:fun Modifier.viewerGestures( zoom: ZoomState?, dismiss: DismissState, handover: PagerHandover?, scope: CoroutineScope, enabled: State&lt;Boolean&gt;, onTap: () -&gt; Unit, onDismiss: (velocityY: Float) -&gt; Unit, hold: PageHold? = null, ): Modifier</ID>
     <ID>DestructuringDeclarationWithTooManyEntries:AppUpdate.kt:AppVersion.Companion$val (major, minor, patch, preRelease, build) = match.destructured</ID>
@@ -992,9 +995,9 @@
     <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallLabel(modifier: Modifier = Modifier)</ID>
     <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallReturnTray( title: String, state: VoiceChatState, elapsed: String, onMute: () -&gt; Unit, onHangUp: () -&gt; Unit, onReturn: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallReturnTray(calls: VoiceCalls, onReturn: (agentId: String) -&gt; Unit, modifier: Modifier = Modifier)</ID>
-    <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallSettingsMenu( expanded: Boolean, onDismiss: () -&gt; Unit, settings: VoiceCallSettings, voices: () -&gt; List&lt;SpeakerVoice&gt;, onChange: (VoiceCallSettings) -&gt; Unit, initialPage: SettingsPage = SettingsPage.Main, )</ID>
+    <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallSettingsMenu( expanded: Boolean, onDismiss: () -&gt; Unit, settings: VoiceCallSettings, voices: () -&gt; List&lt;VoiceOption&gt;, onChange: (VoiceCallSettings) -&gt; Unit, initialPage: SettingsPage = SettingsPage.Main, )</ID>
     <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallTranscript(turns: List&lt;VoiceTurn&gt;, started: String, status: String, modifier: Modifier = Modifier)</ID>
-    <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallTray( state: VoiceChatState, elapsed: String, onMute: () -&gt; Unit, onHangUp: () -&gt; Unit, onTranscript: () -&gt; Unit, modifier: Modifier = Modifier, onRetry: () -&gt; Unit = {}, settings: VoiceCallSettings = VoiceCallSettings(), voices: () -&gt; List&lt;SpeakerVoice&gt; = { emptyList() }, onSettings: (VoiceCallSettings) -&gt; Unit = {}, settingsOpen: Boolean = false, )</ID>
+    <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallTray( state: VoiceChatState, elapsed: String, onMute: () -&gt; Unit, onHangUp: () -&gt; Unit, onTranscript: () -&gt; Unit, modifier: Modifier = Modifier, onRetry: () -&gt; Unit = {}, settings: VoiceCallSettings = VoiceCallSettings(), voices: () -&gt; List&lt;VoiceOption&gt; = { emptyList() }, onSettings: (VoiceCallSettings) -&gt; Unit = {}, settingsOpen: Boolean = false, )</ID>
     <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceCallTray(calls: VoiceCalls, modifier: Modifier = Modifier)</ID>
     <ID>FunctionNaming:VoiceCallViews.kt:@Composable fun VoiceLine(phase: VoiceChatPhase, level: Float, muted: Boolean, modifier: Modifier = Modifier, height: Dp = 20.dp)</ID>
     <ID>FunctionNaming:VoiceCallViews.kt:@Composable private fun Choice(label: String, selected: Boolean, onClick: () -&gt; Unit)</ID>
@@ -1112,7 +1115,6 @@
     <ID>LongMethod:ListInvariantsPropertyTest.kt:ListInvariantsPropertyTest$@Test fun `pinned shown, primaries never hidden, evidence children never primary, running as the server has it, nothing project-scoped notified`()</ID>
     <ID>LongMethod:LiveRunHub.kt:LiveRunHub$@OptIn(ExperimentalCoroutinesApi::class) private suspend fun follow(entry: Entry, self: Job?, backend: CursorBackend, resumeFrom: String?, historical: Boolean, stallMs: Long = stallTimeoutMs): Pass</ID>
     <ID>LongMethod:LiveRunHub.kt:LiveRunHub$private suspend fun stream(entry: Entry, historical: Boolean, resumeFrom: String? = null, unpark: Boolean = false)</ID>
-    <ID>LongMethod:LiveRunHubSnapshotDropTest.kt:LiveRunHubSnapshotDropTest$@Test fun `a dropped stream keeps its snapshot and continues it after the reconnect delay`()</ID>
     <ID>LongMethod:LiveRunMonitorTest.kt:LiveRunMonitorTest$@Test fun `tracks running agents, shares one stream with the conversation and reports finishes once`()</ID>
     <ID>LongMethod:LongProject.kt:LongProject$fun turns( firstAt: Long, turns: Int = TURNS, seed: Int = 20, /** Which turns (1-based) the `/v0` transcript has no message for (see [Turn.promptless]); never a user's turn. */ promptless: (Int) -&gt; Boolean = { false }, /** The newest turn is the user's, whatever [USER_EVERY] says: the live turn started on the reader's own prompt. */ lastIsUser: Boolean = false, ): List&lt;Turn&gt;</ID>
     <ID>LongMethod:LongSessionMemoryBenchmarkTest.kt:LongSessionMemoryBenchmarkTest$@Test fun `thirty-one agents working through a long session keep the heap bounded`()</ID>
@@ -1176,8 +1178,7 @@
     <ID>LongMethod:ViewerPages.kt:@Composable internal fun AudioPage( state: MediaViewerState, session: MediaViewerState.Session, entry: MediaEntry, page: Int, presentation: PagePresentation, environment: PageEnvironment, viewport: IntSize, isCurrent: Boolean, )</ID>
     <ID>LongMethod:ViewerPages.kt:@Composable internal fun ImagePage( state: MediaViewerState, session: MediaViewerState.Session, entry: MediaEntry, page: Int, presentation: PagePresentation, environment: PageEnvironment, viewport: IntSize, isCurrent: Boolean, )</ID>
     <ID>LongMethod:ViewerPages.kt:@Composable internal fun VideoPage( state: MediaViewerState, session: MediaViewerState.Session, entry: MediaEntry, page: Int, presentation: PagePresentation, environment: PageEnvironment, viewport: IntSize, isCurrent: Boolean, )</ID>
-    <ID>LongMethod:VoiceCallViews.kt:@Composable fun VoiceCallTray( state: VoiceChatState, elapsed: String, onMute: () -&gt; Unit, onHangUp: () -&gt; Unit, onTranscript: () -&gt; Unit, modifier: Modifier = Modifier, onRetry: () -&gt; Unit = {}, settings: VoiceCallSettings = VoiceCallSettings(), voices: () -&gt; List&lt;SpeakerVoice&gt; = { emptyList() }, onSettings: (VoiceCallSettings) -&gt; Unit = {}, settingsOpen: Boolean = false, )</ID>
-    <ID>LongMethod:VoiceChat.kt:VoiceChat$private fun listen()</ID>
+    <ID>LongMethod:VoiceCallViews.kt:@Composable fun VoiceCallTray( state: VoiceChatState, elapsed: String, onMute: () -&gt; Unit, onHangUp: () -&gt; Unit, onTranscript: () -&gt; Unit, modifier: Modifier = Modifier, onRetry: () -&gt; Unit = {}, settings: VoiceCallSettings = VoiceCallSettings(), voices: () -&gt; List&lt;VoiceOption&gt; = { emptyList() }, onSettings: (VoiceCallSettings) -&gt; Unit = {}, settingsOpen: Boolean = false, )</ID>
     <ID>LongMethod:Zoomable.kt:fun Modifier.viewerGestures( zoom: ZoomState?, dismiss: DismissState, handover: PagerHandover?, scope: CoroutineScope, enabled: State&lt;Boolean&gt;, onTap: () -&gt; Unit, onDismiss: (velocityY: Float) -&gt; Unit, hold: PageHold? = null, ): Modifier</ID>
     <ID>LoopWithTooManyJumpStatements:AgentRepository.kt:AgentRepository$for</ID>
     <ID>LoopWithTooManyJumpStatements:AgentsWindowList.kt:AgentsWindowList$for</ID>
@@ -1187,6 +1188,7 @@
     <ID>LoopWithTooManyJumpStatements:AttachmentStore.kt:PromptAttachments$for</ID>
     <ID>LoopWithTooManyJumpStatements:BackgroundComposerApi.kt:BackgroundComposerApi$do</ID>
     <ID>LoopWithTooManyJumpStatements:BackgroundComposerApi.kt:BackgroundComposerApi$for</ID>
+    <ID>LoopWithTooManyJumpStatements:CallAudio.kt:AndroidCallSpeaker$while</ID>
     <ID>LoopWithTooManyJumpStatements:ConnectRpc.kt:ConnectJsonClient$while</ID>
     <ID>LoopWithTooManyJumpStatements:ConversationRepository.kt:ConversationRepository$for</ID>
     <ID>LoopWithTooManyJumpStatements:ConversationRepository.kt:ConversationRepository$while</ID>
@@ -1433,6 +1435,18 @@
     <ID>MagicNumber:BlobRecord.kt:BlobRecord$0x20</ID>
     <ID>MagicNumber:BlobRecord.kt:BlobRecord$404</ID>
     <ID>MagicNumber:BlobRecord.kt:BlobRecord.Tally$200</ID>
+    <ID>MagicNumber:CallAudio.kt:0xFF</ID>
+    <ID>MagicNumber:CallAudio.kt:10.0</ID>
+    <ID>MagicNumber:CallAudio.kt:1e-4</ID>
+    <ID>MagicNumber:CallAudio.kt:20</ID>
+    <ID>MagicNumber:CallAudio.kt:32768.0</ID>
+    <ID>MagicNumber:CallAudio.kt:60</ID>
+    <ID>MagicNumber:CallAudio.kt:8</ID>
+    <ID>MagicNumber:CallAudio.kt:AndroidCallMicrophone$4</ID>
+    <ID>MagicNumber:CallAudio.kt:AndroidCallMicrophone$500</ID>
+    <ID>MagicNumber:CallAudio.kt:AndroidCallSpeaker$0xFFFFFFFFL</ID>
+    <ID>MagicNumber:CallAudio.kt:AndroidCallSpeaker$1000</ID>
+    <ID>MagicNumber:CallAudio.kt:AndroidCallSpeaker$5</ID>
     <ID>MagicNumber:CatchUpPull.kt:0.999f</ID>
     <ID>MagicNumber:CatchUpPull.kt:120</ID>
     <ID>MagicNumber:ChatsWidgetConfigure.kt:100</ID>
@@ -1936,6 +1950,11 @@
     <ID>MagicNumber:QueueStack.kt:0.5f</ID>
     <ID>MagicNumber:QueueStack.kt:180f</ID>
     <ID>MagicNumber:QueuedFollowUps.kt:1_000L</ID>
+    <ID>MagicNumber:RealtimeLine.kt:OkHttpRealtimeDialer$15</ID>
+    <ID>MagicNumber:RealtimeLine.kt:OkHttpRealtimeDialer.&lt;no name provided&gt;$1000</ID>
+    <ID>MagicNumber:RealtimeLine.kt:OkHttpRealtimeDialer.&lt;no name provided&gt;$1005</ID>
+    <ID>MagicNumber:RealtimeLine.kt:OkHttpRealtimeDialer.&lt;no name provided&gt;$1006</ID>
+    <ID>MagicNumber:RealtimeLine.kt:OkHttpRealtimeDialer.&lt;no name provided&gt;$4999</ID>
     <ID>MagicNumber:RecordTranscript.kt:RecordPager.Raw$200</ID>
     <ID>MagicNumber:RefreshIndicator.kt:0.25f</ID>
     <ID>MagicNumber:RefreshIndicator.kt:0.4f</ID>
@@ -2154,6 +2173,9 @@
     <ID>MagicNumber:VoiceCallViews.kt:VoiceChatCopy$1000</ID>
     <ID>MagicNumber:VoiceCallViews.kt:VoiceChatCopy$3600</ID>
     <ID>MagicNumber:VoiceCallViews.kt:VoiceChatCopy$60</ID>
+    <ID>MagicNumber:VoiceChat.kt:VoiceChat$1000</ID>
+    <ID>MagicNumber:VoiceChat.kt:VoiceChat$1000L</ID>
+    <ID>MagicNumber:VoiceChat.kt:VoiceChat$3</ID>
     <ID>MagicNumber:VoiceInput.kt:0.35f</ID>
     <ID>MagicNumber:VoiceInput.kt:0.86f</ID>
     <ID>MagicNumber:VoiceInput.kt:1000</ID>
@@ -3364,6 +3386,7 @@
     <ID>MaxLineLength:AppGraph.kt:AppGraph$/** A new chat started on the account service, for the first prompt that carries files (see [ConnectAgentStartApi]). */</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph$/** Android rates the package's notification posts together, so the live roster and the Spotlight share one budget. Main thread only. */</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph$/** Creating a Project and editing its name and look, from the sidebar, the panel and the Project's own view (Extended mode). */</ID>
+    <ID>MaxLineLength:AppGraph.kt:AppGraph$/** Cursor's realtime voice call on the account: the mint, the server-run tools, the voice kept (see [RealtimeVoiceApi]). */</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph$/** How long the account's calls are still held off by a pause the server asked for (a `429`, see `ApiThrottle`); 0 when none, or before any call. */</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph$/** Injectable for tests only: the account's branch lists, for the composer's branch picker against a scripted account. */</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph$/** Injectable for tests only: the account's start, so a chat started on one of the user's machines can be driven from the composer against a scripted account. */</ID>
@@ -3429,7 +3452,6 @@
     <ID>MaxLineLength:AppGraph.kt:AppGraph$val client = lazyAccountClient.value.newBuilder().callTimeout(TRANSCRIPTION_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS).build()</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph$val crashes = withContext(Dispatchers.IO) { crashLog.reports().takeIf { it.isNotEmpty() }?.let { crashLog.export() } }</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph$val text = DiagnosticsInbox.compose(appVersion, now, projectDiagnosticsReport(), transcriptDiagnosticsReport(), crashes)</ID>
-    <ID>MaxLineLength:AppGraph.kt:AppGraph$voiceCallsOverride ?: VoiceCalls.create(app, transcription = { transcription }, onLive = { live -&gt; if (live) VoiceCallService.start(app) })</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph.&lt;no name provided&gt;$override fun blobCounts(agentId: String)</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph.&lt;no name provided&gt;$override suspend</ID>
     <ID>MaxLineLength:AppGraph.kt:AppGraph.&lt;no name provided&gt;$override suspend fun addFollowup(agentId: String, followup: AccountFollowup, synchronous: Boolean): String?</ID>
@@ -4065,6 +4087,11 @@
     <ID>MaxLineLength:BranchSheet.kt:add(PickerItem("default", "Default branch", subtitle = "The repository's default branch", icon = CursorIcons.GitBranch, selected = current.isEmpty(), onPick = { onSelect("") }))</ID>
     <ID>MaxLineLength:BranchSheet.kt:add(PickerNote("note", "Cursor's API can't list a repository's branches, so these are the ones your agents started from or pushed in ${repo.shortName}. Search for any other branch by name to use it."))</ID>
     <ID>MaxLineLength:BranchSheet.kt:if (currentUnlisted) add(PickerItem("current", current, icon = CursorIcons.GitBranch, selected = true, onPick = { onSelect(current) }))</ID>
+    <ID>MaxLineLength:CallAudio.kt:AndroidCallMicrophone$if (AcousticEchoCanceler.isAvailable()) echo = AcousticEchoCanceler.create(next.audioSessionId)?.apply { enabled = true }</ID>
+    <ID>MaxLineLength:CallAudio.kt:AndroidCallMicrophone$val next = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, CHUNK_BYTES * 4))</ID>
+    <ID>MaxLineLength:CallAudio.kt:AndroidCallSpeaker$.</ID>
+    <ID>MaxLineLength:CallAudio.kt:AndroidCallSpeaker$if (item == null || item.itemId != chunk.itemId || item.contentIndex != chunk.contentIndex) current = Item(chunk.itemId, chunk.contentIndex, framesWritten)</ID>
+    <ID>MaxLineLength:CallAudio.kt:AndroidCallSpeaker$val heard = item?.takeIf { wasBusy }?.let { CallSpeaker.Heard(it.itemId, it.contentIndex, ((head - it.startFrame).coerceAtLeast(0) * 1000) / RealtimeWire.SAMPLE_RATE) }</ID>
     <ID>MaxLineLength:CallLedger.kt:CallLedger$" ${calls.size.toString().padStart(4)} × $key ${calls.sumOf { it.millis }} ms" + (if (failed &gt; 0) " ($failed failed or refused)" else "")</ID>
     <ID>MaxLineLength:CallLedger.kt:CallLedger$Entry</ID>
     <ID>MaxLineLength:CallLedger.kt:CallLedger$appendLine(" ${java.time.Instant.ofEpochMilli(e.startedAtMillis)} ${e.method} ${e.url} → ${e.code ?: e.failure ?: "?"} (${e.millis} ms)")</ID>
@@ -5752,6 +5779,7 @@
     <ID>MaxLineLength:ConversationViewModel.kt:ConversationViewModel$if (!allowed &amp;&amp; graph.followUps.state(agentId).value.draft.mode?.needsAccountService == true) graph.followUps.setDraftMode(agentId, null)</ID>
     <ID>MaxLineLength:ConversationViewModel.kt:ConversationViewModel$if (!presenter.isWarm || state.items.isEmpty()) return PresentedTranscript(state, TranscriptPresenter.Presented.EMPTY)</ID>
     <ID>MaxLineLength:ConversationViewModel.kt:ConversationViewModel$if (SlashCommands.has(text, SlashCommands.MULTITASK) &amp;&amp; mode != null &amp;&amp; mode != AgentMode.AGENT) setPickedMode(AgentMode.AGENT)</ID>
+    <ID>MaxLineLength:ConversationViewModel.kt:ConversationViewModel$if (text.isEmpty() || graph.session.isDemo || !capabilities.value.accountQueue) return VoiceChat.TaskSent.Refused</ID>
     <ID>MaxLineLength:ConversationViewModel.kt:ConversationViewModel$is TranscriptRow.Message -&gt; if (!row.call.isRunning) (row.call.payload as? ToolPayload.CoordinatorMessage)?.message?.let(MarkdownCache::prime)</ID>
     <ID>MaxLineLength:ConversationViewModel.kt:ConversationViewModel$private</ID>
     <ID>MaxLineLength:ConversationViewModel.kt:ConversationViewModel$private fun catchingUp(): Boolean</ID>
@@ -8777,8 +8805,6 @@
     <ID>MaxLineLength:LiveRunHubSamplingTest.kt:LiveRunHubSamplingTest$private fun LiveRunHub.Snapshot.reply(): String</ID>
     <ID>MaxLineLength:LiveRunHubSamplingTest.kt:LiveRunHubSamplingTest$val notification = scope.launch { hub.snapshots("bc-1", "run-1", sampleMs = 60_000).collect { seen.value = it } }</ID>
     <ID>MaxLineLength:LiveRunHubSamplingTest.kt:LiveRunHubSamplingTest$val observer = scope.launch { hub.snapshots("bc-1", "run-1", watched = MutableStateFlow(false)).collect { published += it } }</ID>
-    <ID>MaxLineLength:LiveRunHubSnapshotDropTest.kt:LiveRunHubSnapshotDropTest$SseToolCallDto(callId = id, name = name, status = status, args = buildJsonObject { put("path", JsonPrimitive(path)) })</ID>
-    <ID>MaxLineLength:LiveRunHubSnapshotDropTest.kt:LiveRunHubSnapshotDropTest$assertThat(withWork.map { snap -&gt; snap.items.filterIsInstance&lt;ActivityGroup&gt;().single().thoughts.map { it.text } })</ID>
     <ID>MaxLineLength:LiveRunHubTest.kt:LiveRunHubTest$/** A stream gone for good after it said the run ended: finished on its word, not polled for as long as the record lags it. */</ID>
     <ID>MaxLineLength:LiveRunHubTest.kt:LiveRunHubTest$/** The agent's record still names the run it was on before: nothing is streamed under either id until it names the new one. */</ID>
     <ID>MaxLineLength:LiveRunHubTest.kt:LiveRunHubTest$// A long tool call: nothing reaches the connection for many stall windows, and it is held rather than taken up again.</ID>
@@ -12816,6 +12842,39 @@
     <ID>MaxLineLength:RailAccountFilterScreenshotTest.kt:RailAccountFilterScreenshotTest$fun</ID>
     <ID>MaxLineLength:RailBesidePinnedPanelTest.kt:RailBesidePinnedPanelTest$fun</ID>
     <ID>MaxLineLength:RailBesidePinnedPanelTest.kt:RailBesidePinnedPanelTest$private fun widthOf(tag: String)</ID>
+    <ID>MaxLineLength:RealtimeLine.kt:OkHttpRealtimeDialer.&lt;no name provided&gt;$val said = response?.let { r -&gt; runCatching { r.body?.string() }.getOrNull()?.takeIf { it.isNotBlank() } ?: "HTTP ${r.code}" }</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:AccountRealtimeVoiceApi$override suspend</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:ExecuteToolRequestDto$internal</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:RealtimeVoiceWire$fun</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:RealtimeVoiceWire$languages = dto.languages.mapNotNull { o -&gt; o.id?.takeIf { it.isNotBlank() }?.let { RealtimeVoicePlan.Choice(it, o.label.orEmpty().ifBlank { it }) } }</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:RealtimeVoiceWire$queued = RealtimeVoicePlan.Receipt(dto.queuedReceipt?.outputJson.orEmpty(), dto.queuedReceipt?.instructions.orEmpty())</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:RealtimeVoiceWire$underWay = RealtimeVoicePlan.Receipt(dto.underWayReceipt?.outputJson.orEmpty(), dto.underWayReceipt?.instructions.orEmpty())</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:RealtimeVoiceWire$val tools = runCatching { CursorJson.parseToJsonElement(dto.toolsJson.orEmpty()) as? JsonArray }.getOrNull() ?: return null</ID>
+    <ID>MaxLineLength:RealtimeVoiceApi.kt:RealtimeVoiceWire$voices = dto.voiceOptions.mapNotNull { o -&gt; o.id?.takeIf { it.isNotBlank() }?.let { RealtimeVoicePlan.Choice(it, o.label.orEmpty().ifBlank { it }) } }</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$Event.Audio(it, json.string("item_id").orEmpty(), (json["content_index"] as? JsonPrimitive)?.intOrNull ?: 0)</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$Event.Error(error?.string("message") ?: json.string("message").orEmpty(), error?.string("code"), error?.string("event_id"))</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$fun</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$if (callId == null || name == null) Event.Other else Event.ToolCall(callId, name, json.string("arguments").orEmpty())</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$json.string("delta")?.takeIf { it.isNotEmpty() }?.let { Event.AssistantDelta(json.string("item_id").orEmpty(), it) } ?: Event.Other</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$json.string("transcript")?.let { Event.Transcript(false, json.string("item_id").orEmpty(), it) } ?: Event.Other</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$json.string("transcript")?.let { Event.Transcript(true, json.string("item_id").orEmpty(), it) } ?: Event.Other</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$private fun JsonObject.string(key: String): String?</ID>
+    <ID>MaxLineLength:RealtimeWire.kt:RealtimeWire$putJsonObject("message") { put("type", "text"); put("content", text.take(LANDED_CHAR_LIMIT)) }</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(RealtimeWire.address("wss://api.x.ai/v1/realtime", "grok-voice")).isEqualTo("wss://api.x.ai/v1/realtime?model=grok-voice")</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(RealtimeWire.address("wss://api.x.ai/v1/realtime?x=1", "a b")).isEqualTo("wss://api.x.ai/v1/realtime?x=1&amp;model=a+b")</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(RealtimeWire.parse("""{"type":"conversation.item.input_audio_transcription.completed","item_id":"u","transcript":"hi"}"""))</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(RealtimeWire.parse("""{"type":"error","error":{"message":"bad","code":"x","event_id":"e"}}""")).isEqualTo(RealtimeWire.Event.Error("bad", "x", "e"))</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(RealtimeWire.parse("""{"type":"response.audio.delta","item_id":"i","delta":"AAA="}""")).isEqualTo(RealtimeWire.Event.Audio("AAA=", "i", 0))</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(RealtimeWire.parse("""{"type":"response.done","response":{"id":"r","status":"cancelled"}}""")).isEqualTo(RealtimeWire.Event.ResponseEnded("r", cancelled = true))</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(RealtimeWire.parse("""{"type":"response.function_call_arguments.done","call_id":"c","name":"send_task","arguments":"{}"}"""))</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(RealtimeWire.parse("""{"type":"response.output_audio.delta","item_id":"i","content_index":1,"delta":"AAA="}"""))</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(auto["audio"]!!.jsonObject["input"]!!.jsonObject["transcription"]!!.jsonObject["language_hint"]).isNull()</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$assertThat(session["audio"]!!.jsonObject["output"]!!.jsonObject["speed"]!!.jsonPrimitive.content).isEqualTo("1.25")</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$speeds</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$val auto = CursorJson.parseToJsonElement(RealtimeWire.sessionUpdate(null, "x", 1.0, "auto", JsonArray(emptyList()))).jsonObject["session"]!!.jsonObject</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$val bare = CursorJson.decodeFromString(MintResponseDto.serializer(), """{"clientSecret":"s","sessionPlan":{"toolsJson":"[]"}}""")</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$val frame = CursorJson.parseToJsonElement(RealtimeWire.sessionUpdate("eve", "Be brief.", 1.25, "fr", JsonArray(emptyList()))).jsonObject</ID>
+    <ID>MaxLineLength:RealtimeWireTest.kt:RealtimeWireTest$val frame = CursorJson.parseToJsonElement(RealtimeWire.workLanded("work-landed-1", listOf("x".repeat(3_000)), 42)).jsonObject</ID>
     <ID>MaxLineLength:RecentRepositoriesTest.kt:RecentRepositoriesTest$assertThat(RecentRepositories.partition(catalog, emptyList(), now).rest.map { it.shortName }).containsExactly("app")</ID>
     <ID>MaxLineLength:RecomposeCounter.kt:RecomposeCounter$fun</ID>
     <ID>MaxLineLength:RecomposeCounter.kt:RecomposeCounter$fun top(n: Int = 20): String</ID>
@@ -13118,23 +13177,6 @@
     <ID>MaxLineLength:RefreshBenchmarkTest.kt:RefreshBenchmarkTest.Process$val agents = AgentRepository(session, prefs, AttachmentStore(context), cache, scope, persistDelayMs = 1, capabilities = capabilities, recordOf = { id -&gt; account.record(id) }, stats = stats)</ID>
     <ID>MaxLineLength:RefreshBenchmarkTest.kt:RefreshBenchmarkTest.Process$val projects = ProjectRepository(session, agents, account, scope = scope, pollIntervalMs = 60_000, capabilities = capabilities, retryDelaysMs = listOf(50L, 50L, 50L), stats = stats).also { it.watchList() }</ID>
     <ID>MaxLineLength:RefreshBenchmarkTest.kt:RefreshBenchmarkTest.Process$val session = SessionManager(SecureKeyStore(context), prefs, CursorBackend(api, FakeRunStreamer(), isDemo = false), CursorBackend(api, FakeRunStreamer(), isDemo = true), capabilities = capabilities)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$/** One frame: the compose clock and the main looper's (the view model's delays) on by 16 ms, then drawn and kept. */</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$File(dir, "frame-%03d.png".format(framesKept++)).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$VoiceChat(scope, scriptedTranscription, { Mic }, Voice(scope), send, clock = { compose.mainClock.currentTime }, errorMessage = { "Couldn't reach Cursor." })</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$api.addFinishedAgent(agentId, "Fee table checks", *prompts, firstRunAt = Instant.ofEpochMilli(now - TURNS * 3_600_000L).toString())</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$api.agents[agentId] = api.agents.getValue(agentId).copy(status = "ACTIVE", latestRunId = live, updatedAt = api.runs.getValue(live).createdAt)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$compose.waitUntil(10_000) { compose.onAllNodes(hasContentDescription(text, substring = true), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() || onScreen(text) }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$compose.waitUntil(120_000) { presentation().state.let { !it.isLoading &amp;&amp; it.isStreaming == running &amp;&amp; it.traceStatus.pending == 0 } }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$graph = AppGraph(context, SecureKeyStore(context) { context.getSharedPreferences("stand-in-secure", Context.MODE_PRIVATE) }, demo = fake, transcriptionApi = scriptedTranscription, voiceCallsOverride = scriptedCalls(), voiceInputOverride = true)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$if (withGoal) compose.waitUntil(30_000) { compose.onAllNodes(hasTestTag("goal-strip"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$private</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$private fun onScreen(text: String)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$private fun presentation()</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$private fun viewModel()</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$result = buildJsonObject { put("success", buildJsonObject { put("content", JsonPrimitive("val x = $n")); put("path", JsonPrimitive("app/src/Turn${turn}File$n.kt")) }) }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$shadowOf(ApplicationProvider.getApplicationContext&lt;Application&gt;()).grantPermissions(Manifest.permission.RECORD_AUDIO)</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest$transcript.performTouchInput { down(Offset(centerX, top + height * start)); moveBy(Offset(0f, sign * (viewConfiguration.touchSlop + 1f))) }</ID>
-    <ID>MaxLineLength:RefreshDemoFramesTest.kt:RefreshDemoFramesTest.Companion$const val REPLY = "All 412 fee tests pass. Two were flaky on the first run, so I ran them again on their own and they held."</ID>
     <ID>MaxLineLength:RefreshFaultsTest.kt:RefreshFaultsTest$assertThat(unreachable.agents.state.value.error).isEqualTo("Cursor couldn't be reached. Check your connection.")</ID>
     <ID>MaxLineLength:RefreshFaultsTest.kt:RefreshFaultsTest$assertWithMessage("rows after the failed refresh").that(list.agents.map { it.id }).containsExactly("bc-0", "bc-1", "bc-2", "bc-3", "bc-4")</ID>
     <ID>MaxLineLength:RefreshFaultsTest.kt:RefreshFaultsTest$assertWithMessage("the retry waited out the Retry-After").that(attempts[1].atMillis - attempts[0].atMillis).isAtLeast(2_000L)</ID>
@@ -15000,29 +15042,19 @@
     <ID>MaxLineLength:SoakBudgetBenchmarkTest.kt:SoakBudgetBenchmarkTest.Companion$/** 228 of the 600 there are, each look a resumed connection (604 while every held run was streamed throughout). */</ID>
     <ID>MaxLineLength:SoakBudgetBenchmarkTest.kt:SoakBudgetBenchmarkTest.Companion$/** 7.8 MB. Held chats keeping every finished turn's trace (0.4.1's out-of-memory crash) added 44 MB in 20 turns. */</ID>
     <ID>MaxLineLength:SoakBudgetBenchmarkTest.kt:SoakBudgetBenchmarkTest.Companion$/** 77–178 ms: the rest is cut short and the look catches up from its position. Waiting it out would be up to 30 s. */</ID>
-    <ID>MaxLineLength:Speaker.kt:TextToSpeechSpeaker$.</ID>
-    <ID>MaxLineLength:Speaker.kt:TextToSpeechSpeaker$/** The engine's own thread reports the end; only the utterance still awaited counts (a stopped one has no listener left). */</ID>
-    <ID>MaxLineLength:Speaker.kt:TextToSpeechSpeaker$tts.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())</ID>
-    <ID>MaxLineLength:Speaker.kt:TextToSpeechSpeaker$val queued = runCatching { tts.speak(text, TextToSpeech.QUEUE_FLUSH, Bundle(), id) }.getOrDefault(TextToSpeech.ERROR)</ID>
-    <ID>MaxLineLength:Speaker.kt:TextToSpeechSpeaker$val region = v.locale.getDisplayCountry(Locale.getDefault()).ifBlank { v.locale.getDisplayLanguage(Locale.getDefault()) }</ID>
-    <ID>MaxLineLength:Speaker.kt:TextToSpeechSpeaker$val voice = want.voice?.let { name -&gt; runCatching { tts.voices.orEmpty().firstOrNull { it.name == name } }.getOrNull() }</ID>
     <ID>MaxLineLength:SpillText.kt:SpillText$/** The text; empty when it was spilled and the caches have been wiped since (the chat it belonged to is gone too). */</ID>
     <ID>MaxLineLength:SpillText.kt:SpillText.Companion$fun of(text: String): SpillText</ID>
     <ID>MaxLineLength:SpillText.kt:SpillText.Serializer$override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("com.cursorforandroid.domain.SpillText", PrimitiveKind.STRING)</ID>
     <ID>MaxLineLength:SpillTextTest.kt:SpillTextTest$assertThat(CursorJson.parseToJsonElement(json).jsonObject["content"]!!.jsonPrimitive.content).isEqualTo(report(3))</ID>
     <ID>MaxLineLength:SpillTextTest.kt:SpillTextTest$private fun read(text: String)</ID>
     <ID>MaxLineLength:SpillTextTest.kt:SpillTextTest$private fun report(seed: Int)</ID>
+    <ID>MaxLineLength:SpokenText.kt:SpokenText$*</ID>
     <ID>MaxLineLength:SpokenText.kt:SpokenText$/** [text] cut at the last sentence that ends within [maxChars], or at a word when no sentence does, saying more follows. */</ID>
-    <ID>MaxLineLength:SpokenText.kt:SpokenText$private</ID>
-    <ID>MaxLineLength:SpokenText.kt:SpokenText$return said in hangUps || said.removeSuffix(" please") in hangUps || said.removePrefix("ok ").removePrefix("okay ") in hangUps</ID>
     <ID>MaxLineLength:SpokenText.kt:SpokenText$text = text.split('\u0000').mapIndexed { i, part -&gt; if (i % 2 == 0) underscored.replace(part) { it.groupValues[1] } else part }.joinToString("")</ID>
-    <ID>MaxLineLength:SpokenText.kt:SpokenText$val said = words.lowercase().replace('’', '\'').filter { it.isLetter() || it == ' ' || it == '\'' }.trim().replace(Regex("""\s+"""), " ")</ID>
     <ID>MaxLineLength:SpokenTextTest.kt:SpokenTextTest$"Done. I fixed the login redirect in SessionManager.kt and removed the old path. Added a test. Ran the suite. Pushed the branch. Nothing else changed."</ID>
     <ID>MaxLineLength:SpokenTextTest.kt:SpokenTextTest$assertThat(SpokenText.of("Running it:\n\n```bash\n./gradlew test")).isEqualTo("Running it: ${SpokenText.CODE_OMITTED}")</ID>
     <ID>MaxLineLength:SpokenTextTest.kt:SpokenTextTest$assertThat(SpokenText.of("See [the pull request](https://github.com/acme/app/pull/12) or https://example.com/x?y=1 for more."))</ID>
     <ID>MaxLineLength:SpokenTextTest.kt:SpokenTextTest$assertThat(SpokenText.of("The tests pass. I opened a pull request.")).isEqualTo("The tests pass. I opened a pull request.")</ID>
-    <ID>MaxLineLength:SpokenTextTest.kt:SpokenTextTest$listOf("Goodbye.", "hang up", "OK, end call", "End the call please", "That’s all.", "Bye!").forEach { assertThat(SpokenText.isHangUp(it)).isTrue() }</ID>
-    <ID>MaxLineLength:SpokenTextTest.kt:SpokenTextTest$listOf("Say goodbye to the old API", "stop the server", "hang up the request after ten seconds", "").forEach { assertThat(SpokenText.isHangUp(it)).isFalse() }</ID>
     <ID>MaxLineLength:Spotlight.kt:SpotlightContent$/** Builds [SpotlightView]s from the timeline items the conversation renders, so the notification and the transcript agree. */</ID>
     <ID>MaxLineLength:Spotlight.kt:SpotlightContent$fun</ID>
     <ID>MaxLineLength:Spotlight.kt:SpotlightContent$private fun ellipsize(text: String, max: Int): String</ID>
@@ -15228,6 +15260,7 @@
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi$call("SubmitPendingFollowupNow", FollowupIdDto(agentId, followupId), FollowupIdDto.serializer(), OutcomeDto.serializer()).require("SubmitPendingFollowupNow")</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi$call("UpdatePendingFollowup", request, UpdatePendingDto.serializer(), OutcomeDto.serializer()).require("UpdatePendingFollowup")</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi$files = context?.selectedDocuments.orEmpty().map { PendingAttachment(it.filename?.takeIf { n -&gt; n.isNotBlank() } ?: "Document", it.mimeType.orEmpty()) }</ID>
+    <ID>MaxLineLength:SteeringApi.kt:SteeringApi$followupMessage = ConversationMessageDto(text = text, agentMode = mode, sentByVoiceCall = followup.sentByVoiceCall.takeIf { it })</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi$if (refused) throw ConnectRpcException(200, null, errorMessage?.takeIf { it.isNotBlank() } ?: "Cursor refused $method.")</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi$injectContextAction = InjectContextActionDto(injectionId = "inj-${UUID.randomUUID()}", expectedRunId = expectedRunId)</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi$override suspend</ID>
@@ -15243,6 +15276,7 @@
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi$val response = call("WakeBackgroundComposer", WakeDto(agentId, WAKE_REASON_FOLLOWUP_COMPOSE), WakeDto.serializer(), WakeResponseDto.serializer())</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi$val state = runCatching { CursorJson.decodeFromJsonElement(ConversationStateDto.serializer(), conversation) }.getOrNull()?.goalState ?: return null</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi.AnswerDto$private</ID>
+    <ID>MaxLineLength:SteeringApi.kt:SteeringApi.ConversationMessageDto$private</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi.GoalStateDto$/** `agent.v1.GoalState`: enums by name or number, `uint64` as decimal strings (or numbers, from a lenient encoder). */</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi.InjectContextActionDto$private</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi.InjectContextDto$private</ID>
@@ -15255,7 +15289,6 @@
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi.SelectedImageDto$private</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi.SubmitInteractionResponseDto$private</ID>
     <ID>MaxLineLength:SteeringApi.kt:SteeringApi.UpdatePendingDto$private</ID>
-    <ID>MaxLineLength:SteeringApi.kt:SteeringApi.UserMessageDto$private</ID>
     <ID>MaxLineLength:SteeringApiTest.kt:SteeringApiTest$/** The conversation-control corner of `aiserver.v1.BackgroundComposerService` over Connect JSON, against a fake api2 that also plays the token exchange. */</ID>
     <ID>MaxLineLength:SteeringApiTest.kt:SteeringApiTest$// `agent.v1.RequestedModel` as the desktop's own follow-up fills it: the id and the picked variant's parameters.</ID>
     <ID>MaxLineLength:SteeringApiTest.kt:SteeringApiTest$// agent.v1.SelectedDocument {uuid, filename, mime_type, prompt_upload_ref {upload_id}} — the desktop's WKy after an upload.</ID>
@@ -17454,6 +17487,17 @@
     <ID>MaxLineLength:VmSectionsTest.kt:VmSectionsTest$state = state.copy(workspace = WorkspaceBrowserState(tree = RemoteLoad.Failed("Cursor refused (pod is hibernated).")))</ID>
     <ID>MaxLineLength:VmSectionsTest.kt:VmSectionsTest.&lt;no name provided&gt;$override fun browseWorkspace(path: String)</ID>
     <ID>MaxLineLength:VmSectionsTest.kt:VmSectionsTest.&lt;no name provided&gt;$override fun browseWorkspaceUp()</ID>
+    <ID>MaxLineLength:VoiceCallFakes.kt:ScriptedDialer$fun</ID>
+    <ID>MaxLineLength:VoiceCallFakes.kt:ScriptedVoiceAccount$override suspend</ID>
+    <ID>MaxLineLength:VoiceCallFakes.kt:ScriptedVoiceAccount.Companion$"""[{"type":"function","name":"send_task","description":"Send a job","parameters":{"type":"object","properties":{"request":{"type":"string"}},"required":["request"]}}]"""</ID>
+    <ID>MaxLineLength:VoiceCallFakes.kt:ScriptedVoiceAccount.Companion$fun</ID>
+    <ID>MaxLineLength:VoiceCallFakes.kt:ScriptedVoiceAccount.Companion$lines = RealtimeVoicePlan.ReplyLines(unknownToolErrorTemplate = "No tool {name}.", agentUnreachableAnswer = "Unreachable.", toolFailedError = "Tool failed.")</ID>
+    <ID>MaxLineLength:VoiceCallPrompt.kt:VoiceCallPrompt$/** The last few lines, each cut to a summary, as `VUv` keeps them: at most [RecentLines], about [RecentChars] in all. */</ID>
+    <ID>MaxLineLength:VoiceCallPrompt.kt:VoiceCallPrompt$fun</ID>
+    <ID>MaxLineLength:VoiceCallPrompt.kt:VoiceCallPrompt$private const val RecentHeader = "RECENT CONVERSATION (context only — answer the latest user utterance; do not re-greet or reopen old topics unless the user asks; speak of your own work in the first person as I, and never call a lookup a peek or say a tool name out loud; lines are clipped summaries, so frame in-progress work as \"last I saw\", state settled results flat, never guess why a check passed or failed, call send_task for exact values, constants, line numbers, or code walkthroughs not verbatim below, paraphrase snake-case or camelCase test names in plain words, never read raw URLs, directory trees, or full commit hashes out loud unless they explicitly ask for a URL or path, and when asked to continue or finish an interrupted reply, speak only the Unheard remainder without repeating Interrupted mid-reply after):"</ID>
+    <ID>MaxLineLength:VoiceCallPrompt.kt:VoiceCallPrompt$val spoken = SimpleDateFormat("EEEE, MMMM d, yyyy 'at' h:mm a z", Locale.US).apply { timeZone = zone }.format(at)</ID>
+    <ID>MaxLineLength:VoiceCallPrompt.kt:WrittenLine$/** A line of the written chat as the call reads it: [fromUser] typed it (or the call sent it), or the agent wrote it. */</ID>
+    <ID>MaxLineLength:VoiceCallPrompt.kt:is AssistantMessage -&gt; item.markdown.takeIf { it.isNotBlank() &amp;&amp; !item.isStreaming }?.let { WrittenLine(item.id, fromUser = false, text = it) }</ID>
     <ID>MaxLineLength:VoiceCallScreenshotTest.kt:VoiceCallScreenshotTest$Row</ID>
     <ID>MaxLineLength:VoiceCallScreenshotTest.kt:VoiceCallScreenshotTest$Text("Fix flaky login test", style = CursorTheme.typography.row, color = CursorTheme.colors.textPrimary, modifier = Modifier.weight(1f))</ID>
     <ID>MaxLineLength:VoiceCallScreenshotTest.kt:VoiceCallScreenshotTest$VoiceCallTray(state, elapsed = "1:24", onMute = {}, onHangUp = {}, onTranscript = {}, settingsOpen = settingsOpen, modifier = Modifier.padding(bottom = 4.dp))</ID>
@@ -17467,7 +17511,6 @@
     <ID>MaxLineLength:VoiceCallService.kt:VoiceCallService$runCatching { getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification(l, calls.state.value)) }</ID>
     <ID>MaxLineLength:VoiceCallSettings.kt:VoiceCallSettings.Companion$val</ID>
     <ID>MaxLineLength:VoiceCallSettings.kt:VoiceSettingsStore.Prefs$language = prefs.getString("language", null)?.takeIf { t -&gt; VoiceCallSettings.Languages.any { it.tag == t } } ?: VoiceCallSettings.AutoLanguage</ID>
-    <ID>MaxLineLength:VoiceCallSettings.kt:VoiceSettingsStore.Prefs$prefs.edit().putString("voice", settings.voice).putFloat("speed", settings.speed).putString("language", settings.language).apply()</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:.</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:/** Cursor's settings menu on the call tray: Voice, Speed and Language, each opening onto its choices with the current one ticked. */</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:Choice(VoiceChatCopy.DefaultVoice, settings.voice == null) { onChange(settings.copy(voice = null)); onDismiss() }</ID>
@@ -17493,6 +17536,7 @@
     <ID>MaxLineLength:VoiceCallViews.kt:VoiceChatCopy$return if (h &gt; 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s) else String.format(Locale.US, "%d:%02d", m, s)</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:VoiceLine(phase = phase, level = state.level, muted = state.muted, modifier = Modifier.fillMaxWidth().testTag(VoiceChatTags.Line))</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:if</ID>
+    <ID>MaxLineLength:VoiceCallViews.kt:if (phase != VoiceChatPhase.Connecting) Text(" · $elapsed", style = type.small, color = colors.textQuaternary, maxLines = 1)</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:if (selected) Icon(CursorIcons.Check, "Selected", tint = CursorTheme.colors.iconSecondary, modifier = Modifier.size(CursorDimens.menuIcon))</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:modifier = modifier.then(if (pressed != null) Modifier.semantics { stateDescription = if (pressed) "On" else "Off" } else Modifier)</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:onChange(settings.copy(language = language.tag, voice = if (language.tag == settings.language) settings.voice else null))</ID>
@@ -17500,15 +17544,49 @@
     <ID>MaxLineLength:VoiceCallViews.kt:val canAskAgain = activity != null &amp;&amp; ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:val turn by motion.animateFloat(0f, 1f, infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Restart), label = "voice-line-turn")</ID>
     <ID>MaxLineLength:VoiceCallViews.kt:val voiceLabel = settings.voice?.let { id -&gt; voices().firstOrNull { it.id == id }?.label } ?: VoiceChatCopy.DefaultVoice</ID>
-    <ID>MaxLineLength:VoiceCallsTest.kt:VoiceCallsTest$VoiceChat(callScope, TranscriptionApi { _, _, _ -&gt; Transcription("", null) }, { QuietMic }, Voice(), send, clock = { scope.testScheduler.currentTime }, errorMessage = { "no" }, io = dispatcher)</ID>
-    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$*</ID>
-    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$// Nothing said for a while: start the clip again, so an utterance never carries minutes of room noise.</ID>
-    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$_state.update { it.copy(lastSaid = words, turns = it.turns + VoiceTurn(fromUser = true, text = words)) }</ID>
+    <ID>MaxLineLength:VoiceCalls.kt:VoiceCalls$if (voice != null &amp;&amp; voice != before.voice &amp;&amp; agentId != null) callScope?.launch { runCatching { saveVoice(agentId, voice) } }</ID>
+    <ID>MaxLineLength:VoiceCalls.kt:VoiceCalls.&lt;no name provided&gt;$if (sent != VoiceChat.TaskSent.Refused) _sentByVoice.update { it + (agentId to (it[agentId].orEmpty() + request.trim())) }</ID>
+    <ID>MaxLineLength:VoiceCalls.kt:VoiceCalls.Companion$fun</ID>
+    <ID>MaxLineLength:VoiceCallsTest.kt:VoiceCallsTest$dialers.single().push("""{"type":"response.function_call_arguments.done","call_id":"c2","name":"send_task","arguments":"{\"request\":\"Ship it\"}"}""")</ID>
+    <ID>MaxLineLength:VoiceCallsTest.kt:VoiceCallsTest$fun</ID>
+    <ID>MaxLineLength:VoiceCallsTest.kt:VoiceCallsTest$push("""{"type":"response.function_call_arguments.done","call_id":"c1","name":"send_task","arguments":"{\"request\":\"$request\"}"}""")</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$!minted.websocketUrl.startsWith(RealtimeVoiceSession.ALLOWED_HOST) -&gt; fail("Realtime voice host is not allowed.")</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$_state.update { it.copy(phase = next, level = if (next is VoiceChatPhase.Listening || next is VoiceChatPhase.Speaking) it.level else 0f) }</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$_state.update { it.copy(turns = it.turns + VoiceTurn(event.fromUser, text), lastSaid = if (event.fromUser) text else it.lastSaid) }</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$answer(call.callId, receipt.outputJson.ifBlank { "{\"receipt\":\"sent\"}" }, respond = true, instructions = receipt.instructions.takeIf { it.isNotBlank() })</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$else -&gt; answer(call.callId, error(plan.lines.unknownToolErrorTemplate.ifBlank { "There is no tool called {name}." }.replace("{name}", call.name)), respond = true)</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$if (minted?.useServerVoiceTools != true) return answer(call.callId, error(plan.lines.toolFailedError.ifBlank { "That lookup is not available on this call." }), respond = true)</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChat$if (permanently) "Microphone access is off. Tap to open Settings." else "Voice chat needs microphone access."</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$is VoiceChatPhase.Speaking -&gt; speaker?.interrupt()?.let { heard -&gt; send(RealtimeWire.truncate(heard.itemId, heard.contentIndex, heard.audioEndMs)) }</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$minted.clientSecret.isBlank() || minted.model.isBlank() -&gt; fail("Cursor did not hand out a voice line for this chat.")</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$private fun decode(base64: String): ByteArray</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$private fun speed(plan: RealtimeVoicePlan): Double</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$put("text", SpokenText.of(line.text, RealtimeWire.LANDED_CHAR_LIMIT).ifBlank { line.text.take(RealtimeWire.LANDED_CHAR_LIMIT) })</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$request.isEmpty() -&gt; return answer(call.callId, error(plan.lines.sendTaskMissingRequestError.ifBlank { "send_task needs a request." }), respond = true)</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$request.length &gt; RealtimeWire.LANDED_CHAR_LIMIT -&gt; return answer(call.callId, error(plan.lines.sendTaskRequestTooLongError.ifBlank { "The request is too long." }), respond = true)</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$send(RealtimeWire.workLanded("work-landed-$at-${landedSeq++}", listOf(text.take(RealtimeWire.LANDED_CHAR_LIMIT)), at))</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$speaker?.interrupt()?.let { heard -&gt; send(RealtimeWire.truncate(heard.itemId, heard.contentIndex, heard.audioEndMs)) }</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$val nextSpeaker = try { newSpeaker() } catch (e: Exception) { return fail("The call's audio could not be opened.") }</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat$val text = said.ifBlank { plan?.lines?.noReplyLine.orEmpty().ifBlank { "The work finished without a written reply. Say that." } }</ID>
+    <ID>MaxLineLength:VoiceChat.kt:VoiceChat.&lt;no name provided&gt;$if (call == generation &amp;&amp; !callerSpeaking) speaker?.play(decode(event.base64), event.itemId, event.contentIndex)</ID>
     <ID>MaxLineLength:VoiceChat.kt:VoiceChatPhase.Failed$data</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(dialer.frames("conversation.item.create").last()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content).contains("No tool open_the_pod_bay_doors.")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(dialer.frames("conversation.item.create").last()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content).isEqualTo("""{"result":"2 files changed"}""")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(dialer.frames("response.create").single()["response"]!!.jsonObject["instructions"]!!.jsonPrimitive.content).endsWith("\n\nSay you sent it.")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(dropped.state.value.phase).isEqualTo(VoiceChatPhase.Failed("Couldn't connect to Grok Voice: Incorrect API key provided."))</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(greeting["response"]!!.jsonObject["instructions"]!!.jsonPrimitive.content).endsWith("\n\nGreet the caller.")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(refused.state.value.phase).isEqualTo(VoiceChatPhase.Failed("Realtime voice is not enabled for this account."))</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(session["audio"]!!.jsonObject["input"]!!.jsonObject["format"]!!.jsonObject["rate"]!!.jsonPrimitive.content).isEqualTo("24000")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(session["audio"]!!.jsonObject["output"]!!.jsonObject["speed"]!!.jsonPrimitive.content).isEqualTo("1.5")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$assertThat(session["tools"]!!.jsonArray.single().jsonObject["name"]!!.jsonPrimitive.content).isEqualTo("send_task")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$dialer.push("""{"type":"conversation.item.input_audio_transcription.completed","item_id":"u2","transcript":"Run the tests"}""")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$dialer.push("""{"type":"response.function_call_arguments.done","call_id":"$callId","name":"$name","arguments":${kotlinx.serialization.json.JsonPrimitive(arguments)}}""")</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$dialer.push("""{"type":"response.output_audio.delta","item_id":"i1","content_index":0,"delta":"${Base64.getEncoder().encodeToString(ByteArray(8))}"}""")</ID>
     <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$fun</ID>
-    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest.Companion$/** From the microphone opening to the utterance being sent: the speech, the pause that ends it, and a tick over. */</ID>
-    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest.Harness.&lt;no name provided&gt;$}</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$private var lines = listOf(WrittenLine("u1", true, "Fix the login bug"), WrittenLine("a1", false, "I fixed **the login bug**."))</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$val output = dialer.frames("conversation.item.create").single()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$val recall = dialer.frames("conversation.item.create").last()["item"]!!.jsonObject["output"]!!.jsonPrimitive.content</ID>
+    <ID>MaxLineLength:VoiceChatTest.kt:VoiceChatTest$val text = landed["payload"]!!.jsonArray.single().jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content</ID>
     <ID>MaxLineLength:VoiceInput.kt:.</ID>
     <ID>MaxLineLength:VoiceInput.kt:/** The swap of one glyph for another in a composer button: the new one fades and grows in as the old one shrinks away. */</ID>
     <ID>MaxLineLength:VoiceInput.kt:Box</ID>
@@ -18018,6 +18096,7 @@
     <ID>ReturnCount:BackgroundRunSamplingBenchmarkTest.kt:BackgroundRunSamplingBenchmarkTest$fun ageAt(t: Long): Long</ID>
     <ID>ReturnCount:BlobRecord.kt:BlobRecord$internal fun selectedImages(message: JsonObject): List&lt;RecordImage&gt;</ID>
     <ID>ReturnCount:BlobRecord.kt:BlobRecord$private suspend fun withBlobText(message: JsonObject, source: Source, tally: Tally): JsonObject</ID>
+    <ID>ReturnCount:CallAudio.kt:internal fun pcmLevel(pcm: ByteArray, length: Int = pcm.size): Float</ID>
     <ID>ReturnCount:CatchUpExitFadeTest.kt:CatchUpExitFadeTest$fun find(view: View): View?</ID>
     <ID>ReturnCount:CatchUpIndicatorTest.kt:CatchUpIndicatorTest$fun find(view: View): View?</ID>
     <ID>ReturnCount:CatchUpPull.kt:CatchUpPull$fun grab(armable: Boolean): Boolean</ID>
@@ -18312,6 +18391,8 @@
     <ID>ReturnCount:PullRequestApi.kt:PullRequestApi.Companion$fun parseInstant(raw: String?): Long?</ID>
     <ID>ReturnCount:PullRequestRepository.kt:PullRequestRepository$private fun PullRequestStatus?.isDue(now: Long, eager: Boolean): Boolean</ID>
     <ID>ReturnCount:PullRequestRepository.kt:PullRequestRepository$suspend fun restoreFromCache()</ID>
+    <ID>ReturnCount:RealtimeVoiceApi.kt:RealtimeVoiceWire$fun plan(dto: SessionPlanDto): RealtimeVoicePlan?</ID>
+    <ID>ReturnCount:RealtimeWire.kt:RealtimeWire$fun parse(frame: String): Event</ID>
     <ID>ReturnCount:RecordPairing.kt:RecordPairing$fun cost(i: Int, run: Int): Long?</ID>
     <ID>ReturnCount:RecordPairing.kt:RecordPairing$fun order(i: Int, run: Int): Int</ID>
     <ID>ReturnCount:RecordTranscript.kt:RecordPager$suspend fun completeTurns(api: ConversationRecordApi, agentId: String, indices: Collection&lt;Int&gt;, state: RecordState, held: Map&lt;Int, String&gt;): Raw?</ID>
@@ -18378,7 +18459,6 @@
     <ID>ReturnCount:SlashCommandPopover.kt:SlashTokens$fun phraseAt(text: CharSequence, selection: TextRange): SlashToken?</ID>
     <ID>ReturnCount:SlashCommandRepository.kt:SlashCommandRepository$private suspend fun globalCommands(backend: CursorBackend, now: Long, startedIn: Int): List&lt;SlashCommand&gt;?</ID>
     <ID>ReturnCount:SlashMenu.kt:SlashMenu$private fun List&lt;SlashItem&gt;.cut(expanded: Set&lt;SlashSection&gt;): List&lt;SlashItem&gt;</ID>
-    <ID>ReturnCount:Speaker.kt:TextToSpeechSpeaker$override fun speak(text: String, onDone: (Boolean) -&gt; Unit)</ID>
     <ID>ReturnCount:SpotlightService.kt:SpotlightService$private fun enterForeground(): Boolean</ID>
     <ID>ReturnCount:StartupMainThreadIoTest.kt:StartupMainThreadIoTest.MainThreadFileIo$private fun record(file: String)</ID>
     <ID>ReturnCount:Steering.kt:AgentMode.Companion$fun parse(raw: String?): AgentMode?</ID>
@@ -18465,7 +18545,8 @@
     <ID>ReturnCount:ViewerGeometry.kt:ViewerGeometry$fun panWithin(value: Float, delta: Float, limit: Float, band: Float = RubberBandFactor): AxisPan</ID>
     <ID>ReturnCount:ViewerPreloads.kt:ViewerPreloads$fun start(entry: MediaEntry, agentId: String?, prepare: suspend () -&gt; Unit): Preload?</ID>
     <ID>ReturnCount:VoiceCallService.kt:VoiceCallService$override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int</ID>
-    <ID>ReturnCount:VoiceCallService.kt:VoiceCallService.Companion$fun ensureChannel(context: Context)</ID>
+    <ID>ReturnCount:VoiceChat.kt:VoiceChat$fun agent(running: Boolean, lines: List&lt;WrittenLine&gt;)</ID>
+    <ID>ReturnCount:VoiceChat.kt:VoiceChat$private fun refresh()</ID>
     <ID>ReturnCount:WidgetData.kt:WidgetData$suspend fun refresh(graph: AppGraph, budget: WidgetRefreshBudget, forced: Boolean): Boolean</ID>
     <ID>ReturnCount:WidgetIndicatorTest.kt:WidgetIndicatorTest$private fun AppWidgetHostView.rowViews(): List&lt;View&gt;</ID>
     <ID>ReturnCount:WidgetList.kt:WidgetList$private fun projectRows(projectId: String?, agents: List&lt;Agent&gt;, prefs: ListPreferences, local: LocalAgentState, nowMillis: Long, zone: ZoneId): List&lt;AgentRow&gt;</ID>
@@ -18648,6 +18729,7 @@
     <ID>TooManyFunctions:ProjectShortcutGrid.kt:com.cursorforandroid.ui.home.ProjectShortcutGrid.kt</ID>
     <ID>TooManyFunctions:ProjectViewModel.kt:ProjectViewModel : ViewModel</ID>
     <ID>TooManyFunctions:QueuedFollowUps.kt:com.cursorforandroid.ui.conversation.QueuedFollowUps.kt</ID>
+    <ID>TooManyFunctions:RealtimeWire.kt:RealtimeWire</ID>
     <ID>TooManyFunctions:RecordTranscript.kt:RecordPager</ID>
     <ID>TooManyFunctions:ReviewRepository.kt:ReviewRepository</ID>
     <ID>TooManyFunctions:RichContent.kt:com.cursorforandroid.ui.conversation.RichContent.kt</ID>

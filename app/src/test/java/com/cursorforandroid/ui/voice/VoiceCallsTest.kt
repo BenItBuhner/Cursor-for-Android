@@ -1,10 +1,5 @@
 package com.cursorforandroid.ui.voice
 
-import com.cursorforandroid.data.api.Transcription
-import com.cursorforandroid.data.api.TranscriptionApi
-import com.cursorforandroid.data.media.AudioCapture
-import com.cursorforandroid.data.media.RecordedClip
-import com.cursorforandroid.data.media.Speaker
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,8 +14,8 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * The app's one call outside any screen: bound to one chat, held while that chat's host is gone and picked up when it
- * comes back, ended by a call on another chat, and telling the foreground service when it is live.
+ * The app's one call outside any screen: bound to one chat, handing that chat's host the jobs while it is there,
+ * ended by a call on another chat, and telling the foreground service when it is live.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class VoiceCallsTest {
@@ -28,48 +23,51 @@ class VoiceCallsTest {
     private val dispatcher = StandardTestDispatcher()
     private val scope = TestScope(dispatcher)
     private val live = mutableListOf<Boolean>()
-    private val opened = mutableListOf<String>()
+    private val sent = mutableListOf<String>()
+    private val speakers = mutableListOf<ScriptedSpeaker>()
+    private val dialers = mutableListOf<ScriptedDialer>()
+    private val account = ScriptedVoiceAccount()
 
-    private object QuietMic : AudioCapture {
-        override fun start() = Unit
-        override fun level() = 0f
-        override fun stop(): RecordedClip? = null
-        override fun cancel() = Unit
-    }
-
-    private class Voice : Speaker {
-        var released = 0
-        override fun speak(text: String, onDone: (Boolean) -> Unit) = onDone(true)
-        override fun stop() = Unit
-        override fun release() { released++ }
-    }
-
-    private val voices = mutableListOf<Voice>()
-
-    private fun calls() = VoiceCalls(
-        newChat = { callScope, send ->
+    private fun calls(store: VoiceSettingsStore = VoiceSettingsStore.InMemory()) = VoiceCalls(
+        newChat = { callScope, agentId, host ->
             VoiceChat(
                 scope = callScope,
-                transcription = TranscriptionApi { _, _, _ -> Transcription("", null) },
-                newCapture = { QuietMic },
-                speaker = Voice().also { voices += it },
-                send = send,
+                agentId = agentId,
+                api = account,
+                dialer = ScriptedDialer().also { dialers += it },
+                newMicrophone = { ScriptedMicrophone() },
+                newSpeaker = { ScriptedSpeaker().also { speakers += it } },
+                host = host,
                 clock = { scope.testScheduler.currentTime },
                 errorMessage = { "no" },
-                io = dispatcher,
             )
         },
         onLive = { live += it },
         clock = { scope.testScheduler.currentTime },
+        store = store,
+        saveVoice = account::setVoice,
     )
 
-    private fun host(agentId: String) = VoiceCalls.Host { words -> opened += "$agentId:$words"; true }
+    private fun host(agentId: String) = object : VoiceCalls.Host {
+        override fun sendTask(request: String): VoiceChat.TaskSent {
+            sent += "$agentId:$request"
+            return VoiceChat.TaskSent.UnderWay
+        }
+
+        override fun writtenLines(): List<WrittenLine> = emptyList()
+    }
 
     @Before
     fun setUp() = Dispatchers.setMain(dispatcher)
 
     @After
     fun tearDown() = Dispatchers.resetMain()
+
+    private fun ScriptedDialer.task(request: String) {
+        open()
+        ready()
+        push("""{"type":"response.function_call_arguments.done","call_id":"c1","name":"send_task","arguments":"{\"request\":\"$request\"}"}""")
+    }
 
     @Test
     fun `a call is bound to its chat, and its line and live flag follow it`() = scope.runTest {
@@ -79,7 +77,7 @@ class VoiceCallsTest {
         assertThat(calls.isOn("bc-1")).isTrue()
         assertThat(calls.isOn("bc-2")).isFalse()
         assertThat(calls.line.value?.title).isEqualTo("Fix login")
-        assertThat(calls.state.value.phase).isEqualTo(VoiceChatPhase.Listening())
+        assertThat(account.mints).containsExactly("bc-1" to null)
         assertThat(live).containsExactly(true)
 
         calls.end()
@@ -87,81 +85,70 @@ class VoiceCallsTest {
         assertThat(calls.line.value).isNull()
         assertThat(calls.state.value.active).isFalse()
         assertThat(live).containsExactly(true, false).inOrder()
-        assertThat(voices.single().released).isEqualTo(1)
+        assertThat(speakers.single().released).isEqualTo(1)
     }
 
     @Test
-    fun `the chat's screen leaving holds the call, and its coming back takes it off hold`() = scope.runTest {
+    fun `a job goes to the chat's host and is remembered for its label, and none goes while the host is away`() = scope.runTest {
         val calls = calls()
         val first = host("bc-1")
         calls.start("bc-1", "Fix login", first)
         runCurrent()
+        dialers.single().task("Run the tests")
+        runCurrent()
+        assertThat(sent).containsExactly("bc-1:Run the tests")
+        assertThat(calls.sentByVoice.value).containsExactly("bc-1", setOf("Run the tests"))
 
         calls.detach("bc-1", first)
+        dialers.single().push("""{"type":"response.function_call_arguments.done","call_id":"c2","name":"send_task","arguments":"{\"request\":\"Ship it\"}"}""")
         runCurrent()
-        assertThat(calls.state.value.phase).isEqualTo(VoiceChatPhase.Muted)
+        assertThat(sent).containsExactly("bc-1:Run the tests")
         assertThat(calls.line.value?.agentId).isEqualTo("bc-1")
-
-        // Another chat's host is not this call's.
-        calls.attach("bc-2", host("bc-2"))
-        assertThat(calls.state.value.phase).isEqualTo(VoiceChatPhase.Muted)
-
-        calls.attach("bc-1", host("bc-1"))
-        runCurrent()
-        assertThat(calls.state.value.phase).isEqualTo(VoiceChatPhase.Listening())
-    }
-
-    @Test
-    fun `a stale host going does not hold a call a newer screen hosts`() = scope.runTest {
-        val calls = calls()
-        val old = host("bc-1")
-        calls.start("bc-1", "Fix login", old)
-        val fresh = host("bc-1")
-        calls.attach("bc-1", fresh)
-        calls.detach("bc-1", old)
-        runCurrent()
-        assertThat(calls.state.value.phase).isEqualTo(VoiceChatPhase.Listening())
+        calls.end()
     }
 
     @Test
     fun `starting a call on another chat hangs up the first`() = scope.runTest {
         val calls = calls()
         calls.start("bc-1", "Fix login", host("bc-1"))
+        runCurrent()
         calls.start("bc-2", "Ship docs", host("bc-2"))
         runCurrent()
         assertThat(calls.line.value?.agentId).isEqualTo("bc-2")
-        assertThat(voices.first().released).isEqualTo(1)
+        assertThat(speakers.first().released).isEqualTo(1)
         assertThat(live).containsExactly(true, false, true).inOrder()
+        calls.end()
     }
 
     @Test
-    fun `the agent's progress only reaches the chat the call is with`() = scope.runTest {
+    fun `the agent's progress and title only reach the chat the call is with`() = scope.runTest {
         val calls = calls()
         calls.start("bc-1", "Fix login", host("bc-1"))
         runCurrent()
-        calls.agent("bc-2", running = true, replyId = "x", markdown = "elsewhere")
-        assertThat(calls.state.value.phase).isEqualTo(VoiceChatPhase.Listening())
+        calls.agent("bc-2", running = true, lines = listOf(WrittenLine("x", false, "elsewhere")))
         calls.title("bc-1", "Fix the login flow")
         assertThat(calls.line.value?.title).isEqualTo("Fix the login flow")
         calls.title("bc-2", "Other")
         assertThat(calls.line.value?.title).isEqualTo("Fix the login flow")
+        calls.end()
     }
 
     @Test
-    fun `the call's settings are kept between calls, and what a call sent is remembered by chat`() = scope.runTest {
+    fun `the call's settings are kept between calls, and a voice picked is kept on the account`() = scope.runTest {
         val store = VoiceSettingsStore.InMemory()
-        val calls = VoiceCalls(
-            newChat = { callScope, send ->
-                VoiceChat(callScope, TranscriptionApi { _, _, _ -> Transcription("", null) }, { QuietMic }, Voice(), send, clock = { scope.testScheduler.currentTime }, errorMessage = { "no" }, io = dispatcher)
-            },
-            clock = { scope.testScheduler.currentTime },
-            store = store,
-        )
+        val calls = calls(store)
         calls.setSettings(VoiceCallSettings(speed = 1.5f, language = "fr"))
         assertThat(store.load()).isEqualTo(VoiceCallSettings(speed = 1.5f, language = "fr"))
         assertThat(calls.settings.value.languageTag).isEqualTo("fr")
         assertThat(VoiceCallSettings.speedLabel(calls.settings.value.speed)).isEqualTo("1.5x")
-        assertThat(VoiceCallSettings.languageLabel("fr")).isEqualTo("French")
-        assertThat(calls.sentByVoice.value).isEmpty()
+
+        calls.start("bc-1", "Fix login", host("bc-1"))
+        runCurrent()
+        assertThat(account.mints).containsExactly("bc-1" to "fr")
+        assertThat(calls.voices().map { it.label }).containsExactly("Eve", "Rex").inOrder()
+        calls.setSettings(calls.settings.value.copy(voice = "rex"))
+        runCurrent()
+        assertThat(account.voicesSet).containsExactly("rex")
+        calls.end()
     }
 }

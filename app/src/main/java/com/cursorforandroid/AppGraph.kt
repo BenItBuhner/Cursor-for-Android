@@ -11,6 +11,8 @@ import com.cursorforandroid.crash.CrashContext
 import com.cursorforandroid.crash.CrashLog
 import com.cursorforandroid.data.api.AccountApi
 import com.cursorforandroid.data.api.AccountTranscriptionApi
+import com.cursorforandroid.data.api.AccountRealtimeVoiceApi
+import com.cursorforandroid.data.voice.OkHttpRealtimeDialer
 import com.cursorforandroid.data.api.AccountFollowup
 import com.cursorforandroid.data.api.AccountList
 import com.cursorforandroid.data.api.AgentFilesApi
@@ -449,8 +451,16 @@ class AppGraph(
      * foreground service keeps it going with the app out of sight.
      */
     val voiceCalls: VoiceCalls by lazy {
-        voiceCallsOverride ?: VoiceCalls.create(app, transcription = { transcription }, onLive = { live -> if (live) VoiceCallService.start(app) })
+        voiceCallsOverride ?: VoiceCalls.create(
+            app,
+            api = { lazyRealtimeVoice.value },
+            dialer = { OkHttpRealtimeDialer(lazyAccountClient.value) },
+            onLive = { live -> if (live) VoiceCallService.start(app) },
+        )
     }
+
+    /** Cursor's realtime voice call on the account: the mint, the server-run tools, the voice kept (see [RealtimeVoiceApi]). */
+    private val lazyRealtimeVoice = lazy { AccountRealtimeVoiceApi(lazyAccountRpc.value, lazySessionTokens.value) }
 
     /**
      * Whether the composers offer the microphone: wherever a dictation can be transcribed. That is through the account
