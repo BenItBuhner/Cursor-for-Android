@@ -198,7 +198,8 @@ class CrashLogTest {
         assertThat(reports.map { it.headline }).containsExactly("ANR", "LOW_MEMORY", "java.lang.IllegalStateException: seen by the handler").inOrder()
         assertThat(reports.last().text).contains("Android's exit record")
         assertThat(reports[1].text).contains("pss=878 MB")
-        assertThat(log.pending.value!!.headline).isEqualTo("ANR")
+        // The user swiped the app away after the ANR: the last process did not crash, so nothing is offered.
+        assertThat(log.pending.value).isNull()
 
         // Read again on the next launch: nothing new.
         log(dir).recordExitReasons(activityManager, context.packageName)
@@ -248,7 +249,52 @@ class CrashLogTest {
         log.recordExitReasons(activityManager, context.packageName)
         log.load()
         assertThat(log.reports().count { it.headline == "LOW_MEMORY" }).isEqualTo(CrashLog.MAX_KILLS)
-        assertThat(log.pending.value!!.headline).contains("real")
+        assertThat(log.reports().map { it.headline }).contains("java.lang.RuntimeException: real")
+    }
+
+    @Test
+    fun `an ANR that ended the last process is offered`() {
+        val dir = folder.newFolder("crash")
+        val shadow: ShadowActivityManager = shadowOf(activityManager)
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_USER_REQUESTED, now - 200_000, null))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_ANR, now - 100_000, "Input dispatching timed out"))
+        val log = log(dir)
+        log.recordExitReasons(activityManager, context.packageName)
+        log.load()
+        assertThat(log.pending.value!!.headline).isEqualTo("ANR")
+    }
+
+    @Test
+    fun `a crash the handler wrote is offered when it ended the last process`() {
+        val dir = folder.newFolder("crash")
+        val crashAt = now - 100_000
+        now = crashAt
+        log(dir).record("main", IllegalStateException("real one"))
+        now = 1_800_000_000_000L
+        shadowOf(activityManager).addApplicationExitInfo(exit(ApplicationExitInfo.REASON_CRASH, crashAt + 300, "java.lang.IllegalStateException"))
+        val log = log(dir)
+        log.recordExitReasons(activityManager, context.packageName)
+        log.load()
+        assertThat(log.pending.value!!.headline).contains("real one")
+    }
+
+    @Test
+    fun `an old undismissed crash is not offered on the first launch after an update`() {
+        val dir = folder.newFolder("crash")
+        val crashAt = now - 7 * 86_400_000L
+        now = crashAt
+        log(dir).record("main", IllegalStateException("weeks ago"))
+        now = 1_800_000_000_000L
+        val shadow: ShadowActivityManager = shadowOf(activityManager)
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_CRASH, crashAt + 300, "java.lang.IllegalStateException"))
+        // Then used normally for a week, and replaced by the update (a reason this log never keeps).
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_USER_REQUESTED, now - 86_400_000L, null))
+        shadow.addApplicationExitInfo(exit(ApplicationExitInfo.REASON_PACKAGE_UPDATED, now - 60_000, "package updated"))
+        val log = log(dir)
+        log.recordExitReasons(activityManager, context.packageName)
+        log.load()
+        assertThat(log.pending.value).isNull()
+        assertThat(log.export()).contains("weeks ago")
     }
 
     @Test

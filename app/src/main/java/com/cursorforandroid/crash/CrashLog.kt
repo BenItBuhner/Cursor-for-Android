@@ -42,6 +42,11 @@ class CrashLog(
     val pending: StateFlow<Report?> = _pending.asStateFlow()
 
     @Volatile private var context: () -> String = { "" }
+    /**
+     * How the previous process ended, from Android's exit record ([recordExitReasons]): its time, and whether that
+     * was a crash. Null before it is read or below API 30, where the newest undismissed crash is offered instead.
+     */
+    @Volatile private var lastEnd: Pair<Long, Boolean>? = null
     @Volatile private var lastSnapshotAt = 0L
 
     /**
@@ -170,7 +175,12 @@ class CrashLog(
     private fun recordExitReasonsR(activityManager: ActivityManager, packageName: String) {
         val seenFile = File(dir, EXIT_SEEN)
         val seen = runCatching { seenFile.readText().trim().toLong() }.getOrDefault(0L)
-        val exits = activityManager.getHistoricalProcessExitReasons(packageName, 0, MAX_EXITS_READ)
+        val history = activityManager.getHistoricalProcessExitReasons(packageName, 0, MAX_EXITS_READ)
+        // "Last time" is the app's own last process: a crash weeks ago, then a swipe, a reboot or the update that
+        // replaced the app, is not how it ended last time.
+        val last = history.filter { it.processName == packageName }.maxByOrNull { it.timestamp } ?: history.maxByOrNull { it.timestamp }
+        lastEnd = last?.let { it.timestamp to (it.reason in CRASH_REASONS) }
+        val exits = history
             .filter { it.timestamp > seen && (it.reason in CRASH_REASONS || it.reason in KILL_REASONS) }
             .sortedBy { it.timestamp }
         if (exits.isEmpty()) return
@@ -219,12 +229,18 @@ class CrashLog(
         }
     }
 
-    /** Reads the kept reports and publishes the newest undismissed crash (never a system kill). Call off the main thread. */
+    /**
+     * Reads the kept reports and publishes the newest undismissed crash (never a system kill), and only when it is
+     * what ended the previous process (see [lastEnd]): not an old crash once the app has since been swiped away,
+     * killed, rebooted or updated. Call after [recordExitReasons], off the main thread.
+     */
     fun load() {
         val dismissed = runCatching { File(dir, DISMISSED).readText().trim().toLong() }.getOrDefault(0L)
         val newest = reportFiles().lastOrNull { !isKill(it) } ?: run { _pending.value = null; return }
         val at = millisOf(newest) ?: return
         if (at <= dismissed) { _pending.value = null; return }
+        val end = lastEnd
+        if (end != null && (!end.second || kotlin.math.abs(at - end.first) > MATCH_WINDOW_MS)) { _pending.value = null; return }
         _pending.value = read(newest)
     }
 
