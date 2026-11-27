@@ -1145,3 +1145,10 @@ aiserver.v1.AiService/MintDesktopRealtimeVoiceSecret	mintDesktopRealtimeVoiceSec
 aiserver.v1.AiService/NameAgent	nameAgent	Unary
 aiserver.v1.AiService/EvaluatePromptHook	evaluatePromptHook	Unary
 aiserver.v1.AiService/GetCloudSetupBlockers	getCloudSetupBlockers	Unary
+# Added from Cursor 3.32.4 (Linux AppImage, workbench.desktop.main.js) on 2026-11-27: the thread-call methods, which
+# 3.21.16 did not have yet. MintRealtimeVoiceSecret, GetRealtimeVoice and SetRealtimeVoice are on AiService;
+# ExecuteCloudAgentVoiceTool is on BackgroundComposerService.
+aiserver.v1.AiService/MintRealtimeVoiceSecret	mintRealtimeVoiceSecret	Unary
+aiserver.v1.AiService/GetRealtimeVoice	getRealtimeVoice	Unary
+aiserver.v1.AiService/SetRealtimeVoice	setRealtimeVoice	Unary
+aiserver.v1.BackgroundComposerService/ExecuteCloudAgentVoiceTool	executeCloudAgentVoiceTool	Unary
